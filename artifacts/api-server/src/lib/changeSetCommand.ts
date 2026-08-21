@@ -309,16 +309,73 @@ export interface ChangeSetCommandStore {
   ): Promise<T>;
 }
 
+export type ChangeSetCommandAuditStart = {
+  tenantId: string;
+  contextId: string;
+  actorPrincipalId: string;
+  actorMembershipId: string;
+  policyVersionId: string;
+  commandType: "CREATE" | "TRANSITION";
+  targetState: ChangeSetState | null;
+  capability: string;
+  idempotencyKey: string;
+  requestHash: string;
+};
+
+export interface ChangeSetCommandAuditAttempt {
+  recordResult(result: ChangeSetCommandResult): Promise<void>;
+  recordUnexpectedError(): Promise<void>;
+}
+
+export interface ChangeSetCommandAuditWriter {
+  startAttempt(
+    input: ChangeSetCommandAuditStart,
+  ): Promise<ChangeSetCommandAuditAttempt>;
+}
+
 export type ChangeSetCommandDependencies = {
   store: ChangeSetCommandStore;
   nextUuidV7: () => string;
   now?: () => number;
+  auditWriter?: ChangeSetCommandAuditWriter;
 };
 
 class RollbackCommand extends Error {
   constructor(readonly result: ChangeSetCommandResult) {
     super(result.ok ? "unexpected_success" : result.reason);
   }
+}
+
+async function executeWithDurableAudit(input: {
+  dependencies: ChangeSetCommandDependencies;
+  audit: ChangeSetCommandAuditStart;
+  operation: () => Promise<ChangeSetCommandResult>;
+}): Promise<ChangeSetCommandResult> {
+  const attempt = input.dependencies.auditWriter
+    ? await input.dependencies.auditWriter.startAttempt(input.audit)
+    : null;
+  let result: ChangeSetCommandResult;
+  try {
+    result = await input.operation();
+  } catch (error) {
+    if (error instanceof RollbackCommand) {
+      result = error.result;
+    } else {
+      if (attempt) {
+        try {
+          await attempt.recordUnexpectedError();
+        } catch (auditError) {
+          throw new AggregateError(
+            [error, auditError],
+            "change_set_command_and_terminal_audit_failed",
+          );
+        }
+      }
+      throw error;
+    }
+  }
+  await attempt?.recordResult(result);
+  return result;
 }
 
 function isUuidV7(value: unknown): value is string {
@@ -811,8 +868,21 @@ export async function executeCreateR1ChangeSetCommand(input: {
       idempotencyKey: undefined,
     },
   });
-  try {
-    return await input.dependencies.store.transaction(async (tx) => {
+  return executeWithDurableAudit({
+    dependencies: input.dependencies,
+    audit: {
+      tenantId: input.context.tenantId,
+      contextId: input.context.contextId,
+      actorPrincipalId: input.context.principalId,
+      actorMembershipId: input.context.membershipId,
+      policyVersionId: input.context.policyVersionId,
+      commandType: "CREATE",
+      targetState: null,
+      capability: createPolicy.capabilityKey,
+      idempotencyKey: input.command.idempotencyKey,
+      requestHash,
+    },
+    operation: () => input.dependencies.store.transaction(async (tx) => {
       await tx.setLocalTenant(input.context.tenantId);
       const authorizationNow = freshCommandNow(input.dependencies);
       requireCurrentContext(input.context, authorizationNow);
@@ -1009,11 +1079,8 @@ export async function executeCreateR1ChangeSetCommand(input: {
         completedAt: freshCommandNow(input.dependencies),
       });
       return { ok: true, replayed: false, result };
-    });
-  } catch (error) {
-    if (error instanceof RollbackCommand) return error.result;
-    throw error;
-  }
+    }),
+  });
 }
 
 export async function executeTransitionR1ChangeSetCommand(input: {
@@ -1081,8 +1148,21 @@ export async function executeTransitionR1ChangeSetCommand(input: {
     actorPrincipalId: input.context.principalId,
     command: { ...input.command, idempotencyKey: undefined },
   });
-  try {
-    return await input.dependencies.store.transaction(async (tx) => {
+  return executeWithDurableAudit({
+    dependencies: input.dependencies,
+    audit: {
+      tenantId: input.context.tenantId,
+      contextId: input.context.contextId,
+      actorPrincipalId: input.context.principalId,
+      actorMembershipId: input.context.membershipId,
+      policyVersionId: input.context.policyVersionId,
+      commandType: "TRANSITION",
+      targetState: input.command.toState,
+      capability: capabilityKey,
+      idempotencyKey: input.command.idempotencyKey,
+      requestHash,
+    },
+    operation: () => input.dependencies.store.transaction(async (tx) => {
       await tx.setLocalTenant(input.context.tenantId);
       const changeSet = await tx.loadChangeSetForUpdate(
         input.context.tenantId,
@@ -1383,11 +1463,8 @@ export async function executeTransitionR1ChangeSetCommand(input: {
         completedAt: freshCommandNow(input.dependencies),
       });
       return { ok: true, replayed: false, result };
-    });
-  } catch (error) {
-    if (error instanceof RollbackCommand) return error.result;
-    throw error;
-  }
+    }),
+  });
 }
 
 export function isValidChangeSetCommandHash(value: unknown): value is string {

@@ -1224,7 +1224,11 @@ export const changeSetCommandAuditEventsTable = pgTable(
     ),
     check(
       "change_set_command_audit_events_command_chk",
-      sql`${table.commandType} IN ('CREATE', 'TRANSITION') AND ((${table.commandType} = 'CREATE' AND ${table.targetState} IS NULL) OR (${table.commandType} = 'TRANSITION' AND ${table.targetState} IS NOT NULL AND ${table.changeSetId} IS NOT NULL AND ${table.targetState} IN ('VALIDATED', 'SIMULATED', 'IN_REVIEW')))`,
+      sql`${table.commandType} IN ('CREATE', 'TRANSITION') AND ((${table.commandType} = 'CREATE' AND ${table.targetState} IS NULL) OR (${table.commandType} = 'TRANSITION' AND ${table.targetState} IS NOT NULL AND ${table.targetState} IN ('VALIDATED', 'SIMULATED', 'IN_REVIEW')))`,
+    ),
+    check(
+      "change_set_command_audit_events_terminal_success_change_set_chk",
+      sql`${table.phase} <> 'TERMINAL' OR ${table.outcome} <> 'SUCCESS' OR ${table.changeSetId} IS NOT NULL`,
     ),
     check(
       "change_set_command_audit_events_capability_chk",

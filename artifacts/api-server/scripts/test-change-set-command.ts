@@ -14,8 +14,12 @@ import {
   type AccessDecisionReceiptInsert,
   type AuthoritativeR1Configuration,
   type ChangeSetApprovalInsert,
+  type ChangeSetCommandAuditAttempt,
+  type ChangeSetCommandAuditStart,
+  type ChangeSetCommandAuditWriter,
   type ChangeSetCommandClaim,
   type ChangeSetCommandClaimResult,
+  type ChangeSetCommandResult,
   type ChangeSetCommandAttemptReceiptInsert,
   type ChangeSetCommandStore,
   type ChangeSetCommandSuccess,
@@ -1425,6 +1429,134 @@ test("legacy branch create and transition scopes stay closed until composite bin
     detail: "legacy_branch_scope_unbound",
   });
   assert.equal(store.claims.size, 0);
+});
+
+class MemoryAuditWriter implements ChangeSetCommandAuditWriter {
+  starts: ChangeSetCommandAuditStart[] = [];
+  results: ChangeSetCommandResult[] = [];
+  unexpectedErrors = 0;
+  failStart = false;
+
+  async startAttempt(
+    input: ChangeSetCommandAuditStart,
+  ): Promise<ChangeSetCommandAuditAttempt> {
+    if (this.failStart) throw new Error("audit_start_failed");
+    this.starts.push(structuredClone(input));
+    return {
+      recordResult: async (result) => {
+        this.results.push(structuredClone(result));
+      },
+      recordUnexpectedError: async () => {
+        this.unexpectedErrors += 1;
+      },
+    };
+  }
+}
+
+test("durable audit start is fail-closed before business mutation", async () => {
+  const context = verifiedContext("maker");
+  const store = new MemoryStore(
+    (active) => resolvedState(active, ["control_plane.flag.create"]),
+    { impersonating: false, stepUpSatisfied: false, stepUpReceiptId: null },
+  );
+  const auditWriter = new MemoryAuditWriter();
+  auditWriter.failStart = true;
+
+  await assert.rejects(
+    executeCreateR1ChangeSetCommand({
+      context,
+      command: createCommand("create:audit-start-failure:0001"),
+      dependencies: {
+        store,
+        auditWriter,
+        nextUuidV7: idFactory(500),
+        now: () => NOW,
+      },
+    }),
+    /audit_start_failed/,
+  );
+  assert.deepEqual(store.events, []);
+  assert.equal(store.changes.size, 0);
+});
+
+test("durable audit records expected rollback results outside the business transaction", async () => {
+  const context = verifiedContext("maker");
+  const store = new MemoryStore(
+    (active) => resolvedState(active, ["control_plane.flag.create"]),
+    { impersonating: false, stepUpSatisfied: false, stepUpReceiptId: null },
+    null,
+  );
+  const auditWriter = new MemoryAuditWriter();
+  const result = await executeCreateR1ChangeSetCommand({
+    context,
+    command: createCommand("create:audit-rollback:0001"),
+    dependencies: {
+      store,
+      auditWriter,
+      nextUuidV7: idFactory(520),
+      now: () => NOW,
+    },
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "draft_rejected",
+    detail: "authoritative_baseline_unavailable",
+  });
+  assert.equal(auditWriter.starts.length, 1);
+  assert.deepEqual(auditWriter.results, [result]);
+  assert.equal(store.changes.size, 0);
+});
+
+test("durable audit records unexpected command errors and preserves the original failure", async () => {
+  const auditWriter = new MemoryAuditWriter();
+  const context = verifiedContext("maker");
+  const failingStore: ChangeSetCommandStore = {
+    transaction: async () => {
+      throw new Error("business_connection_lost");
+    },
+  };
+
+  await assert.rejects(
+    executeCreateR1ChangeSetCommand({
+      context,
+      command: createCommand("create:audit-error:0001"),
+      dependencies: {
+        store: failingStore,
+        auditWriter,
+        nextUuidV7: idFactory(540),
+        now: () => NOW,
+      },
+    }),
+    /business_connection_lost/,
+  );
+  assert.equal(auditWriter.starts.length, 1);
+  assert.equal(auditWriter.unexpectedErrors, 1);
+  assert.deepEqual(auditWriter.results, []);
+});
+
+test("0060 durable audit adapter is tenant-bound, append-only, and default-unwired", () => {
+  const migration = readFileSync(
+    new URL(
+      "../../../lib/db/drizzle/0060_change_set_durable_audit_adapter.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(
+    migration,
+    /LOCK TABLE public\.change_set_command_audit_events IN ACCESS EXCLUSIVE MODE/,
+  );
+  assert.match(migration, /CREATE SCHEMA fas_audit_v1/);
+  assert.match(migration, /REVOKE ALL ON SCHEMA fas_audit_v1 FROM PUBLIC/);
+  assert.match(migration, /change set audit RPC tenant context mismatch/);
+  assert.match(migration, /pg_advisory_xact_lock/);
+  assert.match(migration, /audit change set identity may be bound only by the terminal event/);
+  assert.match(
+    migration,
+    /phase <> 'TERMINAL'[\s\S]+outcome <> 'SUCCESS'[\s\S]+change_set_id IS NOT NULL/,
+  );
+  assert.doesNotMatch(migration, /GRANT EXECUTE|CREATE ROLE|CREATE USER/);
 });
 
 test("idempotency migration forces RLS and allows only one-way completion", () => {

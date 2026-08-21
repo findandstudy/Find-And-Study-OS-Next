@@ -52,6 +52,8 @@ const commandOwnerRole = "fas_cp_owner";
 const commandExecutorRole = "fas_cp_executor";
 const evidenceOwnerRole = "fas_evidence_owner";
 const evidenceIssuerRole = "fas_evidence_issuer";
+const auditOwnerRole = "fas_audit_owner";
+const auditWriterRole = "fas_audit_writer";
 
 async function withClient<T>(
   url: string,
@@ -105,6 +107,11 @@ async function setup() {
       CREATE ROLE ${evidenceIssuerRole}
         LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS
         PASSWORD 'fas_evidence_issuer_it_2026';
+      CREATE ROLE ${auditOwnerRole}
+        NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+      CREATE ROLE ${auditWriterRole}
+        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS
+        PASSWORD 'fas_audit_writer_it_2026';
       ALTER DATABASE ${databaseName} OWNER TO ${migratorRole};
       REVOKE TEMPORARY ON DATABASE ${databaseName} FROM PUBLIC;
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
@@ -119,6 +126,9 @@ async function setup() {
       ALTER ROLE ${commandExecutorRole} SET idle_in_transaction_session_timeout = '15s';
       ALTER ROLE ${evidenceIssuerRole} SET statement_timeout = '15s';
       ALTER ROLE ${evidenceIssuerRole} SET lock_timeout = '5s';
+      ALTER ROLE ${auditWriterRole} SET statement_timeout = '15s';
+      ALTER ROLE ${auditWriterRole} SET lock_timeout = '5s';
+      ALTER ROLE ${auditWriterRole} SET idle_in_transaction_session_timeout = '15s';
     `);
   });
   console.log("[postgres-gate] disposable authority split prepared");
@@ -632,7 +642,7 @@ async function verifyAtomicDdlRollback(migrator: pg.Client) {
         "SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations",
       )
     ).rows[0].count,
-    60,
+    61,
   );
 }
 
@@ -1138,14 +1148,14 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
       migrator.query(
         `INSERT INTO public.change_set_command_audit_events (
           id, tenant_id, attempt_id, sequence, context_id,
-          actor_principal_id, actor_membership_id, command_type,
+          actor_principal_id, actor_membership_id, change_set_id, command_type,
           capability, phase, outcome, reason_code,
           idempotency_key_fingerprint, request_fingerprint,
           fingerprint_key_id, previous_hash, event_hash
         ) VALUES (
-          $1, $2, $3, 2, $4, $5, $6, 'CREATE',
+          $1, $2, $3, 2, $4, $5, $6, $7, 'CREATE',
           'control_plane.change.create', 'TERMINAL', 'SUCCESS', 'COMMAND_COMPLETED',
-          $7, $8, 'test-audit-key-1', $9, $10
+          $8, $9, 'test-audit-key-1', $10, $11
         )`,
         [
           ID.auditEventTwo,
@@ -1154,6 +1164,7 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
           ID.context,
           ID.principalA,
           ID.membershipA,
+          ID.changeSet,
           "1".repeat(64),
           "2".repeat(64),
           "4".repeat(64),
@@ -1171,14 +1182,14 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
       migrator.query(
         `INSERT INTO public.change_set_command_audit_events (
           id, tenant_id, attempt_id, sequence, context_id,
-          actor_principal_id, actor_membership_id, command_type,
+          actor_principal_id, actor_membership_id, change_set_id, command_type,
           capability, policy_version_id, phase, outcome, reason_code,
           idempotency_key_fingerprint, request_fingerprint,
           fingerprint_key_id, previous_hash, event_hash
         ) VALUES (
-          $1, $2, $3, 2, $4, $5, $6, 'CREATE',
-          'control_plane.change.create', $7, 'TERMINAL', 'SUCCESS', 'COMMAND_COMPLETED',
-          $8, $9, 'test-audit-key-1', $10, $11
+          $1, $2, $3, 2, $4, $5, $6, $7, 'CREATE',
+          'control_plane.change.create', $8, 'TERMINAL', 'SUCCESS', 'COMMAND_COMPLETED',
+          $9, $10, 'test-audit-key-1', $11, $12
         )`,
         [
           ID.auditEventThree,
@@ -1187,6 +1198,7 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
           ID.contextTwo,
           ID.principalA,
           ID.membershipA,
+          ID.changeSet,
           ID.policyA,
           "1".repeat(64),
           "2".repeat(64),
@@ -1202,14 +1214,14 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
     await migrator.query(
       `INSERT INTO public.change_set_command_audit_events (
         id, tenant_id, attempt_id, sequence, context_id,
-        actor_principal_id, actor_membership_id, command_type,
+        actor_principal_id, actor_membership_id, change_set_id, command_type,
         capability, policy_version_id, phase, outcome, reason_code,
         idempotency_key_fingerprint, request_fingerprint,
         fingerprint_key_id, previous_hash, event_hash
       ) VALUES (
-        $1, $2, $3, 2, $4, $5, $6, 'CREATE',
-        'control_plane.change.create', $7, 'TERMINAL', 'SUCCESS', 'COMMAND_COMPLETED',
-        $8, $9, 'test-audit-key-1', $10, $11
+        $1, $2, $3, 2, $4, $5, $6, $7, 'CREATE',
+        'control_plane.change.create', $8, 'TERMINAL', 'SUCCESS', 'COMMAND_COMPLETED',
+        $9, $10, 'test-audit-key-1', $11, $12
       )`,
       [
         ID.auditEventTwo,
@@ -1218,6 +1230,7 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
         ID.context,
         ID.principalA,
         ID.membershipA,
+        ID.changeSet,
         ID.policyA,
         "1".repeat(64),
         "2".repeat(64),
@@ -1234,14 +1247,14 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
       migrator.query(
         `INSERT INTO public.change_set_command_audit_events (
           id, tenant_id, attempt_id, sequence, context_id,
-          actor_principal_id, actor_membership_id, command_type,
+          actor_principal_id, actor_membership_id, change_set_id, command_type,
           capability, policy_version_id, phase, outcome, reason_code,
           idempotency_key_fingerprint, request_fingerprint,
           fingerprint_key_id, previous_hash, event_hash
         ) VALUES (
-          $1, $2, $3, 3, $4, $5, $6, 'CREATE',
-          'control_plane.change.create', $7, 'TERMINAL', 'SUCCESS', 'COMMAND_COMPLETED',
-          $8, $9, 'test-audit-key-1', $10, $11
+          $1, $2, $3, 3, $4, $5, $6, $7, 'CREATE',
+          'control_plane.change.create', $8, 'TERMINAL', 'SUCCESS', 'COMMAND_COMPLETED',
+          $9, $10, 'test-audit-key-1', $11, $12
         )`,
         [
           ID.auditEventFour,
@@ -1250,6 +1263,7 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
           ID.context,
           ID.principalA,
           ID.membershipA,
+          ID.changeSet,
           ID.policyA,
           "1".repeat(64),
           "2".repeat(64),
@@ -1293,14 +1307,14 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
       migrator.query(
         `INSERT INTO public.change_set_command_audit_events (
           id, tenant_id, attempt_id, sequence, context_id,
-          actor_principal_id, actor_membership_id, command_type,
+          actor_principal_id, actor_membership_id, change_set_id, command_type,
           capability, policy_version_id, phase, outcome, reason_code,
           idempotency_key_fingerprint, request_fingerprint,
           fingerprint_key_id, previous_hash, event_hash
         ) VALUES (
-          $1, $2, $3, 2, $4, $5, $6, 'CREATE',
-          'control_plane.change.create', $7, 'TERMINAL', 'SUCCESS', 'INTERNAL_ERROR',
-          $8, $9, 'test-audit-key-1', $10, $11
+          $1, $2, $3, 2, $4, $5, $6, $7, 'CREATE',
+          'control_plane.change.create', $8, 'TERMINAL', 'SUCCESS', 'INTERNAL_ERROR',
+          $9, $10, 'test-audit-key-1', $11, $12
         )`,
         [
           ID.auditEventThree,
@@ -1309,6 +1323,7 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
           ID.context,
           ID.principalA,
           ID.membershipA,
+          ID.changeSet,
           ID.policyA,
           "1".repeat(64),
           "2".repeat(64),
@@ -1578,7 +1593,7 @@ async function verify() {
     const migrationCount = await migrator.query(
       "SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations",
     );
-    assert.equal(migrationCount.rows[0].count, 60);
+    assert.equal(migrationCount.rows[0].count, 61);
     await verifyAtomicDdlRollback(migrator);
     await migrator.query(
       `INSERT INTO public.branches (id, name) VALUES
