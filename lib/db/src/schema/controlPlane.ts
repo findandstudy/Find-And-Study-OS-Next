@@ -597,7 +597,6 @@ export const changeSetEvidenceSigningKeysTable = pgTable(
     algorithm: text("algorithm").notNull(),
     publicKeySpkiBase64: text("public_key_spki_base64").notNull(),
     publicKeyFingerprintSha256: text("public_key_fingerprint_sha256").notNull(),
-    opaqueSigningKeyRef: text("opaque_signing_key_ref").notNull(),
     state: text("state").notNull().default("PENDING"),
     validFrom: timestamp("valid_from", { withTimezone: true }).notNull(),
     signUntil: timestamp("sign_until", { withTimezone: true }).notNull(),
@@ -632,6 +631,33 @@ export const changeSetEvidenceSigningKeysTable = pgTable(
     check(
       "change_set_evidence_signing_keys_revocation_chk",
       sql`(${table.state} IN ('PENDING', 'ACTIVE', 'VERIFY_ONLY') AND ${table.revokedAt} IS NULL) OR (${table.state} IN ('REVOKED', 'COMPROMISED') AND ${table.revokedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const changeSetEvidenceSigningKeyBindingsTable = pgTable(
+  "change_set_evidence_signing_key_bindings",
+  {
+    issuerId: text("issuer_id").notNull(),
+    keyId: text("key_id").notNull(),
+    opaqueSigningKeyRef: text("opaque_signing_key_ref").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.issuerId, table.keyId] }),
+    foreignKey({
+      columns: [table.issuerId, table.keyId],
+      foreignColumns: [
+        changeSetEvidenceSigningKeysTable.issuerId,
+        changeSetEvidenceSigningKeysTable.keyId,
+      ],
+      name: "change_set_evidence_signing_key_bindings_key_fk",
+    }).onDelete("restrict"),
+    check(
+      "change_set_evidence_signing_key_bindings_ref_chk",
+      sql`length(${table.opaqueSigningKeyRef}) BETWEEN 16 AND 255 AND ${table.opaqueSigningKeyRef} ~ '^(kms|hsm|test-memory)://[A-Za-z0-9][A-Za-z0-9._:/-]{8,240}$' AND ${table.opaqueSigningKeyRef} !~ '[[:space:]]'`,
     ),
   ],
 );
@@ -776,6 +802,10 @@ export const changeSetEvidenceRequestsTable = pgTable(
       sql`${table.kind} IN ('VALIDATION', 'SIMULATION', 'TEST_ARTIFACT', 'ROLLBACK_PLAN', 'CANARY_PLAN')`,
     ),
     check(
+      "change_set_evidence_requests_kind_target_chk",
+      sql`(${table.kind} = 'VALIDATION' AND ${table.targetState} = 'VALIDATED') OR (${table.kind} = 'SIMULATION' AND ${table.targetState} = 'SIMULATED') OR (${table.kind} IN ('TEST_ARTIFACT', 'ROLLBACK_PLAN', 'CANARY_PLAN') AND ${table.targetState} = 'IN_REVIEW')`,
+    ),
+    check(
       "change_set_evidence_requests_hashes_chk",
       sql`${table.challengeNonceHash} ~ '^[0-9a-f]{64}$' AND ${table.subjectHash} ~ '^[0-9a-f]{64}$'`,
     ),
@@ -819,6 +849,7 @@ export const changeSetEvidenceReceiptsTable = pgTable(
     environmentId: text("environment_id").notNull(),
     cellId: text("cell_id").notNull(),
     evidenceRequestId: uuid("evidence_request_id").notNull(),
+    issuerTenantGrantId: uuid("issuer_tenant_grant_id").notNull(),
     challengeNonceHash: text("challenge_nonce_hash").notNull(),
     toolId: text("tool_id").notNull(),
     toolVersion: text("tool_version").notNull(),
@@ -832,6 +863,8 @@ export const changeSetEvidenceReceiptsTable = pgTable(
     artifactCount: integer("artifact_count"),
     artifactManifestHash: text("artifact_manifest_hash"),
     outcomeHash: text("outcome_hash").notNull(),
+    signedClaims: jsonb("signed_claims").notNull(),
+    signedClaimsCanonical: text("signed_claims_canonical").notNull(),
     signedClaimsHash: text("signed_claims_hash").notNull(),
     signatureBase64Url: text("signature_base64url").notNull(),
     issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
@@ -870,6 +903,14 @@ export const changeSetEvidenceReceiptsTable = pgTable(
         changeSetEvidenceRequestsTable.id,
       ],
       name: "change_set_evidence_receipts_request_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.issuerTenantGrantId],
+      foreignColumns: [
+        changeSetEvidenceIssuerTenantGrantsTable.tenantId,
+        changeSetEvidenceIssuerTenantGrantsTable.id,
+      ],
+      name: "change_set_evidence_receipts_issuer_tenant_grant_fk",
     }).onDelete("restrict"),
     foreignKey({
       columns: [table.tenantId, table.changeSetId],
@@ -912,12 +953,20 @@ export const changeSetEvidenceReceiptsTable = pgTable(
       sql`${table.kind} IN ('VALIDATION', 'SIMULATION', 'TEST_ARTIFACT', 'ROLLBACK_PLAN', 'CANARY_PLAN')`,
     ),
     check(
+      "change_set_evidence_receipts_kind_target_chk",
+      sql`(${table.kind} = 'VALIDATION' AND ${table.targetState} = 'VALIDATED') OR (${table.kind} = 'SIMULATION' AND ${table.targetState} = 'SIMULATED') OR (${table.kind} IN ('TEST_ARTIFACT', 'ROLLBACK_PLAN', 'CANARY_PLAN') AND ${table.targetState} = 'IN_REVIEW')`,
+    ),
+    check(
       "change_set_evidence_receipts_outcome_chk",
       sql`${table.outcome} IN ('PASSED', 'FAILED')`,
     ),
     check(
       "change_set_evidence_receipts_hashes_chk",
       sql`${table.challengeNonceHash} ~ '^[0-9a-f]{64}$' AND ${table.subjectHash} ~ '^[0-9a-f]{64}$' AND ${table.outcomeHash} ~ '^[0-9a-f]{64}$' AND ${table.signedClaimsHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "change_set_evidence_receipts_signed_claims_chk",
+      sql`jsonb_typeof(${table.signedClaims}) = 'object' AND length(${table.signedClaimsCanonical}) BETWEEN 2 AND 8192`,
     ),
     check(
       "change_set_evidence_receipts_envelope_identity_chk",
@@ -937,7 +986,7 @@ export const changeSetEvidenceReceiptsTable = pgTable(
     ),
     check(
       "change_set_evidence_receipts_artifact_count_chk",
-      sql`(${table.kind} = 'TEST_ARTIFACT' AND ${table.artifactCount} IS NOT NULL AND ${table.artifactCount} > 0 AND ${table.artifactManifestHash} ~ '^[0-9a-f]{64}$') OR (${table.kind} <> 'TEST_ARTIFACT' AND ${table.artifactCount} IS NULL AND ${table.artifactManifestHash} IS NULL)`,
+      sql`(${table.kind} = 'TEST_ARTIFACT' AND ${table.artifactCount} IS NOT NULL AND ${table.artifactCount} > 0 AND ${table.artifactManifestHash} IS NOT NULL AND ${table.artifactManifestHash} ~ '^[0-9a-f]{64}$') OR (${table.kind} <> 'TEST_ARTIFACT' AND ${table.artifactCount} IS NULL AND ${table.artifactManifestHash} IS NULL)`,
     ),
   ],
 ).enableRLS();
@@ -1052,6 +1101,29 @@ export const changeSetCommandAuditEventsTable = pgTable(
       table.changeSetId,
       table.occurredAt,
     ),
+    foreignKey({
+      columns: [
+        table.tenantId,
+        table.actorMembershipId,
+        table.actorPrincipalId,
+      ],
+      foreignColumns: [
+        membershipsTable.tenantId,
+        membershipsTable.id,
+        membershipsTable.principalId,
+      ],
+      name: "change_set_command_audit_events_actor_membership_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.policyVersionId],
+      foreignColumns: [policyVersionsTable.tenantId, policyVersionsTable.id],
+      name: "change_set_command_audit_events_policy_version_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.changeSetId],
+      foreignColumns: [changeSetsTable.tenantId, changeSetsTable.id],
+      name: "change_set_command_audit_events_change_set_fk",
+    }).onDelete("restrict"),
     check("change_set_command_audit_events_id_uuidv7_chk", uuidV7(table.id)),
     check(
       "change_set_command_audit_events_attempt_uuidv7_chk",
@@ -1067,7 +1139,7 @@ export const changeSetCommandAuditEventsTable = pgTable(
     ),
     check(
       "change_set_command_audit_events_command_chk",
-      sql`${table.commandType} IN ('CREATE', 'TRANSITION') AND ((${table.commandType} = 'CREATE' AND ${table.targetState} IS NULL) OR (${table.commandType} = 'TRANSITION' AND ${table.targetState} IS NOT NULL AND ${table.targetState} IN ('VALIDATED', 'SIMULATED', 'IN_REVIEW')))`,
+      sql`${table.commandType} IN ('CREATE', 'TRANSITION') AND ((${table.commandType} = 'CREATE' AND ${table.targetState} IS NULL) OR (${table.commandType} = 'TRANSITION' AND ${table.targetState} IS NOT NULL AND ${table.changeSetId} IS NOT NULL AND ${table.targetState} IN ('VALIDATED', 'SIMULATED', 'IN_REVIEW')))`,
     ),
     check(
       "change_set_command_audit_events_capability_chk",
@@ -1079,11 +1151,11 @@ export const changeSetCommandAuditEventsTable = pgTable(
     ),
     check(
       "change_set_command_audit_events_outcome_chk",
-      sql`${table.outcome} IN ('STARTED', 'ALLOW', 'DENY', 'REJECT', 'CONFLICT', 'ERROR', 'SUCCESS')`,
+      sql`(${table.phase} = 'ATTEMPT_STARTED' AND ${table.outcome} = 'STARTED') OR (${table.phase} = 'AUTHORIZATION' AND ${table.outcome} = 'ALLOW') OR (${table.phase} IN ('CLAIM', 'EVIDENCE', 'MUTATION', 'COMMIT') AND ${table.outcome} = 'SUCCESS') OR (${table.phase} = 'TERMINAL' AND ${table.outcome} IN ('DENY', 'REJECT', 'CONFLICT', 'ERROR', 'SUCCESS'))`,
     ),
     check(
       "change_set_command_audit_events_reason_chk",
-      sql`${table.reasonCode} ~ '^[A-Z][A-Z0-9_]{1,63}$'`,
+      sql`(${table.phase} = 'ATTEMPT_STARTED' AND ${table.outcome} = 'STARTED' AND ${table.reasonCode} = 'REQUEST_ACCEPTED') OR (${table.phase} = 'AUTHORIZATION' AND ${table.outcome} = 'ALLOW' AND ${table.reasonCode} = 'AUTHORIZED') OR (${table.phase} = 'CLAIM' AND ${table.outcome} = 'SUCCESS' AND ${table.reasonCode} = 'CLAIMED') OR (${table.phase} = 'EVIDENCE' AND ${table.outcome} = 'SUCCESS' AND ${table.reasonCode} = 'EVIDENCE_ACCEPTED') OR (${table.phase} = 'MUTATION' AND ${table.outcome} = 'SUCCESS' AND ${table.reasonCode} = 'MUTATION_APPLIED') OR (${table.phase} = 'COMMIT' AND ${table.outcome} = 'SUCCESS' AND ${table.reasonCode} = 'COMMIT_CONFIRMED') OR (${table.phase} = 'TERMINAL' AND ${table.outcome} = 'SUCCESS' AND ${table.reasonCode} = 'COMMAND_COMPLETED') OR (${table.phase} = 'TERMINAL' AND ${table.outcome} = 'DENY' AND ${table.reasonCode} = 'AUTHORIZATION_DENIED') OR (${table.phase} = 'TERMINAL' AND ${table.outcome} = 'REJECT' AND ${table.reasonCode} IN ('EVIDENCE_REJECTED', 'MUTATION_REJECTED')) OR (${table.phase} = 'TERMINAL' AND ${table.outcome} = 'CONFLICT' AND ${table.reasonCode} IN ('IDEMPOTENCY_CONFLICT', 'COMMAND_IN_PROGRESS')) OR (${table.phase} = 'TERMINAL' AND ${table.outcome} = 'ERROR' AND ${table.reasonCode} = 'INTERNAL_ERROR')`,
     ),
     check(
       "change_set_command_audit_events_hashes_chk",
@@ -1108,6 +1180,8 @@ export type ChangeSetEvidenceIssuer =
   typeof changeSetEvidenceIssuersTable.$inferSelect;
 export type ChangeSetEvidenceSigningKey =
   typeof changeSetEvidenceSigningKeysTable.$inferSelect;
+export type ChangeSetEvidenceSigningKeyBinding =
+  typeof changeSetEvidenceSigningKeyBindingsTable.$inferSelect;
 export type ChangeSetEvidenceIssuerTenantGrant =
   typeof changeSetEvidenceIssuerTenantGrantsTable.$inferSelect;
 export type ChangeSetEvidenceRequest =

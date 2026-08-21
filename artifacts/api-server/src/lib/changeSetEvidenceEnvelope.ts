@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { canonicalJson } from "./jsonCanonical";
+import { canonicalJson } from "./jsonCanonical.js";
 
 export const CHANGE_SET_EVIDENCE_AUDIENCE = "fas.change-set.transition";
 export const CHANGE_SET_EVIDENCE_DOMAIN = "FAS_CHANGESET_EVIDENCE\0v1\0";
@@ -26,6 +26,7 @@ const EXPECTED_CLAIM_KEYS = [
   "expiresAt",
   "issuedAt",
   "issuerId",
+  "issuerTenantGrantId",
   "issuerPrincipalId",
   "keyId",
   "kind",
@@ -64,6 +65,7 @@ export type ChangeSetEvidenceClaims = {
   evidenceRequestId: string;
   challengeNonce: string;
   issuerId: string;
+  issuerTenantGrantId: string;
   issuerPrincipalId: string;
   keyId: string;
   algorithm: "Ed25519";
@@ -114,6 +116,7 @@ export type ChangeSetEvidenceSigner = {
 };
 
 export type ChangeSetEvidenceTenantGrant = {
+  id: string;
   tenantId: string;
   kind: ChangeSetEvidenceKind;
   toolId: string;
@@ -130,6 +133,7 @@ export type ChangeSetEvidenceVerificationKey = {
   algorithm: "Ed25519";
   environmentId: string;
   cellId: string;
+  issuerState: "ACTIVE" | "REVOKED";
   state: "ACTIVE" | "VERIFY_ONLY" | "REVOKED" | "COMPROMISED";
   validFrom: number;
   signUntil: number;
@@ -144,6 +148,8 @@ export type ChangeSetEvidenceVerificationFailure =
   | "malformed_token"
   | "invalid_claims"
   | "unknown_key"
+  | "environment_mismatch"
+  | "invalid_key_record"
   | "key_inactive"
   | "key_window_invalid"
   | "key_fingerprint_mismatch"
@@ -155,6 +161,12 @@ export type ChangeSetEvidenceVerificationFailure =
 export type ChangeSetEvidenceVerificationResult =
   | { ok: true; claims: Readonly<ChangeSetEvidenceClaims> }
   | { ok: false; reason: ChangeSetEvidenceVerificationFailure };
+
+export type ChangeSetEvidenceVerificationContext = {
+  now: number;
+  expectedEnvironmentId: string;
+  expectedCellId: string;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -243,6 +255,7 @@ function parseClaims(value: unknown): ChangeSetEvidenceClaims | null {
     typeof claims.challengeNonce !== "string" ||
     !NONCE_RE.test(claims.challengeNonce) ||
     !isIdentifier(claims.issuerId) ||
+    !isUuidV7(claims.issuerTenantGrantId) ||
     !isUuidV7(claims.issuerPrincipalId) ||
     !isIdentifier(claims.keyId) ||
     !isUuidV7(claims.tenantId) ||
@@ -275,6 +288,7 @@ function parseClaims(value: unknown): ChangeSetEvidenceClaims | null {
     ...(claims as ChangeSetEvidenceClaims),
     receiptId: claims.receiptId.toLowerCase(),
     evidenceRequestId: claims.evidenceRequestId.toLowerCase(),
+    issuerTenantGrantId: claims.issuerTenantGrantId.toLowerCase(),
     issuerPrincipalId: claims.issuerPrincipalId.toLowerCase(),
     tenantId: claims.tenantId.toLowerCase(),
     changeSetId: claims.changeSetId.toLowerCase(),
@@ -385,14 +399,20 @@ export async function issueChangeSetEvidenceEnvelope(
 export function verifyChangeSetEvidenceEnvelope(
   token: string | null | undefined,
   keys: readonly ChangeSetEvidenceVerificationKey[],
-  now = Date.now(),
+  context: ChangeSetEvidenceVerificationContext,
 ): ChangeSetEvidenceVerificationResult {
   if (!token) return { ok: false, reason: "missing_token" };
+  if (!isRecord(context) || !Array.isArray(keys)) {
+    return { ok: false, reason: "malformed_token" };
+  }
+  const { now, expectedEnvironmentId, expectedCellId } = context;
   if (
     typeof token !== "string" ||
     Buffer.byteLength(token, "utf8") > CHANGE_SET_EVIDENCE_MAX_TOKEN_BYTES ||
     !Number.isSafeInteger(now) ||
-    now < 0
+    now < 0 ||
+    !isIdentifier(expectedEnvironmentId) ||
+    !isIdentifier(expectedCellId)
   ) {
     return { ok: false, reason: "malformed_token" };
   }
@@ -422,19 +442,47 @@ export function verifyChangeSetEvidenceEnvelope(
     return { ok: false, reason: "malformed_token" };
   }
 
+  if (
+    claims.environmentId !== expectedEnvironmentId ||
+    claims.cellId !== expectedCellId
+  ) {
+    return { ok: false, reason: "environment_mismatch" };
+  }
+
   const key = keys.find(
-    (candidate) =>
+    (candidate: ChangeSetEvidenceVerificationKey) =>
+      isRecord(candidate) &&
       candidate.issuerId === claims.issuerId &&
-      candidate.keyId === claims.keyId &&
-      candidate.environmentId === claims.environmentId &&
-      candidate.cellId === claims.cellId,
+      candidate.keyId === claims.keyId,
   );
   if (!key) return { ok: false, reason: "unknown_key" };
-  if (key.state === "REVOKED" || key.state === "COMPROMISED") {
+  if (
+    !isIdentifier(key.issuerId) ||
+    !isUuidV7(key.issuerPrincipalId) ||
+    !isIdentifier(key.keyId) ||
+    key.algorithm !== "Ed25519" ||
+    !isIdentifier(key.environmentId) ||
+    !isIdentifier(key.cellId) ||
+    !["ACTIVE", "REVOKED"].includes(key.issuerState) ||
+    !["ACTIVE", "VERIFY_ONLY", "REVOKED", "COMPROMISED"].includes(key.state) ||
+    !Array.isArray(key.tenantGrants)
+  ) {
+    return { ok: false, reason: "invalid_key_record" };
+  }
+  if (
+    key.environmentId !== claims.environmentId ||
+    key.cellId !== claims.cellId
+  ) {
+    return { ok: false, reason: "environment_mismatch" };
+  }
+  if (
+    key.issuerState !== "ACTIVE" ||
+    key.state === "REVOKED" ||
+    key.state === "COMPROMISED"
+  ) {
     return { ok: false, reason: "key_inactive" };
   }
   if (
-    key.algorithm !== "Ed25519" ||
     key.issuerPrincipalId.toLowerCase() !== claims.issuerPrincipalId ||
     !Number.isSafeInteger(key.validFrom) ||
     !Number.isSafeInteger(key.signUntil) ||
@@ -454,11 +502,37 @@ export function verifyChangeSetEvidenceEnvelope(
     return { ok: false, reason: "key_fingerprint_mismatch" };
   }
   const grant = key.tenantGrants.find(
-    (candidate) =>
-      candidate.tenantId.toLowerCase() === claims.tenantId &&
-      candidate.kind === claims.kind &&
-      candidate.toolId === claims.toolId &&
-      candidate.toolVersion === claims.toolVersion,
+    (candidate: ChangeSetEvidenceTenantGrant) => {
+      if (
+        !isRecord(candidate) ||
+        !isUuidV7(candidate.id) ||
+        !isUuidV7(candidate.tenantId) ||
+        typeof candidate.kind !== "string" ||
+        ![
+          "VALIDATION",
+          "SIMULATION",
+          "TEST_ARTIFACT",
+          "ROLLBACK_PLAN",
+          "CANARY_PLAN",
+        ].includes(candidate.kind as ChangeSetEvidenceKind) ||
+        !isIdentifier(candidate.toolId) ||
+        !isIdentifier(candidate.toolVersion) ||
+        typeof candidate.state !== "string" ||
+        !["ACTIVE", "REVOKED"].includes(candidate.state) ||
+        !Number.isSafeInteger(candidate.validFrom) ||
+        (candidate.validUntil !== null &&
+          !Number.isSafeInteger(candidate.validUntil))
+      ) {
+        return false;
+      }
+      return (
+        candidate.id.toLowerCase() === claims.issuerTenantGrantId &&
+        candidate.tenantId.toLowerCase() === claims.tenantId &&
+        candidate.kind === claims.kind &&
+        candidate.toolId === claims.toolId &&
+        candidate.toolVersion === claims.toolVersion
+      );
+    },
   );
   if (
     !grant ||
@@ -467,7 +541,8 @@ export function verifyChangeSetEvidenceEnvelope(
     grant.validFrom > claims.issuedAt ||
     (grant.validUntil !== null &&
       (!Number.isSafeInteger(grant.validUntil) ||
-        claims.issuedAt >= grant.validUntil))
+        claims.issuedAt >= grant.validUntil ||
+        now >= grant.validUntil))
   ) {
     return { ok: false, reason: "tenant_grant_inactive" };
   }

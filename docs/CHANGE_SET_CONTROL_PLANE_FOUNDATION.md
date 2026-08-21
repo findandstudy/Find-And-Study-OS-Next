@@ -190,7 +190,8 @@ gate.
 counts. The future store must load immutable server-issued evidence receipts
 under the same transaction. Each typed receipt binds its UUIDv7 ID, kind,
 issuer and issuer principal, signing key, audience, environment/cell, single-use
-request and challenge, tool/version, tenant, ChangeSet, target state, requesting
+request and challenge, exact issuer-tenant grant UUID, tool/version, tenant,
+ChangeSet, target state, requesting
 principal and membership, proposed hash, policy version, pass/fail outcome,
 artifact manifest, issued/expiry window, and unconsumed state.
 Review submission requires distinct `TEST_ARTIFACT`, `ROLLBACK_PLAN`, and
@@ -201,9 +202,10 @@ by the exact transition command; concurrent reuse admits at most one consumer.
 
 Migration `0058_change_set_evidence_identity_audit_foundation.sql` adds the
 default-unwired authenticity registry: issuer identity, public Ed25519 key and
-fingerprint, opaque KMS/HSM signing-key reference, exact tenant/kind/tool grant,
-single-use evidence request, and immutable signed-envelope bindings. Private
-key material is neither a column nor a configuration value. Key material,
+fingerprint, a separately ACL-bound opaque KMS/HSM signing-key reference, exact
+tenant-grant UUID, single-use evidence request, persisted canonical signed
+claims, and immutable signed-envelope bindings. Private key material is neither
+a column nor a configuration value. Key material,
 issuer identity, grants, requests, and consumed evidence cannot be rewritten;
 rotation creates a new key and moves the prior key through `VERIFY_ONLY` to a
 terminal revoked state. `REVOKED` and `COMPROMISED` keys fail closed.
@@ -212,15 +214,23 @@ terminal revoked state. `REVOKED` and `COMPROMISED` keys fail closed.
 issuer/verifier contract. Its domain-separated canonical claims bind every
 security-relevant identity and reject claim mutation, wrong key/fingerprint,
 wrong tenant grant, expiry, future issuance, malformed artifacts, and revoked
-or compromised keys. PostgreSQL records and locks these bindings, but does not
-perform Ed25519 verification itself: the future narrow adapter must verify the
+or compromised keys. Verification requires an independently trusted expected
+environment/cell and current issuer, key, and exact grant records. PostgreSQL
+persists enough canonical claims to reconstruct and reverify the token, locks
+issuer/key/grant rows during issue and consumption, and fails closed on revoke
+races. PostgreSQL recomputes the stored canonical-claim hash and signed
+challenge nonce SHA-256; it does not perform Ed25519 verification or RFC 8785
+canonicalization itself. The future narrow adapter must verify the exact
 canonical envelope before its issuer-only insert procedure can persist a
 receipt.
 
 The same migration adds `change_set_command_audit_events`, a tenant-scoped,
 append-only attempt chain containing fixed enums and keyed fingerprints rather
 than raw idempotency keys, request bodies, titles, reasons, errors, stack traces,
-secrets, or PII. This is only the storage contract. The outer-attempt/business-
+secrets, or PII. The database serializes each attempt, preserves actor/context/
+request identity, and forbids appends after one terminal event. The `event_hash`
+is still an adapter-computed keyed value; the default-unwired table does not
+recompute that MAC. This is only the storage contract. The outer-attempt/business-
 transaction/terminal-event adapter wiring remains deliberately absent.
 
 Notification template variables must be declared whether referenced in the

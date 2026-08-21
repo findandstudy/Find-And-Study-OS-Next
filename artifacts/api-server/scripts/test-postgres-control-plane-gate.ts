@@ -4,7 +4,9 @@ import pg from "pg";
 import {
   fingerprintChangeSetEvidencePublicKey,
   issueChangeSetEvidenceEnvelope,
+  verifyChangeSetEvidenceEnvelope,
   type ChangeSetEvidenceSigner,
+  type ChangeSetEvidenceVerificationKey,
 } from "../src/lib/changeSetEvidenceEnvelope.js";
 import { canonicalJson } from "../src/lib/jsonCanonical.js";
 
@@ -137,6 +139,9 @@ const ID = {
   auditAttempt: "018f3000-0000-7000-8000-000000000215",
   auditEventOne: "018f3000-0000-7000-8000-000000000216",
   auditEventTwo: "018f3000-0000-7000-8000-000000000217",
+  auditEventThree: "018f3000-0000-7000-8000-000000000218",
+  auditEventFour: "018f3000-0000-7000-8000-000000000219",
+  auditAttemptTwo: "018f3000-0000-7000-8000-00000000021a",
 } as const;
 
 const baseHash = "a".repeat(64);
@@ -174,9 +179,17 @@ const TENANT_OWNED_TABLES = [
 ] as const;
 
 const evidenceKeyPair = crypto.generateKeyPairSync("ed25519");
+const auditTestHmacKey = crypto.randomBytes(32);
 const evidenceIssuerId = "fas-evidence-service";
 const evidenceKeyId = "pg-gate-key-1";
 const evidenceToolVersion = "test-v1";
+
+function auditEventHash(event: Record<string, unknown>): string {
+  return crypto
+    .createHmac("sha256", auditTestHmacKey)
+    .update(canonicalJson(event), "utf8")
+    .digest("hex");
+}
 
 function evidenceSigner(now: number): ChangeSetEvidenceSigner {
   return {
@@ -318,10 +331,10 @@ async function seedControlPlane(client: pg.Client) {
   await client.query(
     `INSERT INTO public.change_set_evidence_signing_keys (
       issuer_id, key_id, algorithm, public_key_spki_base64,
-      public_key_fingerprint_sha256, opaque_signing_key_ref, state,
+      public_key_fingerprint_sha256, state,
       valid_from, sign_until, verify_until
     ) VALUES (
-      $1, $2, 'Ed25519', $3, $4, 'test-memory://pg-gate-key-1', 'ACTIVE',
+      $1, $2, 'Ed25519', $3, $4, 'ACTIVE',
       to_timestamp($5 / 1000.0), to_timestamp($6 / 1000.0), to_timestamp($7 / 1000.0)
     )`,
     [
@@ -335,6 +348,12 @@ async function seedControlPlane(client: pg.Client) {
       registryNow + 60 * 60 * 1000,
       registryNow + 2 * 60 * 60 * 1000,
     ],
+  );
+  await client.query(
+    `INSERT INTO public.change_set_evidence_signing_key_bindings
+      (issuer_id, key_id, opaque_signing_key_ref)
+     VALUES ($1, $2, 'test-memory://pg-gate-key-1')`,
+    [evidenceIssuerId, evidenceKeyId],
   );
   await inTenantTransaction(client, ID.tenantA, async () => {
     await insertChangeSet(client, ID.changeSet);
@@ -416,6 +435,7 @@ async function seedControlPlane(client: pg.Client) {
           receiptId: evidenceId,
           evidenceRequestId,
           challengeNonce,
+          issuerTenantGrantId: ID.evidenceGrant,
           tenantId: ID.tenantA,
           changeSetId,
           targetState: "VALIDATED",
@@ -434,24 +454,27 @@ async function seedControlPlane(client: pg.Client) {
         evidenceSigner(Date.now()),
       );
       const signatureBase64Url = issued.token.split(".")[1];
+      const signedClaimsCanonical = canonicalJson(issued.claims);
       const signedClaimsHash = crypto
         .createHash("sha256")
-        .update(canonicalJson(issued.claims), "utf8")
+        .update(signedClaimsCanonical, "utf8")
         .digest("hex");
       await client.query(
         `INSERT INTO public.change_set_evidence_receipts (
           id, tenant_id, change_set_id, target_state, kind, issuer,
           issuer_principal_id, signing_key_id, algorithm, schema_version,
           audience, environment_id, cell_id, evidence_request_id,
-          challenge_nonce_hash, tool_id, tool_version,
+          issuer_tenant_grant_id, challenge_nonce_hash, tool_id, tool_version,
           requested_by_principal_id, requested_by_membership_id, subject_hash,
           policy_version_id, outcome, artifact_count, artifact_manifest_hash,
-          outcome_hash, signed_claims_hash, signature_base64url, issued_at, expires_at
+          outcome_hash, signed_claims, signed_claims_canonical,
+          signed_claims_hash, signature_base64url,
+          issued_at, expires_at
         ) VALUES (
           $1, $2, $3, 'VALIDATED', 'VALIDATION', $4, $5, $6, 'Ed25519', 1,
-          'fas.change-set.transition', 'test-ci', 'cell-a', $7, $8, $4, $9,
-          $10, $11, $12, $13, 'PASSED', NULL, NULL, $14, $15, $16,
-          to_timestamp($17 / 1000.0), to_timestamp($18 / 1000.0)
+          'fas.change-set.transition', 'test-ci', 'cell-a', $7, $8, $9, $4, $10,
+          $11, $12, $13, $14, 'PASSED', NULL, NULL, $15, $16::jsonb, $17, $18, $19,
+          to_timestamp($20 / 1000.0), to_timestamp($21 / 1000.0)
         )`,
         [
           evidenceId,
@@ -461,6 +484,7 @@ async function seedControlPlane(client: pg.Client) {
           ID.issuerPrincipal,
           evidenceKeyId,
           evidenceRequestId,
+          ID.evidenceGrant,
           challengeNonceHash,
           evidenceToolVersion,
           ID.principalA,
@@ -468,6 +492,8 @@ async function seedControlPlane(client: pg.Client) {
           proposedHash,
           ID.policyA,
           validationOutcomeHash,
+          signedClaimsCanonical,
+          signedClaimsCanonical,
           signedClaimsHash,
           signatureBase64Url,
           issued.claims.issuedAt,
@@ -744,6 +770,39 @@ async function verifyComposites(migrator: pg.Client) {
     /access_decision_receipts_actor_membership_fk/,
   );
   await migrator.query("ROLLBACK");
+
+  await migrator.query("BEGIN");
+  await setTenant(migrator, ID.tenantA);
+  await mustFail(
+    () =>
+      migrator.query(
+        `INSERT INTO public.change_set_command_audit_events (
+          id, tenant_id, attempt_id, sequence, context_id,
+          actor_principal_id, actor_membership_id, command_type,
+          capability, policy_version_id, phase, outcome, reason_code,
+          idempotency_key_fingerprint, request_fingerprint,
+          fingerprint_key_id, previous_hash, event_hash
+        ) VALUES (
+          $1, $2, $3, 1, $4, $5, $6, 'CREATE',
+          'control_plane.change.create', $7, 'ATTEMPT_STARTED', 'STARTED', 'REQUEST_ACCEPTED',
+          $8, $9, 'test-audit-key-1', NULL, $10
+        )`,
+        [
+          ID.auditEventFour,
+          ID.tenantA,
+          ID.auditAttemptTwo,
+          ID.context,
+          ID.principalB,
+          ID.membershipA,
+          ID.policyA,
+          "1".repeat(64),
+          "2".repeat(64),
+          "8".repeat(64),
+        ],
+      ),
+    /change_set_command_audit_events_actor_membership_fk/,
+  );
+  await migrator.query("ROLLBACK");
 }
 
 async function verifyProposalAndEvidence(migrator: pg.Client) {
@@ -860,6 +919,40 @@ async function verifyProposalAndEvidence(migrator: pg.Client) {
 }
 
 async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
+  const auditOneHash = auditEventHash({
+    tenantId: ID.tenantA,
+    attemptId: ID.auditAttempt,
+    sequence: 1,
+    contextId: ID.context,
+    actorPrincipalId: ID.principalA,
+    actorMembershipId: ID.membershipA,
+    commandType: "CREATE",
+    capability: "control_plane.change.create",
+    policyVersionId: ID.policyA,
+    phase: "ATTEMPT_STARTED",
+    outcome: "STARTED",
+    reasonCode: "REQUEST_ACCEPTED",
+    idempotencyKeyFingerprint: "1".repeat(64),
+    requestFingerprint: "2".repeat(64),
+    previousHash: null,
+  });
+  const auditTwoHash = auditEventHash({
+    tenantId: ID.tenantA,
+    attemptId: ID.auditAttempt,
+    sequence: 2,
+    contextId: ID.context,
+    actorPrincipalId: ID.principalA,
+    actorMembershipId: ID.membershipA,
+    commandType: "CREATE",
+    capability: "control_plane.change.create",
+    policyVersionId: ID.policyA,
+    phase: "TERMINAL",
+    outcome: "SUCCESS",
+    reasonCode: "COMMAND_COMPLETED",
+    idempotencyKeyFingerprint: "1".repeat(64),
+    requestFingerprint: "2".repeat(64),
+    previousHash: auditOneHash,
+  });
   await inTenantTransaction(migrator, ID.tenantA, async () => {
     const requests = await migrator.query(
       `SELECT id, state, issued_receipt_id
@@ -879,6 +972,84 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
         issued_receipt_id: ID.racingEvidence,
       },
     ]);
+
+    const persisted = await migrator.query(
+      `SELECT receipt.signed_claims, receipt.signed_claims_canonical,
+              receipt.signed_claims_hash,
+              receipt.signature_base64url,
+              issuer.id AS issuer_id, issuer.principal_id AS issuer_principal_id,
+              issuer.environment_id, issuer.cell_id, issuer.state AS issuer_state,
+              signing_key.key_id, signing_key.algorithm,
+              signing_key.public_key_spki_base64,
+              signing_key.public_key_fingerprint_sha256,
+              signing_key.state AS key_state, signing_key.valid_from,
+              signing_key.sign_until, signing_key.verify_until,
+              tenant_grant.id AS grant_id, tenant_grant.tenant_id,
+              tenant_grant.kind, tenant_grant.tool_id, tenant_grant.tool_version,
+              tenant_grant.state AS grant_state, tenant_grant.valid_from AS grant_valid_from,
+              tenant_grant.valid_until AS grant_valid_until
+       FROM public.change_set_evidence_receipts receipt
+       JOIN public.change_set_evidence_issuers issuer ON issuer.id = receipt.issuer
+       JOIN public.change_set_evidence_signing_keys signing_key
+         ON signing_key.issuer_id = receipt.issuer
+        AND signing_key.key_id = receipt.signing_key_id
+       JOIN public.change_set_evidence_issuer_tenant_grants tenant_grant
+         ON tenant_grant.tenant_id = receipt.tenant_id
+        AND tenant_grant.id = receipt.issuer_tenant_grant_id
+       WHERE receipt.tenant_id = $1 AND receipt.id = $2`,
+      [ID.tenantA, ID.racingEvidence],
+    );
+    assert.equal(persisted.rowCount, 1);
+    const row = persisted.rows[0];
+    const canonicalClaims = row.signed_claims_canonical as string;
+    assert.equal(canonicalJson(row.signed_claims), canonicalClaims);
+    assert.equal(
+      crypto.createHash("sha256").update(canonicalClaims, "utf8").digest("hex"),
+      row.signed_claims_hash,
+    );
+    const token = `${Buffer.from(canonicalClaims, "utf8").toString("base64url")}.${row.signature_base64url}`;
+    const key = {
+      issuerId: row.issuer_id,
+      issuerPrincipalId: row.issuer_principal_id,
+      keyId: row.key_id,
+      algorithm: row.algorithm,
+      environmentId: row.environment_id,
+      cellId: row.cell_id,
+      issuerState: row.issuer_state,
+      state: row.key_state,
+      validFrom: (row.valid_from as Date).getTime(),
+      signUntil: (row.sign_until as Date).getTime(),
+      verifyUntil: (row.verify_until as Date).getTime(),
+      publicKey: crypto.createPublicKey({
+        key: Buffer.from(row.public_key_spki_base64, "base64"),
+        format: "der",
+        type: "spki",
+      }),
+      publicKeyFingerprintSha256: row.public_key_fingerprint_sha256,
+      tenantGrants: [
+        {
+          id: row.grant_id,
+          tenantId: row.tenant_id,
+          kind: row.kind,
+          toolId: row.tool_id,
+          toolVersion: row.tool_version,
+          state: row.grant_state,
+          validFrom: (row.grant_valid_from as Date).getTime(),
+          validUntil:
+            row.grant_valid_until === null
+              ? null
+              : (row.grant_valid_until as Date).getTime(),
+        },
+      ],
+    } as ChangeSetEvidenceVerificationKey;
+    const verified = verifyChangeSetEvidenceEnvelope(token, [key], {
+      now: Date.now(),
+      expectedEnvironmentId: "test-ci",
+      expectedCellId: "cell-a",
+    });
+    if (verified.ok === false) assert.fail(verified.reason);
+    assert.equal(verified.claims.receiptId, ID.racingEvidence);
+    assert.equal(verified.claims.issuerTenantGrantId, ID.evidenceGrant);
   });
 
   await migrator.query("BEGIN");
@@ -933,7 +1104,7 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
         ID.policyA,
         "1".repeat(64),
         "2".repeat(64),
-        "3".repeat(64),
+        auditOneHash,
       ],
     );
   });
@@ -971,18 +1142,52 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
   );
   await migrator.query("ROLLBACK");
 
+  await migrator.query("BEGIN");
+  await setTenant(migrator, ID.tenantA);
+  await mustFail(
+    () =>
+      migrator.query(
+        `INSERT INTO public.change_set_command_audit_events (
+          id, tenant_id, attempt_id, sequence, context_id,
+          actor_principal_id, actor_membership_id, command_type,
+          capability, policy_version_id, phase, outcome, reason_code,
+          idempotency_key_fingerprint, request_fingerprint,
+          fingerprint_key_id, previous_hash, event_hash
+        ) VALUES (
+          $1, $2, $3, 2, $4, $5, $6, 'CREATE',
+          'control_plane.change.create', $7, 'TERMINAL', 'SUCCESS', 'COMMAND_COMPLETED',
+          $8, $9, 'test-audit-key-1', $10, $11
+        )`,
+        [
+          ID.auditEventThree,
+          ID.tenantA,
+          ID.auditAttempt,
+          ID.contextTwo,
+          ID.principalA,
+          ID.membershipA,
+          ID.policyA,
+          "1".repeat(64),
+          "2".repeat(64),
+          auditOneHash,
+          "6".repeat(64),
+        ],
+      ),
+    /audit event identity drift is forbidden/,
+  );
+  await migrator.query("ROLLBACK");
+
   await inTenantTransaction(migrator, ID.tenantA, async () => {
     await migrator.query(
       `INSERT INTO public.change_set_command_audit_events (
         id, tenant_id, attempt_id, sequence, context_id,
         actor_principal_id, actor_membership_id, command_type,
-        capability, phase, outcome, reason_code,
+        capability, policy_version_id, phase, outcome, reason_code,
         idempotency_key_fingerprint, request_fingerprint,
         fingerprint_key_id, previous_hash, event_hash
       ) VALUES (
         $1, $2, $3, 2, $4, $5, $6, 'CREATE',
-        'control_plane.change.create', 'TERMINAL', 'SUCCESS', 'COMMAND_COMPLETED',
-        $7, $8, 'test-audit-key-1', $9, $10
+        'control_plane.change.create', $7, 'TERMINAL', 'SUCCESS', 'COMMAND_COMPLETED',
+        $8, $9, 'test-audit-key-1', $10, $11
       )`,
       [
         ID.auditEventTwo,
@@ -991,10 +1196,11 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
         ID.context,
         ID.principalA,
         ID.membershipA,
+        ID.policyA,
         "1".repeat(64),
         "2".repeat(64),
-        "3".repeat(64),
-        "5".repeat(64),
+        auditOneHash,
+        auditTwoHash,
       ],
     );
   });
@@ -1004,13 +1210,109 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
   await mustFail(
     () =>
       migrator.query(
-        `UPDATE public.change_set_command_audit_events
-         SET reason_code = 'TAMPERED'
-         WHERE tenant_id = $1 AND id = $2`,
-        [ID.tenantA, ID.auditEventTwo],
+        `INSERT INTO public.change_set_command_audit_events (
+          id, tenant_id, attempt_id, sequence, context_id,
+          actor_principal_id, actor_membership_id, command_type,
+          capability, policy_version_id, phase, outcome, reason_code,
+          idempotency_key_fingerprint, request_fingerprint,
+          fingerprint_key_id, previous_hash, event_hash
+        ) VALUES (
+          $1, $2, $3, 3, $4, $5, $6, 'CREATE',
+          'control_plane.change.create', $7, 'TERMINAL', 'SUCCESS', 'COMMAND_COMPLETED',
+          $8, $9, 'test-audit-key-1', $10, $11
+        )`,
+        [
+          ID.auditEventFour,
+          ID.tenantA,
+          ID.auditAttempt,
+          ID.context,
+          ID.principalA,
+          ID.membershipA,
+          ID.policyA,
+          "1".repeat(64),
+          "2".repeat(64),
+          auditTwoHash,
+          "7".repeat(64),
+        ],
       ),
-    /authorization receipts are immutable/,
+    /audit chain is terminal/,
   );
+  await migrator.query("ROLLBACK");
+
+  await migrator.query("BEGIN");
+  await setTenant(migrator, ID.tenantA);
+  await migrator.query(
+    `INSERT INTO public.change_set_command_audit_events (
+      id, tenant_id, attempt_id, sequence, context_id,
+      actor_principal_id, actor_membership_id, command_type,
+      capability, policy_version_id, phase, outcome, reason_code,
+      idempotency_key_fingerprint, request_fingerprint,
+      fingerprint_key_id, previous_hash, event_hash
+    ) VALUES (
+      $1, $2, $3, 1, $4, $5, $6, 'CREATE',
+      'control_plane.change.create', $7, 'ATTEMPT_STARTED', 'STARTED', 'REQUEST_ACCEPTED',
+      $8, $9, 'test-audit-key-1', NULL, $10
+    )`,
+    [
+      ID.auditEventFour,
+      ID.tenantA,
+      ID.auditAttemptTwo,
+      ID.context,
+      ID.principalA,
+      ID.membershipA,
+      ID.policyA,
+      "1".repeat(64),
+      "2".repeat(64),
+      "8".repeat(64),
+    ],
+  );
+  await mustFail(
+    () =>
+      migrator.query(
+        `INSERT INTO public.change_set_command_audit_events (
+          id, tenant_id, attempt_id, sequence, context_id,
+          actor_principal_id, actor_membership_id, command_type,
+          capability, policy_version_id, phase, outcome, reason_code,
+          idempotency_key_fingerprint, request_fingerprint,
+          fingerprint_key_id, previous_hash, event_hash
+        ) VALUES (
+          $1, $2, $3, 2, $4, $5, $6, 'CREATE',
+          'control_plane.change.create', $7, 'TERMINAL', 'SUCCESS', 'INTERNAL_ERROR',
+          $8, $9, 'test-audit-key-1', $10, $11
+        )`,
+        [
+          ID.auditEventThree,
+          ID.tenantA,
+          ID.auditAttemptTwo,
+          ID.context,
+          ID.principalA,
+          ID.membershipA,
+          ID.policyA,
+          "1".repeat(64),
+          "2".repeat(64),
+          "8".repeat(64),
+          "9".repeat(64),
+        ],
+      ),
+    /change_set_command_audit_events_reason_chk/,
+  );
+  await migrator.query("ROLLBACK");
+
+  await migrator.query("BEGIN");
+  await setTenant(migrator, ID.tenantA);
+  const hiddenUpdate = await migrator.query(
+    `UPDATE public.change_set_command_audit_events
+     SET reason_code = 'INTERNAL_ERROR'
+     WHERE tenant_id = $1 AND id = $2`,
+    [ID.tenantA, ID.auditEventTwo],
+  );
+  assert.equal(hiddenUpdate.rowCount, 0);
+  const unchanged = await migrator.query(
+    `SELECT reason_code FROM public.change_set_command_audit_events
+     WHERE tenant_id = $1 AND id = $2`,
+    [ID.tenantA, ID.auditEventTwo],
+  );
+  assert.deepEqual(unchanged.rows, [{ reason_code: "COMMAND_COMPLETED" }]);
   await migrator.query("ROLLBACK");
 }
 
@@ -1105,6 +1407,30 @@ async function verifyRevokeSerialization() {
                 SET status = 'REVOKED', version = version + 1, updated_at = now()
                 WHERE tenant_id = $1 AND id = $2`,
           values: [ID.tenantA, ID.membershipA],
+        },
+        {
+          sql: `UPDATE public.change_set_evidence_issuers
+                SET state = 'REVOKED', revoked_at = now()
+                WHERE id = $1`,
+          values: [evidenceIssuerId],
+        },
+        {
+          sql: `UPDATE public.change_set_evidence_signing_keys
+                SET state = 'COMPROMISED', revoked_at = now()
+                WHERE issuer_id = $1 AND key_id = $2`,
+          values: [evidenceIssuerId, evidenceKeyId],
+        },
+        {
+          sql: `UPDATE public.change_set_evidence_issuer_tenant_grants
+                SET state = 'REVOKED', revoked_at = now()
+                WHERE tenant_id = $1 AND id = $2`,
+          values: [ID.tenantA, ID.evidenceGrant],
+        },
+        {
+          sql: `UPDATE public.principals
+                SET status = 'REVOKED', version = version + 1, updated_at = now()
+                WHERE id = $1`,
+          values: [ID.issuerPrincipal],
         },
       ]) {
         await contender.query("BEGIN");

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
 import {
   CHANGE_SET_EVIDENCE_CLOCK_SKEW_MS,
@@ -25,6 +26,7 @@ const ID = {
   request: "018f4000-0000-7000-8000-000000000007",
   issuerPrincipal: "018f4000-0000-7000-8000-000000000008",
   alternate: "018f4000-0000-7000-8000-000000000009",
+  issuerTenantGrant: "018f4000-0000-7000-8000-00000000000a",
 };
 
 const pair = crypto.generateKeyPairSync("ed25519");
@@ -53,6 +55,7 @@ function input(
     receiptId: ID.receipt,
     evidenceRequestId: ID.request,
     challengeNonce: "abcdefghijklmnopqrstuv",
+    issuerTenantGrantId: ID.issuerTenantGrant,
     tenantId: ID.tenant,
     changeSetId: ID.changeSet,
     targetState: "VALIDATED",
@@ -80,6 +83,7 @@ function verificationKey(
     algorithm: "Ed25519",
     environmentId: "test-ci",
     cellId: "cell-a",
+    issuerState: "ACTIVE",
     state: "ACTIVE",
     validFrom: NOW - 60_000,
     signUntil: NOW + 60 * 60 * 1000,
@@ -90,6 +94,7 @@ function verificationKey(
     ),
     tenantGrants: [
       {
+        id: ID.issuerTenantGrant,
         tenantId: ID.tenant,
         kind: "VALIDATION",
         toolId: "fas-evidence-service",
@@ -101,6 +106,20 @@ function verificationKey(
     ],
     ...overrides,
   };
+}
+
+function verifyEvidence(
+  token: string | null | undefined,
+  keys: readonly ChangeSetEvidenceVerificationKey[],
+  now = NOW,
+  expectedEnvironmentId = "test-ci",
+  expectedCellId = "cell-a",
+) {
+  return verifyChangeSetEvidenceEnvelope(token, keys, {
+    now,
+    expectedEnvironmentId,
+    expectedCellId,
+  });
 }
 
 function tamperClaim(token: string, key: string, value: unknown): string {
@@ -123,11 +142,7 @@ function differentValue(value: unknown): unknown {
 
 test("issues and verifies a tenant-bound Ed25519 evidence envelope", async () => {
   const issued = await issueChangeSetEvidenceEnvelope(input(), signer(), NOW);
-  const verified = verifyChangeSetEvidenceEnvelope(
-    issued.token,
-    [verificationKey()],
-    NOW,
-  );
+  const verified = verifyEvidence(issued.token, [verificationKey()]);
   if (verified.ok === false) assert.fail(verified.reason);
   assert.equal(verified.claims.tenantId, ID.tenant);
   assert.equal(verified.claims.receiptId, ID.receipt);
@@ -138,13 +153,34 @@ test("issues and verifies a tenant-bound Ed25519 evidence envelope", async () =>
 test("rejects mutation of every signed claim", async () => {
   const issued = await issueChangeSetEvidenceEnvelope(input(), signer(), NOW);
   for (const [key, value] of Object.entries(issued.claims)) {
-    const result = verifyChangeSetEvidenceEnvelope(
+    const result = verifyEvidence(
       tamperClaim(issued.token, key, differentValue(value)),
       [verificationKey()],
-      NOW,
     );
     assert.equal(result.ok, false, `mutated claim must fail: ${key}`);
   }
+
+  const [payload, signature] = issued.token.split(".");
+  const missing = JSON.parse(
+    Buffer.from(payload, "base64url").toString("utf8"),
+  );
+  delete missing.toolVersion;
+  assert.deepEqual(
+    verifyEvidence(
+      `${Buffer.from(canonicalJson(missing), "utf8").toString("base64url")}.${signature}`,
+      [verificationKey()],
+    ),
+    { ok: false, reason: "invalid_claims" },
+  );
+  const extra = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  extra.unexpected = true;
+  assert.deepEqual(
+    verifyEvidence(
+      `${Buffer.from(canonicalJson(extra), "utf8").toString("base64url")}.${signature}`,
+      [verificationKey()],
+    ),
+    { ok: false, reason: "invalid_claims" },
+  );
 });
 
 test("rejects signature, key, fingerprint, and tenant-grant failures", async () => {
@@ -153,28 +189,22 @@ test("rejects signature, key, fingerprint, and tenant-grant failures", async () 
   const signatureBytes = Buffer.from(signature, "base64url");
   signatureBytes[0] ^= 1;
   const badSignature = `${payload}.${signatureBytes.toString("base64url")}`;
-  assert.deepEqual(
-    verifyChangeSetEvidenceEnvelope(badSignature, [verificationKey()], NOW),
-    { ok: false, reason: "invalid_signature" },
-  );
-  assert.deepEqual(verifyChangeSetEvidenceEnvelope(issued.token, [], NOW), {
+  assert.deepEqual(verifyEvidence(badSignature, [verificationKey()]), {
+    ok: false,
+    reason: "invalid_signature",
+  });
+  assert.deepEqual(verifyEvidence(issued.token, []), {
     ok: false,
     reason: "unknown_key",
   });
   assert.deepEqual(
-    verifyChangeSetEvidenceEnvelope(
-      issued.token,
-      [verificationKey({ publicKeyFingerprintSha256: "f".repeat(64) })],
-      NOW,
-    ),
+    verifyEvidence(issued.token, [
+      verificationKey({ publicKeyFingerprintSha256: "f".repeat(64) }),
+    ]),
     { ok: false, reason: "key_fingerprint_mismatch" },
   );
   assert.deepEqual(
-    verifyChangeSetEvidenceEnvelope(
-      issued.token,
-      [verificationKey({ tenantGrants: [] })],
-      NOW,
-    ),
+    verifyEvidence(issued.token, [verificationKey({ tenantGrants: [] })]),
     { ok: false, reason: "tenant_grant_inactive" },
   );
 });
@@ -182,20 +212,13 @@ test("rejects signature, key, fingerprint, and tenant-grant failures", async () 
 test("supports planned verify-only rotation and rejects revoked keys", async () => {
   const issued = await issueChangeSetEvidenceEnvelope(input(), signer(), NOW);
   assert.equal(
-    verifyChangeSetEvidenceEnvelope(
-      issued.token,
-      [verificationKey({ state: "VERIFY_ONLY" })],
-      NOW,
-    ).ok,
+    verifyEvidence(issued.token, [verificationKey({ state: "VERIFY_ONLY" })])
+      .ok,
     true,
   );
   for (const state of ["REVOKED", "COMPROMISED"] as const) {
     assert.deepEqual(
-      verifyChangeSetEvidenceEnvelope(
-        issued.token,
-        [verificationKey({ state })],
-        NOW,
-      ),
+      verifyEvidence(issued.token, [verificationKey({ state })]),
       { ok: false, reason: "key_inactive" },
     );
   }
@@ -204,11 +227,7 @@ test("supports planned verify-only rotation and rejects revoked keys", async () 
 test("enforces not-before, expiry boundary, and maximum TTL", async () => {
   const issued = await issueChangeSetEvidenceEnvelope(input(), signer(), NOW);
   assert.deepEqual(
-    verifyChangeSetEvidenceEnvelope(
-      issued.token,
-      [verificationKey()],
-      issued.claims.expiresAt,
-    ),
+    verifyEvidence(issued.token, [verificationKey()], issued.claims.expiresAt),
     { ok: false, reason: "expired" },
   );
 
@@ -218,10 +237,10 @@ test("enforces not-before, expiry boundary, and maximum TTL", async () => {
     signer({ signUntil: futureNow + 60_000 }),
     futureNow,
   );
-  assert.deepEqual(
-    verifyChangeSetEvidenceEnvelope(future.token, [verificationKey()], NOW),
-    { ok: false, reason: "not_yet_valid" },
-  );
+  assert.deepEqual(verifyEvidence(future.token, [verificationKey()]), {
+    ok: false,
+    reason: "not_yet_valid",
+  });
 
   await assert.rejects(
     issueChangeSetEvidenceEnvelope(
@@ -248,6 +267,7 @@ test("binds test artifacts to an immutable manifest hash", async () => {
   const key = verificationKey({
     tenantGrants: [
       {
+        id: ID.issuerTenantGrant,
         tenantId: ID.tenant,
         kind: "TEST_ARTIFACT",
         toolId: "fas-evidence-service",
@@ -258,30 +278,72 @@ test("binds test artifacts to an immutable manifest hash", async () => {
       },
     ],
   });
+  assert.equal(verifyEvidence(issued.token, [key]).ok, true);
   assert.equal(
-    verifyChangeSetEvidenceEnvelope(issued.token, [key], NOW).ok,
-    true,
-  );
-  assert.equal(
-    verifyChangeSetEvidenceEnvelope(
+    verifyEvidence(
       tamperClaim(issued.token, "artifactManifestHash", "d".repeat(64)),
       [key],
-      NOW,
     ).ok,
     false,
   );
 });
 
+test("fails closed on environment, issuer, key, and grant runtime drift", async () => {
+  const issued = await issueChangeSetEvidenceEnvelope(input(), signer(), NOW);
+  assert.deepEqual(
+    verifyEvidence(issued.token, [verificationKey()], NOW, "prod-eu"),
+    { ok: false, reason: "environment_mismatch" },
+  );
+  assert.deepEqual(
+    verifyEvidence(issued.token, [verificationKey({ issuerState: "REVOKED" })]),
+    { ok: false, reason: "key_inactive" },
+  );
+  assert.deepEqual(
+    verifyEvidence(issued.token, [
+      verificationKey({ state: "PENDING" as "ACTIVE" }),
+    ]),
+    { ok: false, reason: "invalid_key_record" },
+  );
+  assert.deepEqual(
+    verifyEvidence(issued.token, [
+      verificationKey({
+        tenantGrants: [
+          {
+            id: ID.issuerTenantGrant,
+            tenantId: ID.tenant,
+            kind: "VALIDATION",
+            toolId: "fas-evidence-service",
+            toolVersion: "test-v1",
+            state: "ACTIVE",
+            validFrom: NOW - 60_000,
+            validUntil: NOW,
+          },
+        ],
+      }),
+    ]),
+    { ok: false, reason: "tenant_grant_inactive" },
+  );
+});
+
 test("0058 keeps keys opaque, tenant grants scoped, and audit append-only", () => {
   const migration = fs.readFileSync(
-    new URL(
-      "../../../lib/db/drizzle/0058_change_set_evidence_identity_audit_foundation.sql",
-      import.meta.url,
+    path.join(
+      process.cwd(),
+      "lib/db/drizzle/0058_change_set_evidence_identity_audit_foundation.sql",
     ),
     "utf8",
   );
   assert.doesNotMatch(migration, /private_key/i);
   assert.match(migration, /opaque_signing_key_ref/);
+  assert.match(migration, /change_set_evidence_signing_key_bindings/);
+  assert.match(migration, /issuer_tenant_grant_id/);
+  assert.match(migration, /signed_claims jsonb NOT NULL/);
+  assert.match(migration, /signed_claims_canonical text NOT NULL/);
+  assert.match(migration, /sha256\(convert_to\(NEW\.signed_claims_canonical/);
+  assert.match(
+    migration,
+    /sha256\(convert_to\(NEW\.signed_claims ->> 'challengeNonce'/,
+  );
   assert.match(migration, /change_set_evidence_issuer_tenant_grants/);
   assert.match(
     migration,
@@ -299,6 +361,9 @@ test("0058 keeps keys opaque, tenant grants scoped, and audit append-only", () =
   assert.match(migration, /change_set_command_audit_events_immutable/);
   assert.match(migration, /audit chain must begin with ATTEMPT_STARTED/);
   assert.match(migration, /pg_advisory_xact_lock/);
+  assert.match(migration, /FOR SHARE OF issuer, signing_key, issuer_principal/);
+  assert.match(migration, /audit event identity drift is forbidden/);
+  assert.match(migration, /audit chain is terminal/);
   assert.match(
     migration,
     /REVOKE ALL ON TABLE public\.change_set_evidence_signing_keys FROM PUBLIC/,

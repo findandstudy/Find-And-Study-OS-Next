@@ -75,13 +75,14 @@ The gate passes only when CI records all of the following:
     and one-way command completion constraints;
 11. server-issued validation/simulation/test/rollback/canary receipt bindings to
     issuer principal, Ed25519 key/fingerprint, audience, environment/cell,
-    single-use request/challenge, exact tenant/kind/tool grant, tenant,
+    single-use request/challenge, exact issuer-tenant grant UUID, tenant,
     ChangeSet, target state, requesting principal/membership, proposed hash,
     policy version, artifact manifest, issued/expiry window, and consumption
     state;
 12. hardened `search_path` and temporary-object behavior for both roles;
-13. append-only, tenant-scoped audit sequence/hash-chain behavior and denial of
-    raw command/request/error/secret payload fields.
+13. append-only, tenant-scoped audit sequence, stable actor/context/request
+    identity, one terminal event, adapter-computed keyed event hashes, and
+    denial of raw command/request/error/secret payload fields.
 
 ## Candidate CI harness
 
@@ -103,9 +104,13 @@ exercises:
 - active-proposal uniqueness, transition receipt/state ordering, one-way
   command completion, atomic evidence consumption/finalization, and concurrent
   evidence reuse under the migrator-owned invariant harness.
+- persisted canonical signed-claim round trip through the pure Ed25519 verifier,
+  trusted environment/cell binding, exact grant UUID, issuer/key/grant revoke
+  serialization, and terminal audit-chain invariants.
 
-The candidate workflow passed on GitHub run `32515325893`; the companion G0
-Security Gate passed on run `32515325882`. The check is not yet required and
+The 58-migration baseline workflow passed on GitHub run `32515325893`; the
+updated 59-migration candidate still requires a green head run. The check is
+not yet required and
 does not provide a runtime writer contract or cover cancellation/pool reuse,
 HTTP-to-DB context mismatch, revoke/policy rotation races through a real
 adapter, all idempotency/result replay races, failure injection between every

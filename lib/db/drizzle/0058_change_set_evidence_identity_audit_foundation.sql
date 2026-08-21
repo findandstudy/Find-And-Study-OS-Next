@@ -45,7 +45,6 @@ CREATE TABLE public.change_set_evidence_signing_keys (
   algorithm text NOT NULL,
   public_key_spki_base64 text NOT NULL,
   public_key_fingerprint_sha256 text NOT NULL,
-  opaque_signing_key_ref text NOT NULL,
   state text DEFAULT 'PENDING' NOT NULL,
   valid_from timestamp with time zone NOT NULL,
   sign_until timestamp with time zone NOT NULL,
@@ -69,6 +68,24 @@ CREATE TABLE public.change_set_evidence_signing_keys (
     CHECK (
       (state IN ('PENDING', 'ACTIVE', 'VERIFY_ONLY') AND revoked_at IS NULL)
       OR (state IN ('REVOKED', 'COMPROMISED') AND revoked_at IS NOT NULL)
+    )
+);
+
+CREATE TABLE public.change_set_evidence_signing_key_bindings (
+  issuer_id text NOT NULL,
+  key_id text NOT NULL,
+  opaque_signing_key_ref text NOT NULL,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT change_set_evidence_signing_key_bindings_pk
+    PRIMARY KEY (issuer_id, key_id),
+  CONSTRAINT change_set_evidence_signing_key_bindings_key_fk
+    FOREIGN KEY (issuer_id, key_id)
+    REFERENCES public.change_set_evidence_signing_keys(issuer_id, key_id) ON DELETE RESTRICT,
+  CONSTRAINT change_set_evidence_signing_key_bindings_ref_chk
+    CHECK (
+      length(opaque_signing_key_ref) BETWEEN 16 AND 255
+      AND opaque_signing_key_ref ~ '^(kms|hsm|test-memory)://[A-Za-z0-9][A-Za-z0-9._:/-]{8,240}$'
+      AND opaque_signing_key_ref !~ '[[:space:]]'
     )
 );
 
@@ -152,6 +169,12 @@ CREATE TABLE public.change_set_evidence_requests (
     CHECK (target_state IN ('VALIDATED', 'SIMULATED', 'IN_REVIEW')),
   CONSTRAINT change_set_evidence_requests_kind_chk
     CHECK (kind IN ('VALIDATION', 'SIMULATION', 'TEST_ARTIFACT', 'ROLLBACK_PLAN', 'CANARY_PLAN')),
+  CONSTRAINT change_set_evidence_requests_kind_target_chk
+    CHECK (
+      (kind = 'VALIDATION' AND target_state = 'VALIDATED')
+      OR (kind = 'SIMULATION' AND target_state = 'SIMULATED')
+      OR (kind IN ('TEST_ARTIFACT', 'ROLLBACK_PLAN', 'CANARY_PLAN') AND target_state = 'IN_REVIEW')
+    ),
   CONSTRAINT change_set_evidence_requests_hashes_chk
     CHECK (challenge_nonce_hash ~ '^[0-9a-f]{64}$' AND subject_hash ~ '^[0-9a-f]{64}$'),
   CONSTRAINT change_set_evidence_requests_tool_chk
@@ -180,9 +203,12 @@ ALTER TABLE public.change_set_evidence_receipts
   ADD COLUMN environment_id text NOT NULL,
   ADD COLUMN cell_id text NOT NULL,
   ADD COLUMN evidence_request_id uuid NOT NULL,
+  ADD COLUMN issuer_tenant_grant_id uuid NOT NULL,
   ADD COLUMN challenge_nonce_hash text NOT NULL,
   ADD COLUMN tool_id text NOT NULL,
   ADD COLUMN artifact_manifest_hash text,
+  ADD COLUMN signed_claims jsonb NOT NULL,
+  ADD COLUMN signed_claims_canonical text NOT NULL,
   ADD COLUMN signed_claims_hash text NOT NULL,
   ADD COLUMN signature_base64url text NOT NULL,
   ADD CONSTRAINT change_set_evidence_receipts_issuer_principal_fk
@@ -193,6 +219,9 @@ ALTER TABLE public.change_set_evidence_receipts
   ADD CONSTRAINT change_set_evidence_receipts_request_fk
     FOREIGN KEY (tenant_id, evidence_request_id)
     REFERENCES public.change_set_evidence_requests(tenant_id, id) ON DELETE RESTRICT,
+  ADD CONSTRAINT change_set_evidence_receipts_issuer_tenant_grant_fk
+    FOREIGN KEY (tenant_id, issuer_tenant_grant_id)
+    REFERENCES public.change_set_evidence_issuer_tenant_grants(tenant_id, id) ON DELETE RESTRICT,
   ADD CONSTRAINT change_set_evidence_receipts_envelope_identity_chk
     CHECK (
       schema_version = 1
@@ -208,8 +237,19 @@ ALTER TABLE public.change_set_evidence_receipts
       challenge_nonce_hash ~ '^[0-9a-f]{64}$'
       AND signed_claims_hash ~ '^[0-9a-f]{64}$'
     ),
+  ADD CONSTRAINT change_set_evidence_receipts_signed_claims_chk
+    CHECK (
+      jsonb_typeof(signed_claims) = 'object'
+      AND length(signed_claims_canonical) BETWEEN 2 AND 8192
+    ),
   ADD CONSTRAINT change_set_evidence_receipts_signature_chk
     CHECK (signature_base64url ~ '^[A-Za-z0-9_-]{86}$'),
+  ADD CONSTRAINT change_set_evidence_receipts_kind_target_chk
+    CHECK (
+      (kind = 'VALIDATION' AND target_state = 'VALIDATED')
+      OR (kind = 'SIMULATION' AND target_state = 'SIMULATED')
+      OR (kind IN ('TEST_ARTIFACT', 'ROLLBACK_PLAN', 'CANARY_PLAN') AND target_state = 'IN_REVIEW')
+    ),
   DROP CONSTRAINT change_set_evidence_receipts_artifact_count_chk,
   ADD CONSTRAINT change_set_evidence_receipts_artifact_count_chk
     CHECK (
@@ -217,6 +257,7 @@ ALTER TABLE public.change_set_evidence_receipts
         kind = 'TEST_ARTIFACT'
         AND artifact_count IS NOT NULL
         AND artifact_count > 0
+        AND artifact_manifest_hash IS NOT NULL
         AND artifact_manifest_hash ~ '^[0-9a-f]{64}$'
       )
       OR (
@@ -252,6 +293,15 @@ CREATE TABLE public.change_set_command_audit_events (
     UNIQUE (tenant_id, attempt_id, sequence),
   CONSTRAINT change_set_command_audit_events_tenant_fk
     FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE RESTRICT,
+  CONSTRAINT change_set_command_audit_events_actor_membership_fk
+    FOREIGN KEY (tenant_id, actor_membership_id, actor_principal_id)
+    REFERENCES public.memberships(tenant_id, id, principal_id) ON DELETE RESTRICT,
+  CONSTRAINT change_set_command_audit_events_policy_version_fk
+    FOREIGN KEY (tenant_id, policy_version_id)
+    REFERENCES public.policy_versions(tenant_id, id) ON DELETE RESTRICT,
+  CONSTRAINT change_set_command_audit_events_change_set_fk
+    FOREIGN KEY (tenant_id, change_set_id)
+    REFERENCES public.change_sets(tenant_id, id) ON DELETE RESTRICT,
   CONSTRAINT change_set_command_audit_events_id_uuidv7_chk
     CHECK (substring(id::text from 15 for 1) = '7'),
   CONSTRAINT change_set_command_audit_events_attempt_uuidv7_chk
@@ -267,6 +317,7 @@ CREATE TABLE public.change_set_command_audit_events (
         OR (
           command_type = 'TRANSITION'
           AND target_state IS NOT NULL
+          AND change_set_id IS NOT NULL
           AND target_state IN ('VALIDATED', 'SIMULATED', 'IN_REVIEW')
         )
       )
@@ -276,9 +327,26 @@ CREATE TABLE public.change_set_command_audit_events (
   CONSTRAINT change_set_command_audit_events_phase_chk
     CHECK (phase IN ('ATTEMPT_STARTED', 'AUTHORIZATION', 'CLAIM', 'EVIDENCE', 'MUTATION', 'COMMIT', 'TERMINAL')),
   CONSTRAINT change_set_command_audit_events_outcome_chk
-    CHECK (outcome IN ('STARTED', 'ALLOW', 'DENY', 'REJECT', 'CONFLICT', 'ERROR', 'SUCCESS')),
+    CHECK (
+      (phase = 'ATTEMPT_STARTED' AND outcome = 'STARTED')
+      OR (phase = 'AUTHORIZATION' AND outcome = 'ALLOW')
+      OR (phase IN ('CLAIM', 'EVIDENCE', 'MUTATION', 'COMMIT') AND outcome = 'SUCCESS')
+      OR (phase = 'TERMINAL' AND outcome IN ('DENY', 'REJECT', 'CONFLICT', 'ERROR', 'SUCCESS'))
+    ),
   CONSTRAINT change_set_command_audit_events_reason_chk
-    CHECK (reason_code ~ '^[A-Z][A-Z0-9_]{1,63}$'),
+    CHECK (
+      (phase = 'ATTEMPT_STARTED' AND outcome = 'STARTED' AND reason_code = 'REQUEST_ACCEPTED')
+      OR (phase = 'AUTHORIZATION' AND outcome = 'ALLOW' AND reason_code = 'AUTHORIZED')
+      OR (phase = 'CLAIM' AND outcome = 'SUCCESS' AND reason_code = 'CLAIMED')
+      OR (phase = 'EVIDENCE' AND outcome = 'SUCCESS' AND reason_code = 'EVIDENCE_ACCEPTED')
+      OR (phase = 'MUTATION' AND outcome = 'SUCCESS' AND reason_code = 'MUTATION_APPLIED')
+      OR (phase = 'COMMIT' AND outcome = 'SUCCESS' AND reason_code = 'COMMIT_CONFIRMED')
+      OR (phase = 'TERMINAL' AND outcome = 'SUCCESS' AND reason_code = 'COMMAND_COMPLETED')
+      OR (phase = 'TERMINAL' AND outcome = 'DENY' AND reason_code = 'AUTHORIZATION_DENIED')
+      OR (phase = 'TERMINAL' AND outcome = 'REJECT' AND reason_code IN ('EVIDENCE_REJECTED', 'MUTATION_REJECTED'))
+      OR (phase = 'TERMINAL' AND outcome = 'CONFLICT' AND reason_code IN ('IDEMPOTENCY_CONFLICT', 'COMMAND_IN_PROGRESS'))
+      OR (phase = 'TERMINAL' AND outcome = 'ERROR' AND reason_code = 'INTERNAL_ERROR')
+    ),
   CONSTRAINT change_set_command_audit_events_hashes_chk
     CHECK (
       idempotency_key_fingerprint ~ '^[0-9a-f]{64}$'
@@ -361,7 +429,6 @@ BEGIN
     OR NEW.algorithm <> OLD.algorithm
     OR NEW.public_key_spki_base64 <> OLD.public_key_spki_base64
     OR NEW.public_key_fingerprint_sha256 <> OLD.public_key_fingerprint_sha256
-    OR NEW.opaque_signing_key_ref <> OLD.opaque_signing_key_ref
     OR NEW.valid_from <> OLD.valid_from
     OR NEW.sign_until <> OLD.sign_until
     OR NEW.verify_until <> OLD.verify_until
@@ -433,6 +500,74 @@ AS $$
 DECLARE
   request_row public.change_set_evidence_requests%ROWTYPE;
 BEGIN
+  IF NOT (NEW.signed_claims ?& ARRAY[
+      'algorithm', 'artifactCount', 'artifactManifestHash', 'audience', 'cellId',
+      'challengeNonce', 'changeSetId', 'environmentId', 'evidenceRequestId',
+      'expiresAt', 'issuedAt', 'issuerId', 'issuerTenantGrantId',
+      'issuerPrincipalId', 'keyId', 'kind', 'outcome', 'outcomeHash',
+      'policyVersionId', 'receiptId', 'requestedByMembershipId',
+      'requestedByPrincipalId', 'schemaVersion', 'subjectHash', 'targetState',
+      'tenantId', 'toolId', 'toolVersion'
+    ]::text[])
+    OR (SELECT count(*) FROM jsonb_object_keys(NEW.signed_claims)) <> 28
+    OR jsonb_typeof(NEW.signed_claims -> 'schemaVersion') <> 'number'
+    OR jsonb_typeof(NEW.signed_claims -> 'issuedAt') <> 'number'
+    OR jsonb_typeof(NEW.signed_claims -> 'expiresAt') <> 'number'
+    OR jsonb_typeof(NEW.signed_claims -> 'challengeNonce') <> 'string'
+    OR (
+      NEW.kind = 'TEST_ARTIFACT'
+      AND (
+        jsonb_typeof(NEW.signed_claims -> 'artifactCount') <> 'number'
+        OR jsonb_typeof(NEW.signed_claims -> 'artifactManifestHash') <> 'string'
+      )
+    )
+    OR (
+      NEW.kind <> 'TEST_ARTIFACT'
+      AND (
+        jsonb_typeof(NEW.signed_claims -> 'artifactCount') <> 'null'
+        OR jsonb_typeof(NEW.signed_claims -> 'artifactManifestHash') <> 'null'
+      )
+    )
+    OR NEW.signed_claims_canonical::jsonb IS DISTINCT FROM NEW.signed_claims
+    OR encode(sha256(convert_to(NEW.signed_claims_canonical, 'UTF8')), 'hex')
+       IS DISTINCT FROM NEW.signed_claims_hash
+    OR NEW.signed_claims ->> 'receiptId' IS DISTINCT FROM NEW.id::text
+    OR (NEW.signed_claims ->> 'schemaVersion')::integer IS DISTINCT FROM NEW.schema_version
+    OR NEW.signed_claims ->> 'evidenceRequestId' IS DISTINCT FROM NEW.evidence_request_id::text
+    OR NEW.signed_claims ->> 'issuerTenantGrantId' IS DISTINCT FROM NEW.issuer_tenant_grant_id::text
+    OR NEW.signed_claims ->> 'issuerId' IS DISTINCT FROM NEW.issuer
+    OR NEW.signed_claims ->> 'issuerPrincipalId' IS DISTINCT FROM NEW.issuer_principal_id::text
+    OR NEW.signed_claims ->> 'keyId' IS DISTINCT FROM NEW.signing_key_id
+    OR NEW.signed_claims ->> 'algorithm' IS DISTINCT FROM NEW.algorithm
+    OR NEW.signed_claims ->> 'audience' IS DISTINCT FROM NEW.audience
+    OR NEW.signed_claims ->> 'environmentId' IS DISTINCT FROM NEW.environment_id
+    OR NEW.signed_claims ->> 'cellId' IS DISTINCT FROM NEW.cell_id
+    OR NEW.signed_claims ->> 'tenantId' IS DISTINCT FROM NEW.tenant_id::text
+    OR NEW.signed_claims ->> 'changeSetId' IS DISTINCT FROM NEW.change_set_id::text
+    OR NEW.signed_claims ->> 'targetState' IS DISTINCT FROM NEW.target_state
+    OR NEW.signed_claims ->> 'kind' IS DISTINCT FROM NEW.kind
+    OR NEW.signed_claims ->> 'challengeNonce' IS NULL
+    OR NEW.signed_claims ->> 'challengeNonce' !~ '^[A-Za-z0-9_-]{22,128}$'
+    OR encode(sha256(convert_to(NEW.signed_claims ->> 'challengeNonce', 'UTF8')), 'hex')
+       IS DISTINCT FROM NEW.challenge_nonce_hash
+    OR NEW.signed_claims ->> 'requestedByPrincipalId' IS DISTINCT FROM NEW.requested_by_principal_id::text
+    OR NEW.signed_claims ->> 'requestedByMembershipId' IS DISTINCT FROM NEW.requested_by_membership_id::text
+    OR NEW.signed_claims ->> 'subjectHash' IS DISTINCT FROM NEW.subject_hash
+    OR NEW.signed_claims ->> 'policyVersionId' IS DISTINCT FROM NEW.policy_version_id::text
+    OR NEW.signed_claims ->> 'toolId' IS DISTINCT FROM NEW.tool_id
+    OR NEW.signed_claims ->> 'toolVersion' IS DISTINCT FROM NEW.tool_version
+    OR NEW.signed_claims ->> 'outcome' IS DISTINCT FROM NEW.outcome
+    OR NEW.signed_claims ->> 'artifactCount' IS DISTINCT FROM NEW.artifact_count::text
+    OR NEW.signed_claims ->> 'artifactManifestHash' IS DISTINCT FROM NEW.artifact_manifest_hash
+    OR NEW.signed_claims ->> 'outcomeHash' IS DISTINCT FROM NEW.outcome_hash
+    OR (NEW.signed_claims ->> 'issuedAt')::bigint
+       IS DISTINCT FROM (extract(epoch FROM NEW.issued_at) * 1000)::bigint
+    OR (NEW.signed_claims ->> 'expiresAt')::bigint
+       IS DISTINCT FROM (extract(epoch FROM NEW.expires_at) * 1000)::bigint
+  THEN
+    RAISE EXCEPTION 'persisted signed claims do not match evidence columns';
+  END IF;
+
   IF NEW.issued_at > statement_timestamp() + interval '30 seconds'
     OR NEW.expires_at <= statement_timestamp()
   THEN
@@ -464,29 +599,34 @@ BEGIN
     RAISE EXCEPTION 'signed evidence does not match its single-use request';
   END IF;
 
-  IF NOT EXISTS (
-    SELECT 1
+  PERFORM 1
     FROM public.change_set_evidence_issuers issuer
     JOIN public.change_set_evidence_signing_keys signing_key
       ON signing_key.issuer_id = issuer.id
+    JOIN public.principals issuer_principal
+      ON issuer_principal.id = issuer.principal_id
     WHERE issuer.id = NEW.issuer
       AND issuer.principal_id = NEW.issuer_principal_id
       AND issuer.environment_id = NEW.environment_id
       AND issuer.cell_id = NEW.cell_id
       AND issuer.state = 'ACTIVE'
+      AND issuer_principal.status = 'ACTIVE'
+      AND issuer_principal.risk_state = 'NORMAL'
+      AND issuer_principal.principal_type IN ('SERVICE', 'INTEGRATION')
       AND signing_key.key_id = NEW.signing_key_id
       AND signing_key.algorithm = NEW.algorithm
       AND signing_key.state = 'ACTIVE'
       AND signing_key.valid_from <= NEW.issued_at
       AND signing_key.sign_until >= NEW.issued_at
-  ) THEN
+  FOR SHARE OF issuer, signing_key, issuer_principal;
+  IF NOT FOUND THEN
     RAISE EXCEPTION 'signed evidence issuer or signing key is not active';
   END IF;
 
-  IF NOT EXISTS (
-    SELECT 1
+  PERFORM 1
     FROM public.change_set_evidence_issuer_tenant_grants tenant_grant
-    WHERE tenant_grant.tenant_id = NEW.tenant_id
+    WHERE tenant_grant.id = NEW.issuer_tenant_grant_id
+      AND tenant_grant.tenant_id = NEW.tenant_id
       AND tenant_grant.issuer_id = NEW.issuer
       AND tenant_grant.kind = NEW.kind
       AND tenant_grant.tool_id = NEW.tool_id
@@ -494,7 +634,8 @@ BEGIN
       AND tenant_grant.state = 'ACTIVE'
       AND tenant_grant.valid_from <= NEW.issued_at
       AND (tenant_grant.valid_until IS NULL OR tenant_grant.valid_until > NEW.issued_at)
-  ) THEN
+  FOR SHARE;
+  IF NOT FOUND THEN
     RAISE EXCEPTION 'signed evidence issuer has no active tenant grant';
   END IF;
 
@@ -519,13 +660,71 @@ BEGIN
     OR NEW.environment_id <> OLD.environment_id
     OR NEW.cell_id <> OLD.cell_id
     OR NEW.evidence_request_id <> OLD.evidence_request_id
+    OR NEW.issuer_tenant_grant_id <> OLD.issuer_tenant_grant_id
     OR NEW.challenge_nonce_hash <> OLD.challenge_nonce_hash
     OR NEW.tool_id <> OLD.tool_id
     OR NEW.artifact_manifest_hash IS DISTINCT FROM OLD.artifact_manifest_hash
+    OR NEW.signed_claims <> OLD.signed_claims
+    OR NEW.signed_claims_canonical <> OLD.signed_claims_canonical
     OR NEW.signed_claims_hash <> OLD.signed_claims_hash
     OR NEW.signature_base64url <> OLD.signature_base64url
   THEN
     RAISE EXCEPTION 'signed evidence envelope identity is immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE FUNCTION public.guard_change_set_signed_evidence_current_authority() RETURNS trigger
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path TO pg_catalog, public
+AS $$
+BEGIN
+  IF OLD.consumed_at IS NOT NULL OR NEW.consumed_at IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  PERFORM 1
+  FROM public.change_set_evidence_issuers issuer
+  JOIN public.change_set_evidence_signing_keys signing_key
+    ON signing_key.issuer_id = issuer.id
+  JOIN public.principals issuer_principal
+    ON issuer_principal.id = issuer.principal_id
+  WHERE issuer.id = NEW.issuer
+    AND issuer.principal_id = NEW.issuer_principal_id
+    AND issuer.environment_id = NEW.environment_id
+    AND issuer.cell_id = NEW.cell_id
+    AND issuer.state = 'ACTIVE'
+    AND issuer_principal.status = 'ACTIVE'
+    AND issuer_principal.risk_state = 'NORMAL'
+    AND issuer_principal.principal_type IN ('SERVICE', 'INTEGRATION')
+    AND signing_key.key_id = NEW.signing_key_id
+    AND signing_key.algorithm = NEW.algorithm
+    AND signing_key.state IN ('ACTIVE', 'VERIFY_ONLY')
+    AND signing_key.valid_from <= NEW.issued_at
+    AND signing_key.sign_until >= NEW.issued_at
+    AND signing_key.verify_until > statement_timestamp()
+  FOR SHARE OF issuer, signing_key, issuer_principal;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'signed evidence authority is not current at consumption';
+  END IF;
+
+  PERFORM 1
+  FROM public.change_set_evidence_issuer_tenant_grants tenant_grant
+  WHERE tenant_grant.id = NEW.issuer_tenant_grant_id
+    AND tenant_grant.tenant_id = NEW.tenant_id
+    AND tenant_grant.issuer_id = NEW.issuer
+    AND tenant_grant.kind = NEW.kind
+    AND tenant_grant.tool_id = NEW.tool_id
+    AND tenant_grant.tool_version = NEW.tool_version
+    AND tenant_grant.state = 'ACTIVE'
+    AND tenant_grant.valid_from <= NEW.issued_at
+    AND tenant_grant.valid_from <= statement_timestamp()
+    AND (tenant_grant.valid_until IS NULL OR tenant_grant.valid_until > statement_timestamp())
+  FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'signed evidence tenant grant is not current at consumption';
   END IF;
   RETURN NEW;
 END;
@@ -595,8 +794,7 @@ SECURITY INVOKER
 SET search_path TO pg_catalog, public
 AS $$
 DECLARE
-  prior_sequence integer;
-  prior_hash text;
+  prior_event public.change_set_command_audit_events%ROWTYPE;
 BEGIN
   NEW.occurred_at := statement_timestamp();
   -- The audit table intentionally has no UPDATE policy. Serialize each
@@ -604,18 +802,44 @@ BEGIN
   PERFORM pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended(NEW.tenant_id::text || ':' || NEW.attempt_id::text, 0)
   );
-  SELECT sequence, event_hash INTO prior_sequence, prior_hash
+  SELECT * INTO prior_event
   FROM public.change_set_command_audit_events
   WHERE tenant_id = NEW.tenant_id AND attempt_id = NEW.attempt_id
   ORDER BY sequence DESC
   LIMIT 1;
 
-  IF prior_sequence IS NULL THEN
-    IF NEW.sequence <> 1 OR NEW.previous_hash IS NOT NULL OR NEW.phase <> 'ATTEMPT_STARTED' THEN
+  IF prior_event.sequence IS NULL THEN
+    IF NEW.sequence <> 1
+      OR NEW.previous_hash IS NOT NULL
+      OR NEW.phase <> 'ATTEMPT_STARTED'
+      OR NEW.outcome <> 'STARTED'
+      OR NEW.reason_code <> 'REQUEST_ACCEPTED'
+    THEN
       RAISE EXCEPTION 'audit chain must begin with ATTEMPT_STARTED at sequence one';
     END IF;
-  ELSIF NEW.sequence <> prior_sequence + 1 OR NEW.previous_hash IS DISTINCT FROM prior_hash THEN
-    RAISE EXCEPTION 'audit event sequence or previous hash mismatch';
+  ELSE
+    IF prior_event.phase = 'TERMINAL' THEN
+      RAISE EXCEPTION 'audit chain is terminal and cannot accept another event';
+    END IF;
+    IF NEW.sequence <> prior_event.sequence + 1
+      OR NEW.previous_hash IS DISTINCT FROM prior_event.event_hash
+    THEN
+      RAISE EXCEPTION 'audit event sequence or previous hash mismatch';
+    END IF;
+    IF NEW.context_id <> prior_event.context_id
+      OR NEW.actor_principal_id <> prior_event.actor_principal_id
+      OR NEW.actor_membership_id <> prior_event.actor_membership_id
+      OR NEW.change_set_id IS DISTINCT FROM prior_event.change_set_id
+      OR NEW.command_type <> prior_event.command_type
+      OR NEW.target_state IS DISTINCT FROM prior_event.target_state
+      OR NEW.capability <> prior_event.capability
+      OR NEW.policy_version_id IS DISTINCT FROM prior_event.policy_version_id
+      OR NEW.idempotency_key_fingerprint <> prior_event.idempotency_key_fingerprint
+      OR NEW.request_fingerprint <> prior_event.request_fingerprint
+      OR NEW.fingerprint_key_id <> prior_event.fingerprint_key_id
+    THEN
+      RAISE EXCEPTION 'audit event identity drift is forbidden';
+    END IF;
   END IF;
   RETURN NEW;
 END;
@@ -627,6 +851,9 @@ CREATE TRIGGER change_set_evidence_receipts_bind_signed
 CREATE TRIGGER change_set_evidence_receipts_guard_signed_identity
   BEFORE UPDATE ON public.change_set_evidence_receipts
   FOR EACH ROW EXECUTE FUNCTION public.guard_change_set_signed_evidence_identity();
+CREATE TRIGGER change_set_evidence_receipts_guard_current_authority
+  BEFORE UPDATE ON public.change_set_evidence_receipts
+  FOR EACH ROW EXECUTE FUNCTION public.guard_change_set_signed_evidence_current_authority();
 CREATE TRIGGER change_set_evidence_requests_guard_update
   BEFORE UPDATE ON public.change_set_evidence_requests
   FOR EACH ROW EXECUTE FUNCTION public.guard_change_set_evidence_request_update();
@@ -658,6 +885,9 @@ CREATE TRIGGER change_set_evidence_signing_keys_guard_update
 CREATE TRIGGER change_set_evidence_signing_keys_immutable_delete
   BEFORE DELETE ON public.change_set_evidence_signing_keys
   FOR EACH ROW EXECUTE FUNCTION public.prevent_authorization_receipt_mutation();
+CREATE TRIGGER change_set_evidence_signing_key_bindings_immutable
+  BEFORE UPDATE OR DELETE ON public.change_set_evidence_signing_key_bindings
+  FOR EACH ROW EXECUTE FUNCTION public.prevent_authorization_receipt_mutation();
 CREATE TRIGGER change_set_evidence_issuer_tenant_grants_guard_update
   BEFORE UPDATE ON public.change_set_evidence_issuer_tenant_grants
   FOR EACH ROW EXECUTE FUNCTION public.guard_change_set_evidence_tenant_grant_update();
@@ -667,6 +897,7 @@ CREATE TRIGGER change_set_evidence_issuer_tenant_grants_immutable_delete
 
 REVOKE ALL ON TABLE public.change_set_evidence_issuers FROM PUBLIC;
 REVOKE ALL ON TABLE public.change_set_evidence_signing_keys FROM PUBLIC;
+REVOKE ALL ON TABLE public.change_set_evidence_signing_key_bindings FROM PUBLIC;
 REVOKE ALL ON TABLE public.change_set_evidence_issuer_tenant_grants FROM PUBLIC;
 REVOKE ALL ON TABLE public.change_set_evidence_requests FROM PUBLIC;
 REVOKE ALL ON TABLE public.change_set_command_audit_events FROM PUBLIC;
@@ -677,5 +908,6 @@ REVOKE ALL ON FUNCTION public.guard_change_set_evidence_tenant_grant_update() FR
 REVOKE ALL ON FUNCTION public.guard_change_set_evidence_request_initial() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.enforce_change_set_evidence_request_finalization() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.guard_change_set_signed_evidence_identity() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.guard_change_set_signed_evidence_current_authority() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.guard_change_set_evidence_request_update() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.enforce_change_set_command_audit_chain() FROM PUBLIC;
