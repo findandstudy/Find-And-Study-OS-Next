@@ -109,6 +109,7 @@
     "test:contract-sign": "tsx --test ./scripts/test-contract-sign.ts",
     "test:contract-branding": "tsx --test ./scripts/test-contract-branding.ts",
     "test:object-authz-signed-contract": "tsx --test ./scripts/test-object-authz-signed-contract.ts",
+    "test:integration-database-safety": "tsx --test ./scripts/test-integration-database-safety.ts",
     "test:dashboard-faz3": "tsx --test ./scripts/test-dashboard-faz3.ts",
     "test:service-fee-agent-filter": "tsx --test ./scripts/test-service-fee-agent-filter.ts",
     "test:portal-automation": "tsx --test ./scripts/test-portal-automation.ts",

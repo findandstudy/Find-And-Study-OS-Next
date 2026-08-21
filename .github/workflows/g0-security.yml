@@ -44,6 +44,9 @@ jobs:
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify the package-manager guard
+        run: pnpm run test:package-manager
+
       - name: Validate the migration ledger
         run: node lib/db/validate-migrations.mjs
 
@@ -64,6 +67,7 @@ jobs:
           pnpm --filter @workspace/api-server run test:impersonation-policy
           pnpm --filter @workspace/api-server run test:ai-delivery-safety
           pnpm --filter @workspace/api-server run test:migration-authority
+          pnpm --filter @workspace/api-server run test:integration-database-safety
 
       - name: Run production safety contract tests
         run: |
@@ -75,3 +79,54 @@ jobs:
 
       - name: Detect legacy role-gate inventory drift
         run: pnpm run audit:legacy-role-gates
+
+  windows-portability:
+    name: Windows locked-install and API build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      ALLOW_LIVE_INTEGRATIONS: "false"
+      CI: "true"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5433/fasos_apply_local
+      NODE_ENV: test
+      NO_COLOR: "1"
+
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Activate the repository-pinned pnpm
+        shell: pwsh
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.2 --activate
+          if ((pnpm --version) -ne "10.33.2") { throw "Unexpected pnpm version" }
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify the package-manager guard
+        run: pnpm run test:package-manager
+
+      - name: Validate the migration ledger
+        run: node lib/db/validate-migrations.mjs
+
+      - name: Type-check the workspace
+        run: pnpm run typecheck
+
+      - name: Build the API artifact with Windows native packages
+        run: pnpm --filter @workspace/api-server run build
+
+      - name: Build the portal artifact with Windows native packages
+        run: pnpm --filter @workspace/edcons run build
+
+      - name: Verify integration database targeting remains fail closed
+        run: pnpm --filter @workspace/api-server run test:integration-database-safety

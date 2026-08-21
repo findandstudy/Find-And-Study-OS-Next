@@ -90,3 +90,10 @@ jobs:
           PG_GATE_APP_URL: postgresql://fas_app:fas_app_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
           PG_GATE_MIGRATOR_URL: postgresql://fas_migrator:fas_migrator_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
         run: pnpm --filter @workspace/api-server run test:postgres-control-plane-gate -- verify
+
+      - name: Run signed-contract object authorization integration test
+        env:
+          ALLOW_LIVE_INTEGRATIONS: "false"
+          DATABASE_URL: postgresql://postgres:postgres_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+          OBJECT_AUTHZ_TEST_ALLOW_DATABASE_MUTATION: "1"
+        run: pnpm --filter @workspace/api-server run test:object-authz-signed-contract

@@ -27,19 +27,25 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "crypto";
 import { eq, inArray } from "drizzle-orm";
-import {
+import { assertSafeSignedContractAuthzDatabase } from "./integration-database-safety.js";
+
+assertSafeSignedContractAuthzDatabase();
+
+const databaseModule = await import("@workspace/db");
+const {
   db,
+  pool,
   usersTable,
   agentsTable,
   signedContractsTable,
-} from "@workspace/db";
-import { canAccessGenericObject } from "../src/lib/objectAuthz.js";
-
-// Hard exit after all tests complete — importing the db layer keeps the pool
-// handle open, so node would otherwise hang. Matches the other DB-backed tests.
-after(() => {
-  setImmediate(() => process.exit(process.exitCode ?? 0));
-});
+} = databaseModule;
+let canAccessGenericObject: typeof import("../src/lib/objectAuthz.js").canAccessGenericObject;
+try {
+  ({ canAccessGenericObject } = await import("../src/lib/objectAuthz.js"));
+} catch (error) {
+  await pool.end();
+  throw error;
+}
 
 const tag = `authztest_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
 const pdfUuid = crypto.randomUUID();
@@ -53,27 +59,41 @@ const staleContractUrl = `https://example.test/api/storage/objects/signed-contra
 
 const created = { userIds: [] as number[], agentIds: [] as number[], signedIds: [] as number[] };
 
+// Register cleanup before seeding so a partial fixture is still removed when a
+// later INSERT fails. Close the pool explicitly and let node:test preserve the
+// natural non-zero exit code for assertion or cleanup failures.
+after(async () => {
+  try {
+    await cleanup();
+  } finally {
+    await pool.end();
+  }
+});
+
 async function seed() {
   const [ownerUser] = await db.insert(usersTable).values({
     email: `${tag}_owner@example.test`, role: "agent", firstName: "Owner", lastName: "Agent",
   }).returning({ id: usersTable.id });
+  created.userIds.push(ownerUser.id);
   const [otherUser] = await db.insert(usersTable).values({
     email: `${tag}_other@example.test`, role: "agent", firstName: "Other", lastName: "Agent",
   }).returning({ id: usersTable.id });
+  created.userIds.push(otherUser.id);
   const [adminUser] = await db.insert(usersTable).values({
     email: `${tag}_admin@example.test`, role: "super_admin", firstName: "Admin", lastName: "User",
   }).returning({ id: usersTable.id });
-  created.userIds.push(ownerUser.id, otherUser.id, adminUser.id);
+  created.userIds.push(adminUser.id);
 
   const [ownerAgent] = await db.insert(agentsTable).values({
     firstName: "Owner", lastName: "Agent", userId: ownerUser.id,
     // Intentionally stale: points at a DIFFERENT key than the signed PDF below.
     contractUrl: staleContractUrl,
   }).returning({ id: agentsTable.id });
+  created.agentIds.push(ownerAgent.id);
   const [otherAgent] = await db.insert(agentsTable).values({
     firstName: "Other", lastName: "Agent", userId: otherUser.id,
   }).returning({ id: agentsTable.id });
-  created.agentIds.push(ownerAgent.id, otherAgent.id);
+  created.agentIds.push(otherAgent.id);
 
   const [signed] = await db.insert(signedContractsTable).values({
     signingSessionId: 2_000_000_000 + Math.floor(Math.random() * 1_000_000),
@@ -88,13 +108,30 @@ async function seed() {
 }
 
 async function cleanup() {
-  if (created.signedIds.length) await db.delete(signedContractsTable).where(inArray(signedContractsTable.id, created.signedIds));
-  if (created.agentIds.length) await db.delete(agentsTable).where(inArray(agentsTable.id, created.agentIds));
-  if (created.userIds.length) await db.delete(usersTable).where(inArray(usersTable.id, created.userIds));
+  const errors: unknown[] = [];
+
+  try {
+    if (created.signedIds.length) await db.delete(signedContractsTable).where(inArray(signedContractsTable.id, created.signedIds));
+  } catch (error) {
+    errors.push(error);
+  }
+  try {
+    if (created.agentIds.length) await db.delete(agentsTable).where(inArray(agentsTable.id, created.agentIds));
+  } catch (error) {
+    errors.push(error);
+  }
+  try {
+    if (created.userIds.length) await db.delete(usersTable).where(inArray(usersTable.id, created.userIds));
+  } catch (error) {
+    errors.push(error);
+  }
+
+  if (errors.length) {
+    throw new AggregateError(errors, "signed-contract authz fixture cleanup failed");
+  }
 }
 
 const seeded = await seed();
-after(cleanup);
 
 test("owning agent can download signed PDF via signed_contracts even when agents.contractUrl is stale", async () => {
   // Sanity: the agent's contractUrl really does NOT reference this key.
