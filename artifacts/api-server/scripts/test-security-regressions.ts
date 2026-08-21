@@ -40,6 +40,14 @@ const objectAuthzSource = readFileSync(
   new URL("../src/lib/objectAuthz.ts", import.meta.url),
   "utf8",
 );
+const objectStorageSource = readFileSync(
+  new URL("../src/lib/objectStorage.ts", import.meta.url),
+  "utf8",
+);
+const publicObjectResolverSource = objectStorageSource.slice(
+  objectStorageSource.indexOf("async searchPublicObject"),
+  objectStorageSource.indexOf("// ── downloadObject"),
+);
 const emailVerificationSource = readFileSync(
   new URL("../src/lib/emailVerificationToken.ts", import.meta.url),
   "utf8",
@@ -208,6 +216,18 @@ test("local uploads are owner-bound, fail closed, and bounded before buffering",
   assert.doesNotMatch(storageRouteSource, /processUpload failed, storing original/);
   assert.match(objectAuthzSource, /recordObjectOwner[\s\S]*Promise<boolean>/);
   assert.match(objectAuthzSource, /failed to record object owner:[\s\S]*return false/);
+});
+
+test("local public-object lookup cannot fall through to the private namespace", () => {
+  assert.match(
+    publicObjectResolverSource,
+    /resolveExistingLocalPath\(nodePath\.posix\.join\("public", filePath\)\)/,
+  );
+  assert.doesNotMatch(publicObjectResolverSource, /resolveExistingLocalPath\(filePath\)/);
+  assert.match(objectStorageSource, /writeLocalObjectBuffer[\s\S]*mode: 0o700/);
+  assert.match(objectStorageSource, /writeLocalObjectBuffer[\s\S]*mode: 0o600/);
+  assert.match(storageRouteSource, /writeLocalObjectBuffer\(relPath, body, finalContentType\)/);
+  assert.doesNotMatch(storageRouteSource, /fsPromises\.writeFile\(localPath/);
 });
 
 test("email verification links are random, hashed, expiring, and one-time", () => {

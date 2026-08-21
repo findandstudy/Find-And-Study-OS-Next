@@ -1,10 +1,24 @@
 ---
-name: Local storage driver has no "public/" subfolder
-description: Why outbound senders (e.g. Zernio) must resolve attachment keys via the same public-objects resolver used by the storage route, not by hand-parsing URLs.
+name: Local storage keeps private and public namespaces separate
+description: How trusted attachment readers preserve legacy compatibility without exposing private local objects through the anonymous public-object route.
 ---
 
-With `STORAGE_DRIVER=local`, uploaded files are written flat as `localDir/<prefix>/<objectId>` — there is no `public/` subfolder anywhere in the upload path. `normalizeObjectEntityPath` returns a virtual `/objects/<relPath>` form intended only for the authenticated `/storage/objects/*` route, not for public delivery URLs.
+With `STORAGE_DRIVER=local`, authenticated uploads are private and are written as
+`STORAGE_LOCAL_DIR/<prefix>/<objectId>`. The virtual `/objects/<relPath>` form is
+for authenticated, object-authorized reads through `getObjectEntityFile()`.
 
-**Why:** A caller that builds/derives a public-objects key by naively appending a URL path (or by copying the `/objects/...` virtual path) ends up with keys like `public-objects//objects/inbox/<uuid>` — double slashes and a stray `objects/` prefix — which don't match the real on-disk layout (`inbox/<uuid>`) and fail to resolve, silently breaking outbound delivery of attachments.
+The anonymous `/storage/public-objects/*` route is deliberately different. Its
+`searchPublicObject()` resolver may read only the physical
+`STORAGE_LOCAL_DIR/public/<relPath>` namespace. It must never try the bare
+storage-root path first: a caller who knows a private object key would otherwise
+bypass object authorization.
 
-**How to apply:** Any code that needs to fetch a stored file by its public URL/key (outbound senders, integrations, etc.) must normalize the key (strip leading slashes, strip a leading `objects/` segment, collapse `//`) and then resolve it through the shared `searchPublicObject` resolver in `objectStorage.ts` (which tries the bare path first, with a legacy `public/`-prefixed fallback) — never hand-roll key parsing per caller.
+Legacy inbox URLs can contain double slashes or a stray leading `objects/`
+segment. Trusted server-side callers should normalize those URLs with
+`resolveLocalInboxStorageKey()`, then try
+`getObjectEntityFile('/objects/' + key)` first. They may fall back to
+`searchPublicObject(key)` only for historical objects that were genuinely
+stored in a configured public namespace (including GCS public search paths).
+
+Do not build storage paths by hand, expose a private key through the public
+route, or restore the former bare-path fallback in `searchPublicObject()`.

@@ -1,6 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
-import * as fsPromises from "node:fs/promises";
 import * as nodePath from "node:path";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { requireAuth } from "../lib/auth";
@@ -195,20 +194,6 @@ router.put("/storage/local-upload/:encoded", requireAuth, async (req: Request, r
     return;
   }
 
-  const localDir = process.env.STORAGE_LOCAL_DIR ?? "";
-  if (!localDir) {
-    res.status(500).json({ error: "STORAGE_LOCAL_DIR not configured" });
-    return;
-  }
-
-  const localPath = nodePath.join(localDir, relPath);
-
-  // Guard against path traversal after join
-  if (!localPath.startsWith(localDir + nodePath.sep) && localPath !== localDir) {
-    res.status(400).json({ error: "Invalid path" });
-    return;
-  }
-
   // The upload URL is only an encoded storage path, not a secret. Require the
   // authenticated caller to be the user who requested that path so leaked or
   // guessed URLs cannot overwrite another user's private object.
@@ -226,8 +211,6 @@ router.put("/storage/local-upload/:encoded", requireAuth, async (req: Request, r
   }
 
   try {
-    await fsPromises.mkdir(nodePath.dirname(localPath), { recursive: true });
-
     const chunks: Buffer[] = [];
     let receivedBytes = 0;
     for await (const chunk of req) {
@@ -279,8 +262,7 @@ router.put("/storage/local-upload/:encoded", requireAuth, async (req: Request, r
       }
     }
 
-    await fsPromises.writeFile(localPath, body);
-    await fsPromises.writeFile(`${localPath}.ct`, finalContentType);
+    await objectStorageService.writeLocalObjectBuffer(relPath, body, finalContentType);
 
     res.status(200).json({ ok: true });
   } catch (error) {

@@ -70,16 +70,22 @@ function isWithinRoot(root: string, candidate: string): boolean {
   return relative === "" || (!relative.startsWith(`..${nodePath.sep}`) && relative !== ".." && !nodePath.isAbsolute(relative));
 }
 
-async function resolveExistingLocalPath(relativePath: string): Promise<string> {
+function assertSafeLocalRelativePath(relativePath: string): string[] {
+  const parts = relativePath.split("/");
   if (
     !relativePath ||
     relativePath.includes("\0") ||
     relativePath.includes("\\") ||
     nodePath.isAbsolute(relativePath) ||
-    relativePath.split("/").some((part) => part === "" || part === "." || part === "..")
+    parts.some((part) => part === "" || part === "." || part === "..")
   ) {
     throw new ObjectNotFoundError();
   }
+  return parts;
+}
+
+async function resolveExistingLocalPath(relativePath: string): Promise<string> {
+  assertSafeLocalRelativePath(relativePath);
   const root = await fsPromises.realpath(getLocalStorageDir());
   const candidate = nodePath.resolve(root, relativePath);
   if (!isWithinRoot(root, candidate)) throw new ObjectNotFoundError();
@@ -268,22 +274,14 @@ export class ObjectStorageService {
 
   async searchPublicObject(filePath: string): Promise<ObjectFileHandle | null> {
     if (isLocalDriver()) {
-      // Local-driver uploads (getObjectEntityUploadURL / local-upload route)
-      // are written flat under `${STORAGE_LOCAL_DIR}/${prefix}/${objectId}` —
-      // there is no separate "public" subdirectory anywhere in this app's
-      // upload flows (checked: no caller ever passes a "public/..." prefix).
-      // Try the bare path first since that's how every local-driver upload is
-      // actually stored; keep the legacy "public/" join as a fallback in case
-      // some deployment did place files there.
+      // The unauthenticated public-object route may resolve only the physical
+      // public namespace. Private local objects live directly below the
+      // storage root and must be opened through getObjectEntityFile(), whose
+      // callers apply authentication and object-level authorization.
       try {
-        const bareLocalPath = await resolveExistingLocalPath(filePath);
-        return new LocalStorageFile(bareLocalPath, filePath);
-      } catch {
-        // fall through to legacy "public/" location below
-      }
-      try {
+        assertSafeLocalRelativePath(filePath);
         const publicLocalPath = await resolveExistingLocalPath(nodePath.posix.join("public", filePath));
-        return new LocalStorageFile(publicLocalPath, nodePath.join("public", filePath));
+        return new LocalStorageFile(publicLocalPath, nodePath.posix.join("public", filePath));
       } catch {
         return null;
       }
@@ -406,6 +404,53 @@ export class ObjectStorageService {
 
   // ── uploadBuffer ──────────────────────────────────────────────────────────
 
+  async writeLocalObjectBuffer(
+    relativePath: string,
+    buffer: Buffer,
+    contentType: string,
+  ): Promise<void> {
+    if (!isLocalDriver()) throw new ObjectNotFoundError();
+
+    const parts = assertSafeLocalRelativePath(relativePath);
+    const configuredRoot = nodePath.resolve(getLocalStorageDir());
+    await fsPromises.mkdir(configuredRoot, { recursive: true, mode: 0o700 });
+    const root = await fsPromises.realpath(configuredRoot);
+    await fsPromises.chmod(root, 0o700);
+
+    let parent = root;
+    for (const directoryPart of parts.slice(0, -1)) {
+      const next = nodePath.join(parent, directoryPart);
+      if (!isWithinRoot(root, next)) throw new ObjectNotFoundError();
+      try {
+        const info = await fsPromises.lstat(next);
+        if (!info.isDirectory() || info.isSymbolicLink()) throw new ObjectNotFoundError();
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        await fsPromises.mkdir(next, { mode: 0o700 });
+      }
+      const realDirectory = await fsPromises.realpath(next);
+      if (!isWithinRoot(root, realDirectory)) throw new ObjectNotFoundError();
+      await fsPromises.chmod(realDirectory, 0o700);
+      parent = realDirectory;
+    }
+
+    const localPath = nodePath.join(parent, parts.at(-1)!);
+    if (!isWithinRoot(root, localPath)) throw new ObjectNotFoundError();
+    for (const candidate of [localPath, `${localPath}.ct`]) {
+      try {
+        const info = await fsPromises.lstat(candidate);
+        if (!info.isFile() || info.isSymbolicLink()) throw new ObjectNotFoundError();
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+
+    await fsPromises.writeFile(localPath, buffer, { mode: 0o600 });
+    await fsPromises.chmod(localPath, 0o600);
+    await fsPromises.writeFile(`${localPath}.ct`, contentType, { mode: 0o600 });
+    await fsPromises.chmod(`${localPath}.ct`, 0o600);
+  }
+
   async uploadBuffer(opts: {
     subdir: string;
     filename: string;
@@ -417,12 +462,8 @@ export class ObjectStorageService {
     const filename = opts.filename.replace(/[^A-Za-z0-9._-]/g, "_");
 
     if (isLocalDriver()) {
-      const localDir = getLocalStorageDir();
       const relPath = `${subdir}/${objectId}-${filename}`;
-      const localPath = nodePath.join(localDir, relPath);
-      await fsPromises.mkdir(nodePath.dirname(localPath), { recursive: true });
-      await fsPromises.writeFile(localPath, opts.buffer);
-      await fsPromises.writeFile(`${localPath}.ct`, opts.contentType);
+      await this.writeLocalObjectBuffer(relPath, opts.buffer, opts.contentType);
       return `/objects/${relPath}`;
     }
 
@@ -528,14 +569,7 @@ export class ObjectStorageService {
 
     if (isLocalDriver()) {
       const relPath = objectPath.slice("/objects/".length);
-      if (relPath.includes("..") || relPath.includes("\\")) {
-        throw new ObjectNotFoundError();
-      }
-      const localDir = getLocalStorageDir();
-      const localPath = nodePath.join(localDir, relPath);
-      await fsPromises.mkdir(nodePath.dirname(localPath), { recursive: true });
-      await fsPromises.writeFile(localPath, buffer);
-      await fsPromises.writeFile(`${localPath}.ct`, contentType);
+      await this.writeLocalObjectBuffer(relPath, buffer, contentType);
       return;
     }
 

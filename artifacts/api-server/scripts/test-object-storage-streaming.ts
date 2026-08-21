@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer, get as httpGet, type Server } from "node:http";
 import { Readable } from "node:stream";
-import { mkdtemp, rm, symlink, truncate, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { after, before } from "node:test";
@@ -40,6 +40,8 @@ before(async () => {
   await writeFile(path.join(directory, "empty.txt"), "");
   await writeFile(path.join(directory, "large.bin"), "");
   await truncate(path.join(directory, "large.bin"), largeSize);
+  await mkdir(path.join(directory, "public", "site"), { recursive: true });
+  await writeFile(path.join(directory, "public", "site", "manifest.txt"), "public fixture");
 
   server = createServer(async (req, res) => {
     try {
@@ -129,16 +131,56 @@ test("empty, missing, PDF, DOCX and image responses keep their contracts", async
   assert.equal((await fetch(`${baseUrl}/image.png`)).headers.get("content-type"), "image/png");
 });
 
-test("path traversal and symlink escape are rejected", async () => {
+test("path traversal is rejected", async () => {
   await writeFile(path.join(directory, "..outside.txt"), "safe but invalid path name");
   assert.equal((await fetch(`${baseUrl}/..%2Foutside.txt`)).status, 404);
+});
+
+test("symlink escape is rejected", async (context) => {
   const outside = path.join(tmpdir(), `fasos-outside-${process.pid}.txt`);
   await writeFile(outside, "outside");
-  await symlink(outside, path.join(directory, "escape.txt"));
   try {
+    try {
+      await symlink(outside, path.join(directory, "escape.txt"));
+    } catch (error) {
+      if (process.platform === "win32" && (error as NodeJS.ErrnoException).code === "EPERM") {
+        context.skip("Windows developer mode or symlink privilege is required");
+        return;
+      }
+      throw error;
+    }
     assert.equal((await fetch(`${baseUrl}/escape.txt`)).status, 404);
   } finally {
     await rm(outside, { force: true });
+  }
+});
+
+test("public lookup cannot resolve private local objects", async () => {
+  assert.equal(await storage.searchPublicObject("small.pdf"), null);
+
+  const publicFile = await storage.searchPublicObject("site/manifest.txt");
+  assert(publicFile);
+  const [publicBytes] = await publicFile.download();
+  assert.equal(publicBytes.toString(), "public fixture");
+
+  const privateFile = await storage.getObjectEntityFile("/objects/small.pdf");
+  const [privateBytes] = await privateFile.download();
+  assert.equal(privateBytes.toString(), "%PDF-stream-fixture");
+});
+
+test("local private writes use hardened paths and permissions", async () => {
+  await storage.writeLocalObjectBuffer("secure/nested/private.txt", Buffer.from("secret"), "text/plain");
+  const privatePath = path.join(directory, "secure", "nested", "private.txt");
+  const writtenPrivateFile = await storage.getObjectEntityFile("/objects/secure/nested/private.txt");
+  assert(writtenPrivateFile instanceof LocalStorageFile);
+  assert.equal((await writtenPrivateFile.download())[0].toString(), "secret");
+  assert.equal(await storage.searchPublicObject("secure/nested/private.txt"), null);
+
+  if (process.platform !== "win32") {
+    assert.equal((await stat(path.join(directory, "secure"))).mode & 0o777, 0o700);
+    assert.equal((await stat(path.join(directory, "secure", "nested"))).mode & 0o777, 0o700);
+    assert.equal((await stat(privatePath)).mode & 0o777, 0o600);
+    assert.equal((await stat(`${privatePath}.ct`)).mode & 0o777, 0o600);
   }
 });
 

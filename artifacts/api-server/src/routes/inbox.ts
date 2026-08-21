@@ -735,7 +735,9 @@ router.get(
         configuredInboxMediaHosts([req.hostname]),
       );
       if (localKey) {
-        const file = await inboxMediaStorage.searchPublicObject(localKey);
+        const file = await inboxMediaStorage
+          .getObjectEntityFile(`/objects/${localKey}`)
+          .catch(() => inboxMediaStorage.searchPublicObject(localKey));
         if (!file) {
           res.status(404).json({ error: "File not found" });
           return;

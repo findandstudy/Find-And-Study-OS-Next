@@ -546,7 +546,10 @@ async function downloadAttachmentBytes(
     );
     if (filePath) {
       console.log("[ZERNIO] resolving attachment storage key:", { filePath });
-      const file = await getStorage().searchPublicObject(filePath);
+      const storage = getStorage();
+      const file = await storage
+        .getObjectEntityFile(`/objects/${filePath}`)
+        .catch(() => storage.searchPublicObject(filePath));
       if (!file) {
         console.warn("[ZERNIO] attachment object not found in storage:", filePath);
         return null;
