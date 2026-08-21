@@ -10,9 +10,10 @@ import {
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { validateMigrationLedger } from "../../../lib/db/validate-migrations.mjs";
 
-const root = path.resolve(new URL("../../..", import.meta.url).pathname);
+const root = fileURLToPath(new URL("../../..", import.meta.url));
 const indexSource = readFileSync(
   path.join(root, "artifacts/api-server/src/index.ts"),
   "utf8",
@@ -203,7 +204,14 @@ test("legacy pre-migration cleanup is explicit and local-only", () => {
   }
 });
 
-test("db restore helper rejects unclassified and production-like targets before commands", () => {
+test("db restore helper rejects unclassified and production-like targets before commands", (t) => {
+  const bashProbe = spawnSync("bash", ["-c", "exit 0"], {
+    encoding: "utf8",
+  });
+  if (bashProbe.error || bashProbe.status !== 0) {
+    t.skip("a working bash runtime is unavailable on this host");
+    return;
+  }
   const script = path.join(root, "scripts/db-migrate.sh");
   const unclassified = spawnSync("bash", [script], {
     cwd: root,

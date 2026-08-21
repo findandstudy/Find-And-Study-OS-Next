@@ -60,3 +60,4 @@ export * from "./knowledgeSources";
 export * from "./educationRecords";
 export * from "./studentEducationRecords";
 export * from "./operationalMetadata";
+export * from "./authorization";
