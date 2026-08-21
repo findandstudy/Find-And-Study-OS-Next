@@ -96,6 +96,14 @@ const frontendAuthSource = readFileSync(
   new URL("../../edcons/src/hooks/use-auth.ts", import.meta.url),
   "utf8",
 );
+const sessionSource = readFileSync(
+  new URL("../src/lib/replitAuth.ts", import.meta.url),
+  "utf8",
+);
+const sessionLifetimeSource = readFileSync(
+  new URL("../src/lib/sessionLifetime.ts", import.meta.url),
+  "utf8",
+);
 const dormBookingFollowupSource = readFileSync(
   new URL("../src/lib/inbox/dormBookingFollowupWorker.ts", import.meta.url),
   "utf8",
@@ -345,6 +353,14 @@ test("permission-backed decisions use stored roles and only Super Admin bypasses
   assert.match(authMiddlewareSource, /ADMINISH_ROLES = new Set\(\["super_admin"\]\)/);
   assert.match(frontendAuthSource, /if \(role === "super_admin"\) return true/);
   assert.doesNotMatch(frontendAuthSource, /role === "super_admin" \|\| role === "admin"/);
+});
+
+test("session sliding is capped by a server-issued absolute lifetime", () => {
+  assert.match(sessionLifetimeSource, /ABSOLUTE_SESSION_TTL = 24 \* 60 \* 60 \* 1000/);
+  assert.match(sessionSource, /storedData: SessionData = \{ \.\.\.data, issued_at: issuedAt \}/);
+  assert.match(sessionSource, /isAbsoluteSessionExpired\(issuedAt\)/);
+  assert.match(sessionSource, /getBoundedSessionExpiry\(issuedAt, IDLE_TIMEOUT\)/);
+  assert.match(authMiddlewareSource, /getRemainingSessionCookieTtl/);
 });
 
 test("email verification links are random, hashed, expiring, and one-time", () => {

@@ -59,3 +59,13 @@ target control plane must add:
 
 Until those controls exist, the affected writer files remain quarantined in
 the tenant writer registry.
+
+## Session boundary added alongside the control plane
+
+Privileged control-plane work must not rely on indefinitely sliding sessions.
+Sessions now carry a server-issued timestamp and expire after at most 24 hours,
+even if the 8-hour idle window keeps sliding. Pre-existing sessions receive a
+one-time issued timestamp on their first authenticated observation, and the
+browser cookie is capped to the remaining hard lifetime. This is not MFA,
+step-up, JIT, or maker-checker evidence; those remain required before high-risk
+ChangeSet approval or publish.

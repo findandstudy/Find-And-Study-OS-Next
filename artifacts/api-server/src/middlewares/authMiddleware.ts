@@ -14,6 +14,7 @@ import { getSessionCookieOptions } from "../lib/cookieOptions";
 import { extractBearerToken, lookupApiToken } from "../lib/apiTokenAuth";
 import { applyPermissionOverrides } from "../lib/permissions";
 import { verifyStudentPhotoSignature } from "@workspace/portal-adapters";
+import { getRemainingSessionCookieTtl, resolveSessionIssuedAt } from "../lib/sessionLifetime";
 
 declare global {
   namespace Express {
@@ -248,14 +249,18 @@ export async function authMiddleware(
   // The helper throttles PostgreSQL writes to once per session per five
   // minutes while user status/role remains checked on every request.
   setImmediate(() => {
-    touchSession(sid).catch(() => {});
+    touchSession(sid, resolveSessionIssuedAt(session.issued_at)).catch(() => {});
   });
 
   // Slide the BROWSER cookie expiry forward to match the server-side session.
   // Without this, the cookie's maxAge is fixed at login time (30 min) and
   // disappears even though the user is actively using the app — leading to
   // unexpected 401 "Authentication required" errors on the next mutation.
-  res.cookie(SESSION_COOKIE, sid, getSessionCookieOptions(req, SESSION_TTL));
+  const remainingCookieTtl = getRemainingSessionCookieTtl(
+    resolveSessionIssuedAt(session.issued_at),
+    SESSION_TTL,
+  );
+  res.cookie(SESSION_COOKIE, sid, getSessionCookieOptions(req, remainingCookieTtl));
 
   next();
 }
