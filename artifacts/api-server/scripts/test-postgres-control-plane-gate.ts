@@ -241,7 +241,7 @@ async function insertChangeSet(
       '{"flagKey":"journey.beta","enabled":false}'::jsonb,
       '{"flagKey":"journey.beta","enabled":true}'::jsonb,
       '>=1', 'INTERNAL', '{"changed":["enabled"]}'::jsonb,
-      $7, $7, '{"mode":"all"}'::jsonb, '{}'::jsonb,
+      $7, $10, '{"mode":"all"}'::jsonb, '{}'::jsonb,
       '[{"metric":"error_rate","op":"gt","value":0}]'::jsonb,
       '{"mode":"restore_base"}'::jsonb
     )`,
@@ -255,6 +255,7 @@ async function insertChangeSet(
       ID.policyA,
       organizationScope ? "ORGANIZATION" : "TENANT",
       organizationScope ? ID.organizationA : null,
+      ID.policyA,
     ],
   );
 }
