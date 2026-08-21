@@ -280,6 +280,91 @@ export const changeSetsTable = pgTable(
   ],
 ).enableRLS();
 
+export const r1ConfigurationSnapshotsTable = pgTable(
+  "r1_configuration_snapshots",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenantsTable.id, { onDelete: "restrict" }),
+    changeType: text("change_type").notNull(),
+    configurationKey: text("configuration_key").notNull(),
+    targetScopeType: text("target_scope_type").notNull(),
+    targetOrganizationId: uuid("target_organization_id"),
+    targetLegacyBranchId: integer("target_legacy_branch_id"),
+    version: bigint("version", { mode: "number" }).notNull(),
+    config: jsonb("config").$type<Record<string, unknown>>().notNull(),
+    configHash: text("config_hash").notNull(),
+    sourceChangeSetId: uuid("source_change_set_id"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("r1_configuration_snapshots_tenant_id_id_uq").on(
+      table.tenantId,
+      table.id,
+    ),
+    uniqueIndex("r1_configuration_snapshots_target_uidx").on(
+      table.tenantId,
+      table.changeType,
+      table.configurationKey,
+      table.targetScopeType,
+      sql`coalesce(${table.targetOrganizationId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+      sql`coalesce(${table.targetLegacyBranchId}, -1)`,
+    ),
+    foreignKey({
+      columns: [table.tenantId, table.targetOrganizationId],
+      foreignColumns: [organizationsTable.tenantId, organizationsTable.id],
+      name: "r1_configuration_snapshots_tenant_organization_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [
+        table.tenantId,
+        table.targetOrganizationId,
+        table.targetLegacyBranchId,
+      ],
+      foreignColumns: [
+        tenantOrganizationLegacyBranchesTable.tenantId,
+        tenantOrganizationLegacyBranchesTable.organizationId,
+        tenantOrganizationLegacyBranchesTable.legacyBranchId,
+      ],
+      name: "r1_configuration_snapshots_tenant_organization_branch_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.sourceChangeSetId],
+      foreignColumns: [changeSetsTable.tenantId, changeSetsTable.id],
+      name: "r1_configuration_snapshots_source_change_set_fk",
+    }).onDelete("restrict"),
+    check("r1_configuration_snapshots_id_uuidv7_chk", uuidV7(table.id)),
+    check(
+      "r1_configuration_snapshots_type_chk",
+      sql`${table.changeType} IN ('BRAND', 'LOCALE', 'NOTIFICATION_TEMPLATE', 'FEATURE_FLAG', 'MAINTENANCE_BANNER')`,
+    ),
+    check(
+      "r1_configuration_snapshots_key_chk",
+      sql`${table.configurationKey} ~ '^[a-z][a-z0-9_.:-]{0,127}$'`,
+    ),
+    check(
+      "r1_configuration_snapshots_scope_chk",
+      sql`(
+        (${table.targetScopeType} = 'TENANT' AND ${table.targetOrganizationId} IS NULL AND ${table.targetLegacyBranchId} IS NULL)
+        OR (${table.targetScopeType} = 'ORGANIZATION' AND ${table.targetOrganizationId} IS NOT NULL AND ${table.targetLegacyBranchId} IS NULL)
+        OR (${table.targetScopeType} = 'LEGACY_BRANCH' AND ${table.targetOrganizationId} IS NOT NULL AND ${table.targetLegacyBranchId} IS NOT NULL)
+      )`,
+    ),
+    check("r1_configuration_snapshots_version_chk", sql`${table.version} >= 0`),
+    check(
+      "r1_configuration_snapshots_config_chk",
+      sql`jsonb_typeof(${table.config}) = 'object'`,
+    ),
+    check(
+      "r1_configuration_snapshots_hash_chk",
+      sql`${table.configHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+  ],
+).enableRLS();
+
 export const changeSetApprovalsTable = pgTable(
   "change_set_approvals",
   {

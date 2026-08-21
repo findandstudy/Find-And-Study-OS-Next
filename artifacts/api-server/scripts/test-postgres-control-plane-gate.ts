@@ -48,6 +48,10 @@ assert.notEqual(migratorUrl, appUrl);
 const databaseName = adminTarget.pathname.slice(1);
 const migratorRole = "fas_migrator";
 const appRole = "fas_app";
+const commandOwnerRole = "fas_cp_owner";
+const commandExecutorRole = "fas_cp_executor";
+const evidenceOwnerRole = "fas_evidence_owner";
+const evidenceIssuerRole = "fas_evidence_issuer";
 
 async function withClient<T>(
   url: string,
@@ -91,6 +95,16 @@ async function setup() {
       CREATE ROLE ${appRole}
         LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS
         PASSWORD 'fas_app_it_2026';
+      CREATE ROLE ${commandOwnerRole}
+        NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+      CREATE ROLE ${commandExecutorRole}
+        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS
+        PASSWORD 'fas_cp_executor_it_2026';
+      CREATE ROLE ${evidenceOwnerRole}
+        NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+      CREATE ROLE ${evidenceIssuerRole}
+        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS
+        PASSWORD 'fas_evidence_issuer_it_2026';
       ALTER DATABASE ${databaseName} OWNER TO ${migratorRole};
       REVOKE TEMPORARY ON DATABASE ${databaseName} FROM PUBLIC;
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
@@ -100,6 +114,11 @@ async function setup() {
       ALTER ROLE ${appRole} SET statement_timeout = '15s';
       ALTER ROLE ${appRole} SET lock_timeout = '5s';
       ALTER ROLE ${appRole} SET idle_in_transaction_session_timeout = '15s';
+      ALTER ROLE ${commandExecutorRole} SET statement_timeout = '15s';
+      ALTER ROLE ${commandExecutorRole} SET lock_timeout = '5s';
+      ALTER ROLE ${commandExecutorRole} SET idle_in_transaction_session_timeout = '15s';
+      ALTER ROLE ${evidenceIssuerRole} SET statement_timeout = '15s';
+      ALTER ROLE ${evidenceIssuerRole} SET lock_timeout = '5s';
     `);
   });
   console.log("[postgres-gate] disposable authority split prepared");
@@ -167,6 +186,7 @@ const TENANT_OWNED_TABLES = [
   "access_assignments",
   "access_decision_receipts",
   "tenant_organization_legacy_branches",
+  "r1_configuration_snapshots",
   "change_sets",
   "change_set_approvals",
   "change_set_transition_receipts",
@@ -612,7 +632,7 @@ async function verifyAtomicDdlRollback(migrator: pg.Client) {
         "SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations",
       )
     ).rows[0].count,
-    59,
+    60,
   );
 }
 
@@ -1558,7 +1578,7 @@ async function verify() {
     const migrationCount = await migrator.query(
       "SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations",
     );
-    assert.equal(migrationCount.rows[0].count, 59);
+    assert.equal(migrationCount.rows[0].count, 60);
     await verifyAtomicDdlRollback(migrator);
     await migrator.query(
       `INSERT INTO public.branches (id, name) VALUES
