@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -156,6 +157,7 @@ function UserSortHeader({ label, sortKey, currentSort, onSort }: {
 }
 
 function UsersTab() {
+  const { user: currentUser } = useAuth(true);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [sort, setSort] = useState<{ key: UserSortKey; dir: SortDir }>({ key: "user", dir: "asc" });
@@ -410,16 +412,17 @@ function UsersTab() {
     setSaving(true);
     try {
       const { phoneCode, phone, avatarUrl, branchId, ...rest } = editForm;
+      const payload: Record<string, unknown> = {
+        ...rest,
+        branchId: requiresDirectBranch(editForm.role) ? Number(branchId) : null,
+        phone: phone ? `${phoneCode}${phone}` : "",
+        avatarUrl: avatarUrl || null,
+      };
+      if (currentUser?.role === "super_admin") payload.permissionOverrides = editOverrides;
       await customFetch(`/api/users/${editUser.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...rest,
-          branchId: requiresDirectBranch(editForm.role) ? Number(branchId) : null,
-          phone: phone ? `${phoneCode}${phone}` : "",
-          avatarUrl: avatarUrl || null,
-          permissionOverrides: editOverrides,
-        }),
+        body: JSON.stringify(payload),
       });
       toast({ title: "User updated successfully" });
       setEditOpen(false);
@@ -432,10 +435,18 @@ function UsersTab() {
     }
   }
 
+  const currentRole = currentUser?.role ?? "";
+  const roleRank: Record<string, number> = { manager: 100, admin: 200, super_admin: 300 };
+  const branchStaffRoles = new Set(["manager", "staff", "consultant", "editor", "accountant", "pending"]);
   const availableRoles = (roles.length > 0
     ? roles.map(r => ({ value: r.name, label: r.displayName }))
     : Object.keys(ROLE_LABEL_KEYS).map(k => ({ value: k, label: t(ROLE_LABEL_KEYS[k]) }))
-  ).filter(r => r.value !== "student");
+  ).filter((r) => {
+    if (["student", "agent", "sub_agent", "agent_staff"].includes(r.value)) return false;
+    if (currentRole === "super_admin") return true;
+    if (!branchStaffRoles.has(r.value)) return false;
+    return (roleRank[r.value] ?? 0) < (roleRank[currentRole] ?? 0);
+  });
 
   return (
     <div className="space-y-6">
@@ -864,7 +875,7 @@ function UsersTab() {
                 </button>
               </div>
             </div>
-            <div className="space-y-2 pt-2 border-t">
+            {currentRole === "super_admin" && <div className="space-y-2 pt-2 border-t">
               <Label>Permission Overrides</Label>
               <p className="text-xs text-muted-foreground">Override this user's role permissions. "Inherit" uses the role default.</p>
               <div className="space-y-1.5">
@@ -901,7 +912,7 @@ function UsersTab() {
                   );
                 })}
               </div>
-            </div>
+            </div>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setEditOpen(false); setEditUser(null); }}>Cancel</Button>
@@ -1329,6 +1340,7 @@ function RolesTab() {
 
 export default function AdminUsers() {
   const { t } = useI18n();
+  const { user } = useAuth(true);
   return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
@@ -1341,18 +1353,18 @@ export default function AdminUsers() {
               <Users className="w-4 h-4" />
               Users
             </TabsTrigger>
-            <TabsTrigger value="roles" className="gap-2 px-4">
+            {user?.role === "super_admin" && <TabsTrigger value="roles" className="gap-2 px-4">
               <Shield className="w-4 h-4" />
               Roles & Permissions
-            </TabsTrigger>
+            </TabsTrigger>}
           </TabsList>
 
           <TabsContent value="users">
             <UsersTab />
           </TabsContent>
-          <TabsContent value="roles">
+          {user?.role === "super_admin" && <TabsContent value="roles">
             <RolesTab />
-          </TabsContent>
+          </TabsContent>}
         </Tabs>
       </div>
   );

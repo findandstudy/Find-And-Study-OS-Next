@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { db, branchesTable, agentBranchesTable, agentsTable, usersTable } from "@workspace/db";
 import { eq, isNull, and, sql, inArray, getTableColumns } from "drizzle-orm";
 import { z } from "zod";
-import { requireAuth, requireRole } from "../lib/auth";
+import { requireAuth, requireRole, logAudit } from "../lib/auth";
 import { validate, getValidated } from "../middlewares/validate";
 import { STAFF_ROLES } from "../lib/roles";
 import { getVisibleBranchIds } from "../lib/branchScope";
@@ -102,6 +102,9 @@ router.post("/branches", requireAuth, requireRole("super_admin"), validate({ bod
       logoUrl: logoUrl || null,
       notes: notes || null,
     }).returning();
+    await logAudit(req.user!.id, "platform_config.branch.create", "branch", branch.id, {
+      name: branch.name,
+    }, req.ip);
     res.status(201).json(branch);
   } catch (err: any) {
     if (err?.code === "23505") {
@@ -129,6 +132,7 @@ router.patch("/branches/:id", requireAuth, requireRole("super_admin"), validate(
   try {
     const [branch] = await db.update(branchesTable).set(updates).where(eq(branchesTable.id, id)).returning();
     if (!branch) { res.status(404).json({ error: "Branch not found" }); return; }
+    await logAudit(req.user!.id, "platform_config.branch.update", "branch", id, updates, req.ip);
     res.json(branch);
   } catch (err: any) {
     if (err?.code === "23505") {
@@ -144,6 +148,7 @@ router.post("/branches/:id/archive", requireAuth, requireRole("super_admin"), as
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const [branch] = await db.update(branchesTable).set({ archivedAt: new Date() }).where(eq(branchesTable.id, id)).returning();
   if (!branch) { res.status(404).json({ error: "Branch not found" }); return; }
+  await logAudit(req.user!.id, "platform_config.branch.archive", "branch", id, {}, req.ip);
   res.json(branch);
 });
 
@@ -152,6 +157,7 @@ router.post("/branches/:id/unarchive", requireAuth, requireRole("super_admin"), 
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const [branch] = await db.update(branchesTable).set({ archivedAt: null }).where(eq(branchesTable.id, id)).returning();
   if (!branch) { res.status(404).json({ error: "Branch not found" }); return; }
+  await logAudit(req.user!.id, "platform_config.branch.unarchive", "branch", id, {}, req.ip);
   res.json(branch);
 });
 

@@ -1,8 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { requireAuth, requireRole } from "../lib/auth";
-import { MANAGER_ROLES } from "../lib/roles";
+import { requireAuth, requireRole, logAudit } from "../lib/auth";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { normalizeYears, invalidateSeasonCache } from "../lib/season";
 import { invalidateSuppressAutomationCache } from "../lib/notificationDispatcher";
@@ -50,8 +49,7 @@ const SETTINGS_PATCH_FIELDS = [
   "dateFormat",
 ];
 
-const CREDENTIAL_FIELDS = ["smtpPassword", "whatsappToken"];
-const SUPER_ADMIN_ONLY_FIELDS = ["customHeadScript", "customBodyEndScript", "liveChatScript", "featureFlags", "offerExpiryWarningDays", "contractExpiryReminderDays"];
+const CREDENTIAL_FIELDS = ["smtpPassword", "whatsappToken", "n8nWebhookUrl"];
 
 router.get("/settings/branding", async (req, res): Promise<void> => {
   const [settings] = await db.select({
@@ -94,13 +92,15 @@ router.get("/settings/branding", async (req, res): Promise<void> => {
 router.get("/settings", requireAuth, async (req, res): Promise<void> => {
   const [settings] = await db.select().from(settingsTable);
   if (!settings) {
-    const [created] = await db.insert(settingsTable).values({
+    // Read paths must never bootstrap mutable platform configuration. The
+    // first explicit Super Admin PATCH owns creation and its audit receipt.
+    res.json({
       defaultLanguage: "en",
       supportedLanguages: "en,tr,ar,fr,ru",
       whatsappEnabled: false,
       metaLeadEnabled: false,
-    }).returning();
-    res.json(created);
+      dateFormat: "DD.MM.YYYY",
+    });
     return;
   }
   const safe: Record<string, any> = { ...settings };
@@ -110,12 +110,10 @@ router.get("/settings", requireAuth, async (req, res): Promise<void> => {
   res.json(safe);
 });
 
-router.patch("/settings", requireAuth, requireRole(...MANAGER_ROLES), async (req, res): Promise<void> => {
-  const userRole = (req as any).user?.role || "";
+router.patch("/settings", requireAuth, requireRole("super_admin"), async (req, res): Promise<void> => {
   const updates: Record<string, unknown> = {};
   for (const key of SETTINGS_PATCH_FIELDS) {
     if (req.body[key] !== undefined) {
-      if (SUPER_ADMIN_ONLY_FIELDS.includes(key) && userRole !== "super_admin") continue;
       updates[key] = req.body[key];
     }
   }
@@ -155,6 +153,9 @@ router.patch("/settings", requireAuth, requireRole(...MANAGER_ROLES), async (req
     const [u] = await db.update(settingsTable).set(updates).where(eq(settingsTable.id, existing.id)).returning();
     updated = u;
   }
+  await logAudit(req.user!.id, "platform_config.settings.update", "settings", updated.id, {
+    changedFields: Object.keys(updates),
+  }, req.ip);
   const safe: Record<string, any> = { ...updated };
   for (const f of CREDENTIAL_FIELDS) {
     delete safe[f];
@@ -267,7 +268,7 @@ router.post("/settings/admin/wipe-crm", requireAuth, requireRole("super_admin"),
   }
 });
 
-router.post("/settings/admin/backfill-assignments", requireAuth, requireRole("super_admin", "admin", "manager"), async (req, res): Promise<void> => {
+router.post("/settings/admin/backfill-assignments", requireAuth, requireRole("super_admin"), async (req, res): Promise<void> => {
   try {
     const { backfillNullAssignments } = await import("../lib/leadAssignment");
     const result = await backfillNullAssignments(req.user!.id, req.ip);

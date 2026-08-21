@@ -60,8 +60,24 @@ const usersRouteSource = readFileSync(
   new URL("../src/routes/users.ts", import.meta.url),
   "utf8",
 );
+const legacyUserManagementPolicySource = readFileSync(
+  new URL("../src/lib/legacyUserManagementPolicy.ts", import.meta.url),
+  "utf8",
+);
 const agentsRouteSource = readFileSync(
   new URL("../src/routes/agents.ts", import.meta.url),
+  "utf8",
+);
+const rolesRouteSource = readFileSync(
+  new URL("../src/routes/roles.ts", import.meta.url),
+  "utf8",
+);
+const branchesRouteSource = readFileSync(
+  new URL("../src/routes/branches.ts", import.meta.url),
+  "utf8",
+);
+const settingsRouteSource = readFileSync(
+  new URL("../src/routes/settings.ts", import.meta.url),
   "utf8",
 );
 const dormBookingFollowupSource = readFileSync(
@@ -274,6 +290,36 @@ test("legacy impersonation is branch-scoped and nested sessions are denied", () 
   assert.match(usersRouteSource, /auth\.impersonate\.denied/);
   assert.match(agentsRouteSource, /currentSession\.originalSid/);
   assert.match(agentsRouteSource, /Cannot impersonate an inactive account/);
+});
+
+test("legacy generic user management is branch-scoped and privilege ordered", () => {
+  assert.match(usersRouteSource, /inArray\(usersTable\.branchId, visibleBranchIds\)/);
+  assert.match(usersRouteSource, /notInArray\(usersTable\.role/);
+  assert.match(usersRouteSource, /evaluateLegacyUserManagement/);
+  assert.match(usersRouteSource, /PERMISSION_OVERRIDE_REQUIRES_SUPER_ADMIN/);
+  assert.match(usersRouteSource, /canLegacyActorAssignRole/);
+  assert.match(legacyUserManagementPolicySource, /peer_or_higher_privilege/);
+  assert.match(legacyUserManagementPolicySource, /agent_relationship_route_required/);
+  assert.match(legacyUserManagementPolicySource, /Dynamic role permissions are mutable platform configuration/);
+});
+
+test("long-lived platform configuration writes require Super Admin and audit receipts", () => {
+  assert.match(rolesRouteSource, /router\.post\("\/roles", requireAuth, requireRole\("super_admin"\)/);
+  assert.match(rolesRouteSource, /router\.patch\("\/roles\/:id", requireAuth, requireRole\("super_admin"\)/);
+  assert.match(rolesRouteSource, /router\.delete\("\/roles\/:id", requireAuth, requireRole\("super_admin"\)/);
+  assert.doesNotMatch(rolesRouteSource, /seedDefaultRoles/);
+  assert.match(settingsRouteSource, /router\.patch\("\/settings", requireAuth, requireRole\("super_admin"\)/);
+  assert.match(settingsRouteSource, /platform_config\.settings\.update/);
+  assert.match(settingsRouteSource, /"n8nWebhookUrl"/);
+  const settingsRead = settingsRouteSource.slice(
+    settingsRouteSource.indexOf('router.get("/settings"'),
+    settingsRouteSource.indexOf('router.patch("/settings"'),
+  );
+  assert.doesNotMatch(settingsRead, /db\.insert\(settingsTable\)/);
+  assert.match(branchesRouteSource, /platform_config\.branch\.create/);
+  assert.match(branchesRouteSource, /platform_config\.branch\.update/);
+  assert.match(branchesRouteSource, /platform_config\.branch\.archive/);
+  assert.match(branchesRouteSource, /platform_config\.branch\.unarchive/);
 });
 
 test("email verification links are random, hashed, expiring, and one-time", () => {

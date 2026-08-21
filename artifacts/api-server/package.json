@@ -37,6 +37,7 @@
     "test:ai-agent": "tsx --test ./scripts/test-ai-agent-config.ts",
     "test:ai-delivery-safety": "tsx --test ./scripts/test-ai-delivery-safety.ts",
     "test:impersonation-policy": "tsx --test ./scripts/test-impersonation-policy.ts",
+    "test:user-management-policy": "tsx --test ./scripts/test-user-management-policy.ts",
     "test:ai-agent-admin": "tsx --test ./scripts/test-ai-agent-admin.ts",
     "test:ai-agent-models": "tsx --test ./scripts/test-ai-agent-models.ts",
     "test:academy-knowledge": "tsx --test ./scripts/test-academy-knowledge.ts",

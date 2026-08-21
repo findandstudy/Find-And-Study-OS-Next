@@ -117,3 +117,26 @@ This narrows a real horizontal/privilege-escalation path but does not promote
 `users.ts` or `agents.ts` out of external-pilot quarantine. That requires JIT
 capability, active tenant context, MFA/step-up, purpose/expiry, access receipt,
 unsafe-action deny, and revocation tests.
+
+## Second quarantined-path remediation: generic user management
+
+The generic user directory and mutation routes now share a central interim
+policy. Non-super directory reads are limited to server-resolved direct-branch
+staff, branchless users fail closed, agent/student identities use their
+relationship-aware surfaces, and every linked student branch must be in scope
+for a direct management action. Peer/higher password reset, deletion, or
+mutation is denied; self-service admin fields cannot be submitted; dynamic
+roles and permission overrides require Super Admin.
+
+The exact contract, limitations, and verification commands are recorded in
+[`LEGACY_USER_MANAGEMENT_BOUNDARY.md`](./LEGACY_USER_MANAGEMENT_BOUNDARY.md).
+This is a quarantine remediation, not an external-pilot allowlist decision.
+
+## Interim platform-configuration boundary
+
+Long-lived role/permission, branch, global setting, and assignment-backfill
+writes now require Super Admin. Branch and settings changes emit explicit
+configuration audit receipts, credential-bearing settings are not returned,
+and a settings read no longer creates a missing configuration row. The exact
+scope and the remaining ChangeSet/maker-checker work are recorded in
+[`INTERIM_SUPER_ADMIN_CONFIG_BOUNDARY.md`](./INTERIM_SUPER_ADMIN_CONFIG_BOUNDARY.md).
