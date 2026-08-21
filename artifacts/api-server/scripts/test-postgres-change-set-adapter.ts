@@ -207,6 +207,31 @@ async function bootstrapAuthority() {
       );
     }
     await admin.query(`
+      ALTER FUNCTION public.enforce_change_set_transition_finalization()
+        OWNER TO ${ROLE.commandOwner};
+      ALTER FUNCTION public.enforce_change_set_transition_finalization()
+        SECURITY DEFINER;
+      ALTER FUNCTION public.enforce_change_set_transition_finalization()
+        SET search_path TO pg_catalog, public;
+      ALTER FUNCTION public.enforce_change_set_evidence_finalization()
+        OWNER TO ${ROLE.commandOwner};
+      ALTER FUNCTION public.enforce_change_set_evidence_finalization()
+        SECURITY DEFINER;
+      ALTER FUNCTION public.enforce_change_set_evidence_finalization()
+        SET search_path TO pg_catalog, public;
+      ALTER FUNCTION public.enforce_change_set_evidence_request_finalization()
+        OWNER TO ${ROLE.evidenceOwner};
+      ALTER FUNCTION public.enforce_change_set_evidence_request_finalization()
+        SECURITY DEFINER;
+      ALTER FUNCTION public.enforce_change_set_evidence_request_finalization()
+        SET search_path TO pg_catalog, public;
+      REVOKE ALL ON FUNCTION
+        public.enforce_change_set_transition_finalization(),
+        public.enforce_change_set_evidence_finalization(),
+        public.enforce_change_set_evidence_request_finalization()
+      FROM PUBLIC, ${ROLE.commandExecutor}, ${ROLE.evidenceIssuer};
+    `);
+    await admin.query(`
       REVOKE ALL ON ALL FUNCTIONS IN SCHEMA fas_cp_v1 FROM PUBLIC, ${ROLE.commandExecutor};
       REVOKE ALL ON ALL FUNCTIONS IN SCHEMA fas_evidence_v1 FROM PUBLIC, ${ROLE.evidenceIssuer};
       GRANT EXECUTE ON FUNCTION
@@ -281,6 +306,35 @@ async function verifyAuthoritySplit() {
     assert.deepEqual(owners.rows, [
       { nspname: "fas_cp_v1", rolname: ROLE.commandOwner, count: 15 },
       { nspname: "fas_evidence_v1", rolname: ROLE.evidenceOwner, count: 3 },
+    ]);
+    const deferredTriggerAuthorities = await admin.query(
+      `SELECT procedure.proname, owner_role.rolname, procedure.prosecdef
+       FROM pg_proc procedure
+       JOIN pg_roles owner_role ON owner_role.oid = procedure.proowner
+       WHERE procedure.proname = ANY($1::text[])
+       ORDER BY procedure.proname`,
+      [[
+        "enforce_change_set_evidence_finalization",
+        "enforce_change_set_evidence_request_finalization",
+        "enforce_change_set_transition_finalization",
+      ]],
+    );
+    assert.deepEqual(deferredTriggerAuthorities.rows, [
+      {
+        proname: "enforce_change_set_evidence_finalization",
+        rolname: ROLE.commandOwner,
+        prosecdef: true,
+      },
+      {
+        proname: "enforce_change_set_evidence_request_finalization",
+        rolname: ROLE.evidenceOwner,
+        prosecdef: true,
+      },
+      {
+        proname: "enforce_change_set_transition_finalization",
+        rolname: ROLE.commandOwner,
+        prosecdef: true,
+      },
     ]);
   });
 }
