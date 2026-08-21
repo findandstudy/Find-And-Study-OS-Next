@@ -10,6 +10,7 @@ import type {
   ProgramScope,
 } from "@workspace/api-client-react";
 import { useI18n } from "@/hooks/use-i18n";
+import { useAuth } from "@/hooks/use-auth";
 import { getLocale } from "@/lib/i18n";
 import {
   UI_DAY_ORDER,
@@ -125,6 +126,7 @@ function parseKeywords(raw: string): string[] {
 export default function AiAgent() {
   const { t, lang } = useI18n();
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const [bots, setBots] = useState<AiBotSummary[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<number | null>(null);
@@ -393,6 +395,7 @@ export default function AiAgent() {
     try {
       const body: AiAgentConfigUpdate = {
         enabled: config.enabled,
+        externalAutoReplyEnabled: config.externalAutoReplyEnabled,
         defaultOnForNew: config.defaultOnForNew,
         model: config.model,
         temperature: config.temperature,
@@ -758,9 +761,36 @@ export default function AiAgent() {
               <Switch
                 checked={config.enabled}
                 onCheckedChange={(v) => patch({ enabled: v })}
+                disabled={!config.enabled && user?.role !== "super_admin"}
               />
               <Badge variant={config.enabled ? "default" : "secondary"}>
                 {config.enabled ? t("aiAgentAdmin.statusOn") : t("aiAgentAdmin.statusOff")}
+              </Badge>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-amber-300 bg-amber-50/70 p-4 dark:border-amber-800 dark:bg-amber-950/20">
+            <div>
+              <p className="font-medium flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                {t("aiAgentAdmin.externalAutoReplyLabel")}
+              </p>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {t("aiAgentAdmin.externalAutoReplyHint")}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <Switch
+                checked={config.externalAutoReplyEnabled}
+                onCheckedChange={(v) => patch({ externalAutoReplyEnabled: v })}
+                disabled={!config.externalAutoReplyEnabled && user?.role !== "super_admin"}
+              />
+              <Badge variant={config.externalAutoReplyEnabled ? "destructive" : "secondary"}>
+                {config.externalAutoReplyEnabled
+                  ? t("aiAgentAdmin.externalAutoReplyOn")
+                  : t("aiAgentAdmin.externalAutoReplyOff")}
               </Badge>
             </div>
           </div>
@@ -779,6 +809,7 @@ export default function AiAgent() {
             <Switch
               checked={config.defaultOnForNew}
               onCheckedChange={(v) => patch({ defaultOnForNew: v })}
+              disabled={!config.defaultOnForNew && user?.role !== "super_admin"}
             />
           </div>
 

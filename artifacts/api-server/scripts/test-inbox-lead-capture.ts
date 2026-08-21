@@ -56,6 +56,7 @@ import {
   __setStructuredExtractionOverrideForTests,
   type StructuredLeadFields,
 } from "../src/lib/inbox/leadCapture";
+import { __setAiAgentConfigOverrideForTests } from "../src/lib/inbox/aiAgentConfig";
 
 const RUN_ID = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -83,6 +84,11 @@ let nextExtraction: StructuredLeadFields = { ...EMPTY };
 
 __setStructuredExtractionOverrideForTests(async () => ({ ...nextExtraction }));
 __setBotReplyOverrideForTests(async () => "Mock intake reply");
+__setAiAgentConfigOverrideForTests({
+  enabled: true,
+  externalAutoReplyEnabled: true,
+  scheduleEnabled: false,
+});
 __setBotSendOverrideForTests(async (input) => {
   textSendCalls.push(input);
   return { ok: true, externalMessageId: `mock_txt_${RUN_ID}_${sendSeq++}` };
@@ -473,6 +479,7 @@ test("cleanup", async () => {
   __setBotReplyOverrideForTests(null);
   __setBotSendOverrideForTests(null);
   __setBotTemplateSendOverrideForTests(null);
+  __setAiAgentConfigOverrideForTests(null);
 });
 
 // Force a clean process exit once all tests finish — lingering db pool / inbox

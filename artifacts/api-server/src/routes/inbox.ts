@@ -82,6 +82,7 @@ import {
 } from "../lib/inbox/templateVariables";
 import { inboxBus, type InboxBusEvent } from "../lib/inbox/eventBus";
 import {
+  aiAgentPatchRequiresSuperAdmin,
   getAiAgentConfig,
   writeAiAgentConfig,
   aiAgentConfigPatchSchema,
@@ -4244,10 +4245,20 @@ router.put(
       return;
     }
     try {
+      const current = await getAiAgentConfig(aiBotId);
+      if (
+        req.user!.role !== "super_admin" &&
+        aiAgentPatchRequiresSuperAdmin(current, parsed.data)
+      ) {
+        res.status(403).json({ error: "Super Admin approval is required to enable AI automation" });
+        return;
+      }
       const config = await writeAiAgentConfig(parsed.data, aiBotId);
       logAudit(req.user!.id, "update_ai_agent_config", "integration", undefined, {
         aiBotId,
         enabled: config.enabled,
+        externalAutoReplyEnabled: config.externalAutoReplyEnabled,
+        defaultOnForNew: config.defaultOnForNew,
         model: config.model,
       }, req.ip);
       res.json({ config });

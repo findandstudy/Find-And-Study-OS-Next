@@ -14,6 +14,8 @@ import type { EscalationKeywords } from "./escalationKeywords";
  */
 export interface AiAgentConfigUpdate {
   enabled?: boolean;
+  /** Explicit Super Admin approval gate for automatic AI delivery to customer-facing channels. */
+  externalAutoReplyEnabled?: boolean;
   defaultOnForNew?: boolean;
   model?: string;
   temperature?: number;

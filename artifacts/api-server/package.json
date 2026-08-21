@@ -35,6 +35,7 @@
     "test:course-finder-filter-cache": "tsx --test ./scripts/test-course-finder-filter-cache.ts ./scripts/test-course-finder-list-cache.ts",
     "test:public-catalog-list-scaling": "tsx --test ./scripts/test-public-catalog-and-list-scaling.ts",
     "test:ai-agent": "tsx --test ./scripts/test-ai-agent-config.ts",
+    "test:ai-delivery-safety": "tsx --test ./scripts/test-ai-delivery-safety.ts",
     "test:ai-agent-admin": "tsx --test ./scripts/test-ai-agent-admin.ts",
     "test:ai-agent-models": "tsx --test ./scripts/test-ai-agent-models.ts",
     "test:academy-knowledge": "tsx --test ./scripts/test-academy-knowledge.ts",

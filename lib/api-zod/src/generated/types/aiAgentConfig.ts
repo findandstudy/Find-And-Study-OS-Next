@@ -12,6 +12,8 @@ import type { ProgramScope } from "./programScope";
 
 export interface AiAgentConfig {
   enabled: boolean;
+  /** Explicit Super Admin approval gate for automatic AI delivery to customer-facing channels. Older stored configs default to false. */
+  externalAutoReplyEnabled: boolean;
   defaultOnForNew: boolean;
   model: string;
   temperature: number;

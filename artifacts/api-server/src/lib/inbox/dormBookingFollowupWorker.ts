@@ -5,7 +5,10 @@ import {
   messagesTable,
 } from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
-import { getAiAgentConfig } from "./aiAgentConfig";
+import {
+  getAiAgentConfig,
+  isExternalAutoReplyEmergencyStopped,
+} from "./aiAgentConfig";
 import { isAiAgentWithinWorkingHours } from "./botSchedule";
 import { resolveReengagementTemplate, sendBotTemplate } from "./botAutoReply";
 import { inboxBus } from "./eventBus";
@@ -23,7 +26,9 @@ export function dormBookingFollowupEnabled(): boolean {
 }
 
 export async function runDormBookingFollowupSweep(now = new Date()): Promise<{ sent: number; failed: number }> {
-  if (!dormBookingFollowupEnabled()) return { sent: 0, failed: 0 };
+  if (!dormBookingFollowupEnabled() || isExternalAutoReplyEmergencyStopped()) {
+    return { sent: 0, failed: 0 };
+  }
   const minAge = new Date(now.getTime() - WINDOW_END_HOURS * 60 * 60 * 1000);
   const maxAge = new Date(now.getTime() - WINDOW_START_HOURS * 60 * 60 * 1000);
   const candidates = await db
@@ -51,7 +56,12 @@ export async function runDormBookingFollowupSweep(now = new Date()): Promise<{ s
     const phone = contact?.phoneE164 || contact?.phone;
     if (!conv.aiBotId || !conv.lastInboundAt || !phone || contact?.isBlocked) continue;
     const config = await getAiAgentConfig(conv.aiBotId);
-    if (!config.enabled || !isAiAgentWithinWorkingHours(config)) continue;
+    if (
+      !config.enabled ||
+      !config.externalAutoReplyEnabled ||
+      isExternalAutoReplyEmergencyStopped() ||
+      !isAiAgentWithinWorkingHours(config)
+    ) continue;
     if (!/\bDorm\s*Booking\b|accommodation assistant/i.test(config.knowledgeBase)) continue;
 
     const inboundKey = conv.lastInboundAt.toISOString();
@@ -86,6 +96,7 @@ export async function runDormBookingFollowupSweep(now = new Date()): Promise<{ s
         toPhoneE164: phone,
         templateName: template.externalTemplateName,
         language: template.language,
+        externalDeliveryApproved: config.externalAutoReplyEnabled,
         channelAccountId: conv.channelAccountId,
         communicationPipelineId: conv.communicationPipelineId,
       });

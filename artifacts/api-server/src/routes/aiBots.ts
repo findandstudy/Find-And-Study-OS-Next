@@ -13,6 +13,7 @@ import { and, asc, eq, ne } from "drizzle-orm";
 import { requireAuth, requireRole, logAudit } from "../lib/auth";
 import { ADMIN_ROLES } from "../lib/roles";
 import {
+  aiAgentPatchRequiresSuperAdmin,
   aiAgentConfigPatchSchema,
   getAiAgentConfig,
   writeAiAgentConfig,
@@ -88,13 +89,18 @@ router.post("/ai-bots", requireAuth, requireRole(...ADMIN_ROLES), async (req, re
     return;
   }
   const sourceConfig = await getAiAgentConfig(input.cloneFromBotId ?? null);
+  const initialConfig = {
+    ...sourceConfig,
+    externalAutoReplyEnabled: false,
+    defaultOnForNew: false,
+  };
   const [row] = await db.transaction(async (tx) => {
     if (makeDefault) await tx.update(aiBotsTable).set({ isDefault: false });
     const [created] = await tx.insert(aiBotsTable).values({
       name: input.name,
       slug: input.slug,
       description: input.description ?? null,
-      configEncrypted: JSON.stringify(encryptConfig(sourceConfig)),
+      configEncrypted: JSON.stringify(encryptConfig(initialConfig)),
       isDefault: makeDefault,
       isActive: input.isActive !== false,
       createdById: req.user!.id,
@@ -134,7 +140,7 @@ router.post("/ai-bots", requireAuth, requireRole(...ADMIN_ROLES), async (req, re
     return [created];
   });
   await logAudit(req.user!.id, "create_ai_bot", "ai_bot", row.id, { slug: row.slug }, req.ip);
-  res.status(201).json({ bot: botDto(row), config: sourceConfig });
+  res.status(201).json({ bot: botDto(row), config: initialConfig });
 });
 
 router.patch("/ai-bots/:id", requireAuth, requireRole(...ADMIN_ROLES), async (req, res): Promise<void> => {
@@ -211,8 +217,21 @@ router.put("/ai-bots/:id/config", requireAuth, requireRole(...ADMIN_ROLES), asyn
     return;
   }
   try {
+    const current = await getAiAgentConfig(id);
+    if (
+      req.user!.role !== "super_admin" &&
+      aiAgentPatchRequiresSuperAdmin(current, parsed.data)
+    ) {
+      res.status(403).json({ error: "Super Admin approval is required to enable AI automation" });
+      return;
+    }
     const config = await writeAiAgentConfig(parsed.data, id);
-    await logAudit(req.user!.id, "update_ai_bot_config", "ai_bot", id, { enabled: config.enabled, model: config.model }, req.ip);
+    await logAudit(req.user!.id, "update_ai_bot_config", "ai_bot", id, {
+      enabled: config.enabled,
+      externalAutoReplyEnabled: config.externalAutoReplyEnabled,
+      defaultOnForNew: config.defaultOnForNew,
+      model: config.model,
+    }, req.ip);
     res.json({ config });
   } catch (error) {
     if (error instanceof z.ZodError) {

@@ -28,6 +28,9 @@ export interface AiAgentConfig {
   /** Global master switch. When false, NO auto-replies are sent on any
    *  conversation regardless of the per-conversation toggle. */
   enabled: boolean;
+  /** Explicit approval gate for customer-facing channels. Older stored
+   * configs omit this field and therefore fail closed to false. */
+  externalAutoReplyEnabled: boolean;
   /** When true, newly created conversations start with the bot enabled. */
   defaultOnForNew: boolean;
   /** Anthropic model used for the intake reply. */
@@ -156,6 +159,9 @@ export const DEFAULT_AI_AGENT_CONFIG: AiAgentConfig = {
   // decides) is preserved; an admin can flip the master switch off to silence
   // the whole bot.
   enabled: true,
+  // Customer-facing AI delivery requires a deliberate Super Admin opt-in.
+  // Keeping this separate from `enabled` makes older stored configs fail safe.
+  externalAutoReplyEnabled: false,
   // defaultOnForNew defaults FALSE so new conversations stay bot-off until
   // staff opt in — nothing auto-enables.
   defaultOnForNew: false,
@@ -270,6 +276,7 @@ const programScopeSchema = z.object({
 
 export const aiAgentConfigSchema = z.object({
   enabled: z.boolean(),
+  externalAutoReplyEnabled: z.boolean(),
   defaultOnForNew: z.boolean(),
   model: z.string().min(1).max(200),
   temperature: z.number().min(0).max(2),
@@ -425,6 +432,10 @@ function mergeWithDefaults(raw: Record<string, unknown> | null | undefined): AiA
       : [...d.languages];
   return {
     enabled: typeof r.enabled === "boolean" ? r.enabled : d.enabled,
+    externalAutoReplyEnabled:
+      typeof r.externalAutoReplyEnabled === "boolean"
+        ? r.externalAutoReplyEnabled
+        : d.externalAutoReplyEnabled,
     defaultOnForNew: typeof r.defaultOnForNew === "boolean" ? r.defaultOnForNew : d.defaultOnForNew,
     model: typeof r.model === "string" && r.model.trim() ? r.model : d.model,
     temperature: typeof r.temperature === "number" && Number.isFinite(r.temperature) ? r.temperature : d.temperature,
@@ -443,6 +454,34 @@ function mergeWithDefaults(raw: Record<string, unknown> | null | undefined): AiA
     timezone: typeof r.timezone === "string" && isValidTz(r.timezone) ? r.timezone : d.timezone,
     schedule: mergeSchedule(r.schedule),
   };
+}
+
+/** Enabling customer-facing automation is a privileged change. Admins may
+ * always turn these controls off; only Super Admin may turn them on. */
+export function aiAgentPatchRequiresSuperAdmin(
+  current: AiAgentConfig,
+  patch: AiAgentConfigPatch,
+): boolean {
+  return (
+    (patch.enabled === true && !current.enabled) ||
+    (patch.externalAutoReplyEnabled === true && !current.externalAutoReplyEnabled) ||
+    (patch.defaultOnForNew === true && !current.defaultOnForNew)
+  );
+}
+
+/** Infrastructure-level incident override. The database-backed Super Admin
+ * gate remains the normal control; this environment flag can only stop sends. */
+export function isExternalAutoReplyEmergencyStopped(): boolean {
+  const value = (process.env.AI_EXTERNAL_AUTO_REPLY_KILL_SWITCH ?? "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+export function getExternalAiDeliveryBlockReason(
+  externalDeliveryApproved: boolean,
+): "external_ai_delivery_not_approved" | "external_ai_delivery_killed" | null {
+  if (!externalDeliveryApproved) return "external_ai_delivery_not_approved";
+  if (isExternalAutoReplyEmergencyStopped()) return "external_ai_delivery_killed";
+  return null;
 }
 
 // ---------------------------------------------------------------------------

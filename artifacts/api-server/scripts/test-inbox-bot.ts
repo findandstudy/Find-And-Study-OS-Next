@@ -52,6 +52,7 @@ const RUN_ID = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2,
 // the scenarios below must be deterministic at every hour of the day.
 __setAiAgentConfigOverrideForTests({
   enabled: true,
+  externalAutoReplyEnabled: true,
   scheduleEnabled: false,
   maxConsecutiveReplies: 6,
 });

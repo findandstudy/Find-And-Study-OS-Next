@@ -11,8 +11,9 @@
  *   1. non-admin (student/agent/staff) → 403 on all three endpoints.
  *   2. admin GET → 200 with a config payload.
  *   3. admin PUT with an invalid patch (temperature out of range) → 400.
- *   4. admin PUT with a valid patch → 200, persisted + merged.
- *   5. admin POST /test → 200, returns the would-be reply WITHOUT sending
+ *   4. admin PUT with a safe patch → 200, persisted + merged.
+ *   5. activation controls → admin 403, Super Admin 200.
+ *   6. admin POST /test → 200, returns the would-be reply WITHOUT sending
  *      (the bot SEND override is asserted to never be called).
  *
  * The shared ai_agent integrations row is snapshotted and restored.
@@ -159,25 +160,48 @@ test("admin PUT with invalid patch → 400", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. Admin PUT with a valid patch → 200 and persists.
+// 4. Admin PUT with a safe patch → 200 and persists.
 // ---------------------------------------------------------------------------
 test("admin PUT with valid patch → 200 and persists", async () => {
   currentUser = { id: 999000, role: "admin", isActive: true };
   const customKb = `KB_${RUN_ID} brand brain body`;
   const res = await apiReq("PUT", "/inbox/ai-agent/config", {
     maxConsecutiveReplies: 7,
-    defaultOnForNew: true,
     knowledgeBase: customKb,
   });
   assert.equal(res.status, 200);
   assert.equal(res.data.config.maxConsecutiveReplies, 7);
-  assert.equal(res.data.config.defaultOnForNew, true);
   assert.equal(res.data.config.knowledgeBase, customKb);
 
   // Re-read to confirm persistence.
   const get = await apiReq("GET", "/inbox/ai-agent/config");
   assert.equal(get.data.config.maxConsecutiveReplies, 7);
   assert.equal(get.data.config.knowledgeBase, customKb);
+});
+
+// ---------------------------------------------------------------------------
+// 5. Enabling automation requires Super Admin; disabling remains available.
+// ---------------------------------------------------------------------------
+test("AI activation controls require Super Admin", async () => {
+  currentUser = { id: 999000, role: "admin", isActive: true };
+  const denied = await apiReq("PUT", "/inbox/ai-agent/config", {
+    externalAutoReplyEnabled: true,
+  });
+  assert.equal(denied.status, 403);
+
+  currentUser = { id: 999002, role: "super_admin", isActive: true };
+  const approved = await apiReq("PUT", "/inbox/ai-agent/config", {
+    externalAutoReplyEnabled: true,
+  });
+  assert.equal(approved.status, 200);
+  assert.equal(approved.data.config.externalAutoReplyEnabled, true);
+
+  currentUser = { id: 999000, role: "admin", isActive: true };
+  const stopped = await apiReq("PUT", "/inbox/ai-agent/config", {
+    externalAutoReplyEnabled: false,
+  });
+  assert.equal(stopped.status, 200);
+  assert.equal(stopped.data.config.externalAutoReplyEnabled, false);
 });
 
 // ---------------------------------------------------------------------------

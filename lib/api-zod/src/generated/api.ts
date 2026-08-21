@@ -2709,6 +2709,7 @@ export const getAiAgentConfigResponseConfigScheduleSunEndRegExp = new RegExp(
 export const GetAiAgentConfigResponse = zod.object({
   config: zod.object({
     enabled: zod.boolean(),
+    externalAutoReplyEnabled: zod.boolean(),
     defaultOnForNew: zod.boolean(),
     model: zod.string(),
     temperature: zod.number(),
@@ -2881,6 +2882,7 @@ export const updateAiAgentConfigBodyScheduleSunEndRegExp = new RegExp(
 export const UpdateAiAgentConfigBody = zod
   .object({
     enabled: zod.boolean().optional(),
+    externalAutoReplyEnabled: zod.boolean().optional(),
     defaultOnForNew: zod.boolean().optional(),
     model: zod.string().optional(),
     temperature: zod.number().optional(),
@@ -3035,6 +3037,7 @@ export const updateAiAgentConfigResponseConfigScheduleSunEndRegExp = new RegExp(
 export const UpdateAiAgentConfigResponse = zod.object({
   config: zod.object({
     enabled: zod.boolean(),
+    externalAutoReplyEnabled: zod.boolean(),
     defaultOnForNew: zod.boolean(),
     model: zod.string(),
     temperature: zod.number(),

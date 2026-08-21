@@ -6037,6 +6037,11 @@ components:
       properties:
         enabled:
           type: boolean
+        externalAutoReplyEnabled:
+          type: boolean
+          description: >-
+            Explicit Super Admin approval gate for automatic AI delivery to
+            customer-facing channels. Older stored configs default to false.
         defaultOnForNew:
           type: boolean
         model:
@@ -6068,6 +6073,7 @@ components:
           $ref: "#/components/schemas/AiAgentWeeklySchedule"
       required:
         - enabled
+        - externalAutoReplyEnabled
         - defaultOnForNew
         - model
         - temperature
@@ -6203,6 +6209,11 @@ components:
       properties:
         enabled:
           type: boolean
+        externalAutoReplyEnabled:
+          type: boolean
+          description: >-
+            Explicit Super Admin approval gate for automatic AI delivery to
+            customer-facing channels.
         defaultOnForNew:
           type: boolean
         model:

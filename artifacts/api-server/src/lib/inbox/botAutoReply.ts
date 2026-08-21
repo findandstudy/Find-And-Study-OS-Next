@@ -38,7 +38,13 @@ import {
   type BotLanguage,
   type EscalationTopic,
 } from "./botBrain";
-import { getAiAgentConfig, DEFAULT_BOT_MODEL, type AiAgentConfig } from "./aiAgentConfig";
+import {
+  getExternalAiDeliveryBlockReason,
+  getAiAgentConfig,
+  isExternalAutoReplyEmergencyStopped,
+  DEFAULT_BOT_MODEL,
+  type AiAgentConfig,
+} from "./aiAgentConfig";
 import { resolveZernioAccount, sendViaZernio } from "./zernioSend";
 import { assignStuckConversationById } from "../stuckConversationAssigner";
 import {
@@ -328,6 +334,9 @@ export interface BotSendInput {
   // is the user's page-/IG-scoped recipient id.
   recipient: string;
   text: string;
+  /** Defense-in-depth proof that the bot's Super Admin external-delivery gate
+   * was evaluated before this provider send. */
+  externalDeliveryApproved: boolean;
   // The conversation's connected account (multi-account-per-channel). When null
   // the legacy single-config integrations row is used (resolveOutboundConfig).
   channelAccountId?: number | null;
@@ -560,12 +569,15 @@ export async function runBotReplyTest(input: BotTestInput): Promise<BotTestResul
 // Channel-aware send. Only WhatsApp is wired today; a future channel can be
 // slotted in here without touching the engine logic.
 async function sendBotReply(input: BotSendInput): Promise<BotSendResult> {
-  if (__botSendOverride) return __botSendOverride(input);
   // Internal chat is already delivered by the DB message row written below.
   // No external provider call is required.
   if (input.channel === "internal") {
+    if (__botSendOverride) return __botSendOverride(input);
     return { ok: true, externalMessageId: `internal-ai:${crypto.randomUUID()}` };
   }
+  const externalBlockReason = getExternalAiDeliveryBlockReason(input.externalDeliveryApproved);
+  if (externalBlockReason) return { ok: false, error: externalBlockReason };
+  if (__botSendOverride) return __botSendOverride(input);
   // Browser chat has no external transport: the outbound message row written
   // by maybeAutoReply is the delivery source. The embedded client polls that
   // same conversation, so marking it sent is the complete transport action.
@@ -660,6 +672,7 @@ async function handoffConversation(input: {
       channel: input.conv.channel,
       recipient: input.recipient,
       text: handoffText,
+      externalDeliveryApproved: input.config.externalAutoReplyEnabled,
       channelAccountId: input.conv.channelAccountId,
       communicationPipelineId: input.conv.communicationPipelineId,
       zernio: input.zernio,
@@ -722,6 +735,7 @@ export interface BotTemplateSendInput {
   toPhoneE164: string;
   templateName: string;
   language: string;
+  externalDeliveryApproved: boolean;
   parameters?: string[];
   channelAccountId?: number | null;
   communicationPipelineId?: number | null;
@@ -737,6 +751,8 @@ export function __setBotTemplateSendOverrideForTests(
 
 // Channel-aware approved-template send (used outside the 24h window).
 export async function sendBotTemplate(input: BotTemplateSendInput): Promise<BotSendResult> {
+  const externalBlockReason = getExternalAiDeliveryBlockReason(input.externalDeliveryApproved);
+  if (externalBlockReason) return { ok: false, error: externalBlockReason };
   if (__botTemplateSendOverride) return __botTemplateSendOverride(input);
   if (input.channel === "whatsapp") {
     const cfg: WhatsAppConfig =
@@ -801,6 +817,7 @@ export interface AutoReplyOutcome {
   reason:
     | "sent"
     | "globally_disabled"
+    | "external_delivery_disabled"
     | "bot_disabled"
     | "contact_blocked"
     | "already_handled"
@@ -855,6 +872,16 @@ export async function maybeAutoReply(opts: {
   // Global master switch: when the bot is off agency-wide, no auto-replies are
   // sent regardless of the per-conversation toggle.
   if (!config.enabled) return { acted: false, reason: "globally_disabled" };
+
+  // Customer-facing delivery is independently approval-gated. This field
+  // defaults false even for older encrypted configs, while the environment
+  // kill switch gives operations an immediate fail-closed override.
+  if (
+    conv.channel !== "internal" &&
+    (!config.externalAutoReplyEnabled || isExternalAutoReplyEmergencyStopped())
+  ) {
+    return { acted: false, reason: "external_delivery_disabled" };
+  }
 
   // Working-hours schedule gate: outside the configured windows the bot is
   // FULLY silent — no reply, no greeting, no "we're closed" message. The
@@ -1050,6 +1077,7 @@ export async function maybeAutoReply(opts: {
       toPhoneE164: toPhone,
       templateName: template.externalTemplateName,
       language: template.language,
+      externalDeliveryApproved: config.externalAutoReplyEnabled,
       channelAccountId: conv.channelAccountId,
     });
     await db
@@ -1422,6 +1450,7 @@ export async function maybeAutoReply(opts: {
     channel: conv.channel,
     recipient: recipient || "",
     text: replyText,
+    externalDeliveryApproved: config.externalAutoReplyEnabled,
     channelAccountId: conv.channelAccountId,
     communicationPipelineId: conv.communicationPipelineId,
     zernio: zernioRoute,

@@ -42,6 +42,8 @@ import {
   getAiAgentConfig,
   writeAiAgentConfig,
   __setAiAgentConfigOverrideForTests,
+  aiAgentPatchRequiresSuperAdmin,
+  isExternalAutoReplyEmergencyStopped,
   DEFAULT_AI_AGENT_CONFIG,
   AI_AGENT_INTEGRATION_KEY,
 } from "../src/lib/inbox/aiAgentConfig";
@@ -152,6 +154,7 @@ async function outboundCount(conversationId: number): Promise<number> {
 // ---------------------------------------------------------------------------
 test("aiAgentConfigSchema accepts the defaults and rejects bad values", () => {
   assert.doesNotThrow(() => aiAgentConfigSchema.parse(DEFAULT_AI_AGENT_CONFIG));
+  assert.equal(DEFAULT_AI_AGENT_CONFIG.externalAutoReplyEnabled, false);
 
   // temperature out of range
   assert.throws(() => aiAgentConfigSchema.parse({ ...DEFAULT_AI_AGENT_CONFIG, temperature: 5 }));
@@ -181,12 +184,14 @@ test("writeAiAgentConfig persists a patch; getAiAgentConfig reads it merged", as
     await writeAiAgentConfig({
       maxConsecutiveReplies: 9,
       defaultOnForNew: true,
+      externalAutoReplyEnabled: false,
       knowledgeBase: customKb,
     });
 
     const cfg = await getAiAgentConfig();
     assert.equal(cfg.maxConsecutiveReplies, 9);
     assert.equal(cfg.defaultOnForNew, true);
+    assert.equal(cfg.externalAutoReplyEnabled, false);
     assert.equal(cfg.knowledgeBase, customKb);
     // Untouched fields fall back to defaults (field-level merge).
     assert.equal(cfg.enabled, DEFAULT_AI_AGENT_CONFIG.enabled);
@@ -227,6 +232,7 @@ test("engine reads escalation keywords from the live config", async () => {
   const keyword = `escalateword_${RUN_ID}`;
   __setAiAgentConfigOverrideForTests({
     enabled: true,
+    externalAutoReplyEnabled: true,
     escalationKeywords: { contract: [keyword], payment: [], commission: [], partner: [] },
   });
   try {
@@ -265,13 +271,57 @@ test("global switch off → no auto-reply (globally_disabled)", async () => {
   }
 });
 
+test("external delivery defaults off and requires explicit approval", async () => {
+  resetMocks();
+  __setAiAgentConfigOverrideForTests({ enabled: true });
+  try {
+    const { conversationId } = await seedConversation({ botEnabled: true });
+    const msgId = await seedInbound(conversationId, "Hi, I want to study in Istanbul");
+    const outcome = await maybeAutoReply({ conversationId, inboundMessageId: msgId });
+    assert.equal(outcome.reason, "external_delivery_disabled");
+    assert.equal(sentCalls.length, 0);
+    assert.equal(await outboundCount(conversationId), 0);
+  } finally {
+    __setAiAgentConfigOverrideForTests(null);
+  }
+});
+
+test("only activation transitions require Super Admin", () => {
+  const safe = { ...DEFAULT_AI_AGENT_CONFIG };
+  assert.equal(aiAgentPatchRequiresSuperAdmin(safe, { externalAutoReplyEnabled: true }), true);
+  assert.equal(aiAgentPatchRequiresSuperAdmin({ ...safe, enabled: false }, { enabled: true }), true);
+  assert.equal(aiAgentPatchRequiresSuperAdmin(safe, { defaultOnForNew: true }), true);
+  assert.equal(aiAgentPatchRequiresSuperAdmin({ ...safe, externalAutoReplyEnabled: true }, { externalAutoReplyEnabled: false }), false);
+  assert.equal(aiAgentPatchRequiresSuperAdmin(safe, { enabled: false }), false);
+});
+
+test("the infrastructure kill switch is explicit and fail-safe", () => {
+  const previous = process.env.AI_EXTERNAL_AUTO_REPLY_KILL_SWITCH;
+  try {
+    delete process.env.AI_EXTERNAL_AUTO_REPLY_KILL_SWITCH;
+    assert.equal(isExternalAutoReplyEmergencyStopped(), false);
+    process.env.AI_EXTERNAL_AUTO_REPLY_KILL_SWITCH = "true";
+    assert.equal(isExternalAutoReplyEmergencyStopped(), true);
+    process.env.AI_EXTERNAL_AUTO_REPLY_KILL_SWITCH = "0";
+    assert.equal(isExternalAutoReplyEmergencyStopped(), false);
+  } finally {
+    if (previous === undefined) delete process.env.AI_EXTERNAL_AUTO_REPLY_KILL_SWITCH;
+    else process.env.AI_EXTERNAL_AUTO_REPLY_KILL_SWITCH = previous;
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Consecutive-reply handoff
 // ---------------------------------------------------------------------------
 test("at the handoff threshold → handoff message sent once, needs-human, bot OFF", async () => {
   resetMocks();
   const handoffMessage = `HANDOFF_${RUN_ID}`;
-  __setAiAgentConfigOverrideForTests({ enabled: true, maxConsecutiveReplies: 2, handoffMessage });
+  __setAiAgentConfigOverrideForTests({
+    enabled: true,
+    externalAutoReplyEnabled: true,
+    maxConsecutiveReplies: 2,
+    handoffMessage,
+  });
   try {
     const { conversationId } = await seedConversation({ botEnabled: true, botReplyCount: 2 });
     const msgId = await seedInbound(conversationId, "Hello, any update?");
@@ -292,7 +342,11 @@ test("at the handoff threshold → handoff message sent once, needs-human, bot O
 
 test("below the handoff threshold → normal reply, bot_reply_count increments", async () => {
   resetMocks();
-  __setAiAgentConfigOverrideForTests({ enabled: true, maxConsecutiveReplies: 5 });
+  __setAiAgentConfigOverrideForTests({
+    enabled: true,
+    externalAutoReplyEnabled: true,
+    maxConsecutiveReplies: 5,
+  });
   try {
     const { conversationId } = await seedConversation({ botEnabled: true, botReplyCount: 1 });
     const msgId = await seedInbound(conversationId, "Hi, what programs do you offer?");
