@@ -216,6 +216,10 @@ test("supports planned verify-only rotation and rejects revoked keys", async () 
       .ok,
     true,
   );
+  assert.deepEqual(
+    verifyEvidence(issued.token, [verificationKey({ verifyUntil: NOW })]),
+    { ok: false, reason: "key_window_invalid" },
+  );
   for (const state of ["REVOKED", "COMPROMISED"] as const) {
     assert.deepEqual(
       verifyEvidence(issued.token, [verificationKey({ state })]),

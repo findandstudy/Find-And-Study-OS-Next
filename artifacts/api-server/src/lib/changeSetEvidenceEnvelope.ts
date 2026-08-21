@@ -489,7 +489,7 @@ export function verifyChangeSetEvidenceEnvelope(
     !Number.isSafeInteger(key.verifyUntil) ||
     claims.issuedAt < key.validFrom ||
     claims.issuedAt > key.signUntil ||
-    now > key.verifyUntil
+    now >= key.verifyUntil
   ) {
     return { ok: false, reason: "key_window_invalid" };
   }
