@@ -557,9 +557,10 @@ async function main() {
             id, tenant_id, change_set_id, target_state, kind,
             requested_by_principal_id, requested_by_membership_id,
             subject_hash, policy_version_id, tool_id, tool_version,
-            challenge_nonce_hash, state, expires_at
+            challenge_nonce_hash, state, expires_at, created_at
           ) VALUES ($1, $2, $3, 'VALIDATED', 'VALIDATION', $4, $5, $6, $7,
-            $8, $9, $10, 'OPEN', to_timestamp($11 / 1000.0))`,
+            $8, $9, $10, 'OPEN', to_timestamp($11 / 1000.0),
+            to_timestamp($12 / 1000.0))`,
           [
             ID.evidenceRequest,
             ID.tenant,
@@ -572,6 +573,7 @@ async function main() {
             evidenceToolVersion,
             sha256(challengeNonce),
             NOW + 10 * 60_000,
+            NOW - 1_000,
           ],
         );
         await migrator.query("COMMIT");
