@@ -170,6 +170,7 @@ async function bootstrapAuthority() {
       TO ${ROLE.commandOwner};
 
       GRANT SELECT, UPDATE ON TABLE
+        public.principals,
         public.change_set_evidence_issuers,
         public.change_set_evidence_signing_keys,
         public.change_set_evidence_issuer_tenant_grants,
