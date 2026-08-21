@@ -235,7 +235,8 @@ This foundation does not yet deliver:
 - persistent environment grants for separated migrator and runtime application
   database roles;
 - a notification preview sandbox;
-- a passed and required database-backed integration gate;
+- a full and required database-backed runtime-adapter integration gate (the
+  narrower disposable PostgreSQL foundation check is green but not required);
 - a production or local database migration;
 - R2/R3/R4 changes, multi-tenant changes, code, schema, infrastructure, or
   secret rotation;
@@ -246,10 +247,12 @@ writer quarantines remain authoritative.
 
 ## Next safe slice
 
-The next implementation slice is to run and independently review the disposable
-PostgreSQL 16 workflow described in
-`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md`, close every failure, and make its
-exact check required. Only after that evidence may a PostgreSQL adapter
-implement the transaction interface; no API route or Super Admin UI is
-connected in that slice. Publisher and configuration materialization adapters
-remain separate and default-off.
+The disposable PostgreSQL 16 foundation workflow described in
+`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` is green. The next implementation
+slice is to obtain independent review and make the exact checks required, then
+add a production evidence issuer/signing contract and a narrow, default-unwired
+PostgreSQL command-store adapter. The shared runtime role must not receive
+generic Control Plane DML. Cancellation/pool reuse, revoke/policy races,
+failure injection, replay, and durable denial audit must pass before any API
+route or Super Admin UI is connected. Publisher and configuration
+materialization adapters remain separate and default-off.

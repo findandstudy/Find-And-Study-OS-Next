@@ -1,11 +1,13 @@
 # ChangeSet PostgreSQL Integration Gate
 
-Status: **BLOCKED / NO-GO for runtime wiring**.
+Status: **FOUNDATION CI GREEN / NO-GO for runtime wiring**.
 
 This gate is not a delivery estimate and is not proof that migrations `0055`,
 `0056`, or `0057` have run in a long-lived environment. The approved local PostgreSQL endpoint
-`127.0.0.1:5433/fasos_apply_local` was unavailable during this slice, and the
-workspace had no Docker or `psql` executable. No database was mutated.
+`127.0.0.1:5433/fasos_apply_local` was unavailable. GitHub run `32515325893`
+applied all 58 reviewed migrations twice to an isolated disposable PostgreSQL
+16 database and passed the candidate direct-SQL matrix. No long-lived,
+production, staging, or production-derived database was mutated.
 
 ## Required database authority split
 
@@ -92,12 +94,13 @@ image digest, a per-run `fas_it_*` database, separate `fas_migrator` and
   command completion, atomic evidence consumption/finalization, and concurrent
   evidence reuse under the migrator-owned invariant harness.
 
-This workflow is a candidate, not yet a passed or required check. It does not
-yet provide a runtime writer contract or cover cancellation cleanup,
+The candidate workflow passed on GitHub run `32515325893`; the companion G0
+Security Gate passed on run `32515325882`. The check is not yet required and
+does not provide a runtime writer contract or cover cancellation/pool reuse,
 HTTP-to-DB context mismatch, revoke/policy rotation races through a real
 adapter, all idempotency/result replay races, failure injection between every
-write, or decision/step-up paths. Those gaps keep the full matrix and runtime
-wiring at NO-GO even if the candidate job is green.
+write, durable rollback-safe denial audit, or decision/step-up paths. Those
+gaps keep the full matrix and runtime wiring at NO-GO.
 
 ## Runtime-wiring gate
 
