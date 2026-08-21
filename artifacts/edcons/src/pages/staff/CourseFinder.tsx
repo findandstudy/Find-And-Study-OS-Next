@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { lazy, Suspense, useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useProgramDocRequirements, useResolveDocMeta } from "@/lib/programDocTypes";
@@ -24,7 +24,6 @@ import {
   Camera,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { generateProposalPdf } from "@/lib/generateProposalPdf";
 import {
   collectProposalStudyLevels,
   loadProposalDocumentRequirements,
@@ -32,10 +31,7 @@ import {
 import { resolveProposalBranding } from "@/lib/proposalBranding";
 import { createDocumentRecord, uploadDocumentFile } from "@/lib/uploadDocumentFile";
 import { applicationCreationErrorMessage } from "@/lib/applicationCreationError";
-import { PdfMarkupModal } from "@/components/course-finder/PdfMarkupModal";
-import * as XLSX from "xlsx";
 import { useI18n } from "@/hooks/use-i18n";
-import { DocumentScanner } from "@/components/DocumentScanner";
 import {
   APPLICATION_DOCUMENT_HELP_TEXT,
   validateApplicationDocumentFileObj,
@@ -44,6 +40,19 @@ import { MAX_DOCUMENT_PARTS, isSingleImageDocumentType, mergeDocumentParts } fro
 
 const BASE_URL = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
 const TRANSIENT_API_STATUSES = new Set([502, 503, 504]);
+const COURSE_FINDER_VIEW_STORAGE_KEY = "course-finder-view-mode";
+
+const LazyPdfMarkupModal = lazy(() =>
+  import("@/components/course-finder/PdfMarkupModal").then((module) => ({
+    default: module.PdfMarkupModal,
+  })),
+);
+
+const LazyDocumentScanner = lazy(() =>
+  import("@/components/DocumentScanner").then((module) => ({
+    default: module.DocumentScanner,
+  })),
+);
 
 class CourseFinderApiError extends Error {
   constructor(
@@ -186,6 +195,32 @@ type Filters = {
   feeMax: string;
 };
 
+type CourseFinderPage = {
+  data: Program[];
+  meta: { total: number; page: number; limit: number; totalPages: number };
+};
+
+type PdfSettings = {
+  companyName?: string;
+  publicBrandName?: string;
+  companyEmail?: string;
+  supportEmail?: string;
+  salesEmail?: string;
+  companyPhone?: string;
+  whatsappNumber?: string;
+  companyWebsite?: string;
+  canonicalBaseUrl?: string;
+  logoUrl?: string | null;
+  logoSquareUrl?: string | null;
+  pdfLogoUrl?: string | null;
+  pdfPrimaryColor?: string | null;
+  pdfAccentColor?: string | null;
+  themePrimary?: string | null;
+  themeSecondary?: string | null;
+  themeAccent?: string | null;
+  themeSuccess?: string | null;
+};
+
 const SHOW_COMMISSION_ROLES = ["super_admin", "agent", "sub_agent"];
 
 function formatCurrency(amount: number | null | undefined, currency = "USD") {
@@ -213,6 +248,17 @@ function ensureUrl(url: string | null | undefined): string | null {
   return `https://${url}`;
 }
 
+function getInitialCourseFinderViewMode(): "grid" | "list" {
+  if (typeof window === "undefined") return "list";
+  try {
+    return window.localStorage.getItem(COURSE_FINDER_VIEW_STORAGE_KEY) === "grid"
+      ? "grid"
+      : "list";
+  } catch {
+    return "list";
+  }
+}
+
 export default function CourseFinder() {
   const { t } = useI18n();
   const { user, hasAgentStaffPermission } = useAuth(true);
@@ -238,7 +284,7 @@ export default function CourseFinder() {
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [pdfMarkup, setPdfMarkup] = useState(0);
   const [markupModalOpen, setMarkupModalOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = useState<"grid" | "list">(getInitialCourseFinderViewMode);
   const [sortField, setSortField] = useState<string>("");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   // Column-header level filters that aren't represented in the server-side
@@ -257,6 +303,14 @@ export default function CourseFinder() {
   const canUsePdfMarkup = user && ["super_admin", "admin", "manager", "agent", "sub_agent"].includes(user.role);
   const canUseNegativeMarkup = user && ["super_admin", "admin", "manager"].includes(user.role);
   const canExportExcel = user && ["super_admin", "admin"].includes(user.role);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(COURSE_FINDER_VIEW_STORAGE_KEY, viewMode);
+    } catch {
+      // Storage may be unavailable in privacy-restricted browser contexts.
+    }
+  }, [viewMode]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -295,7 +349,8 @@ export default function CourseFinder() {
       `${BASE_URL}/api/course-finder/filters${filterParams ? `?${filterParams}` : ""}`,
       { signal },
     ),
-    staleTime: 45_000,
+    staleTime: 5 * 60_000,
+    gcTime: 15 * 60_000,
     // Cascading options belong to the exact active filter set. Reusing the
     // previous query's options can make the effect below prune newly selected
     // values while the matching options request is still in flight.
@@ -338,13 +393,15 @@ export default function CourseFinder() {
     });
   }, [filterOptions]);
 
-  const queryParams = useMemo(() => {
+  const buildQueryParams = useCallback((targetPage: number) => {
     const p = new URLSearchParams(filterParams);
-    p.set("page", String(page));
+    p.set("page", String(targetPage));
     p.set("limit", "24");
     if (sortField === "tuition") p.set("sort", sortDir === "asc" ? "price_asc" : "price_desc");
     return p.toString();
-  }, [filterParams, page, sortField, sortDir]);
+  }, [filterParams, sortField, sortDir]);
+
+  const queryParams = useMemo(() => buildQueryParams(page), [buildQueryParams, page]);
 
   const {
     data,
@@ -352,10 +409,11 @@ export default function CourseFinder() {
     isFetching,
     isError,
     refetch,
-  } = useQuery<{ data: Program[]; meta: { total: number; page: number; limit: number; totalPages: number } }>({
+  } = useQuery<CourseFinderPage>({
     queryKey: ["course-finder", queryParams],
     queryFn: ({ signal }) => apiFetch(`${BASE_URL}/api/course-finder?${queryParams}`, { signal }),
-    staleTime: 15_000,
+    staleTime: 60_000,
+    gcTime: 10 * 60_000,
     // The application-wide query default keeps previous data. That is useful
     // for many tables, but misleading here: filter chips can represent the new
     // query while cards and the total still represent the old one.
@@ -364,6 +422,27 @@ export default function CourseFinder() {
 
   const programs = data?.data ?? [];
   const meta = data?.meta;
+
+  // Prepare only the next page after the current page has settled. This keeps
+  // the initial request small while making the common next-page action feel
+  // immediate. Older pages remain in React Query's bounded cache as well.
+  useEffect(() => {
+    if (!meta || isFetching || meta.page >= meta.totalPages) return;
+    const nextQueryParams = buildQueryParams(meta.page + 1);
+    const prefetchTimer = window.setTimeout(() => {
+      void queryClient.prefetchQuery<CourseFinderPage>({
+        queryKey: ["course-finder", nextQueryParams],
+        queryFn: ({ signal }) => apiFetch(
+          `${BASE_URL}/api/course-finder?${nextQueryParams}`,
+          { signal },
+        ),
+        staleTime: 60_000,
+        gcTime: 10 * 60_000,
+      });
+    }, 200);
+
+    return () => window.clearTimeout(prefetchTimer);
+  }, [buildQueryParams, isFetching, meta, queryClient]);
 
   const { data: wishlistIds = [] } = useQuery<number[]>({
     queryKey: ["wishlists"],
@@ -420,31 +499,6 @@ export default function CourseFinder() {
       }
     }
   }
-
-  const { data: settings } = useQuery<{
-    companyName?: string;
-    publicBrandName?: string;
-    companyEmail?: string;
-    supportEmail?: string;
-    salesEmail?: string;
-    companyPhone?: string;
-    whatsappNumber?: string;
-    companyWebsite?: string;
-    canonicalBaseUrl?: string;
-    logoUrl?: string | null;
-    logoSquareUrl?: string | null;
-    pdfLogoUrl?: string | null;
-    pdfPrimaryColor?: string | null;
-    pdfAccentColor?: string | null;
-    themePrimary?: string | null;
-    themeSecondary?: string | null;
-    themeAccent?: string | null;
-    themeSuccess?: string | null;
-  }>({
-    queryKey: ["settings-for-pdf"],
-    queryFn: () => apiFetch(`${BASE_URL}/api/settings`),
-    staleTime: 10 * 60_000,
-  });
 
   const { data: agentProfile, isFetched: isAgentProfileFetched } = useQuery<{
     logoUrl?: string | null;
@@ -510,6 +564,15 @@ export default function CourseFinder() {
         const allData = await apiFetch(`${BASE_URL}/api/course-finder?${allParams.toString()}`) as { data: Program[] };
         selected = allData.data.filter(p => selectedIds.has(p.id));
       }
+      const [{ generateProposalPdf }, settings] = await Promise.all([
+        import("@/lib/generateProposalPdf"),
+        queryClient.fetchQuery<PdfSettings>({
+          queryKey: ["settings-for-pdf"],
+          queryFn: () => apiFetch(`${BASE_URL}/api/settings`),
+          staleTime: 10 * 60_000,
+          gcTime: 30 * 60_000,
+        }),
+      ]);
       const proposalBranding = resolveProposalBranding(user?.role, settings, agentProfile);
       const agencyBrandedProposal =
         user?.role === "agent" || user?.role === "sub_agent" || user?.role === "agent_staff";
@@ -697,6 +760,7 @@ export default function CourseFinder() {
       "University Type": p.universityType || "",
       "Status": p.universityStatus || "",
     }));
+    const XLSX = await import("xlsx");
     const ws = XLSX.utils.json_to_sheet(rows);
     const colWidths = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length, 14) }));
     ws["!cols"] = colWidths;
@@ -1121,16 +1185,18 @@ export default function CourseFinder() {
         showCommission={!!showCommission}
       />
 
-      {canUsePdfMarkup && !effectiveForceHideServiceFee && (
-        <PdfMarkupModal
-          open={markupModalOpen}
-          onOpenChange={setMarkupModalOpen}
-          currentMarkup={pdfMarkup}
-          onApply={setPdfMarkup}
-          currency={programs[0]?.currency || "USD"}
-          sampleFee={programs[0]?.serviceFeeAmount}
-          allowNegative={!!canUseNegativeMarkup}
-        />
+      {canUsePdfMarkup && !effectiveForceHideServiceFee && markupModalOpen && (
+        <Suspense fallback={null}>
+          <LazyPdfMarkupModal
+            open={markupModalOpen}
+            onOpenChange={setMarkupModalOpen}
+            currentMarkup={pdfMarkup}
+            onApply={setPdfMarkup}
+            currency={programs[0]?.currency || "USD"}
+            sampleFee={programs[0]?.serviceFeeAmount}
+            allowNegative={!!canUseNegativeMarkup}
+          />
+        </Suspense>
       )}
     </>
   );
@@ -2114,7 +2180,11 @@ function ApplyDropZone({ docType, uploaded, onFile, onUpload, onRemove }: {
         )}
         <input ref={inputRef} type="file" multiple={!isSingleImageDocumentType(docType.key)} accept={docType.accept} className="hidden"
           onChange={(e) => { void handleFiles(Array.from(e.target.files || [])); e.target.value = ""; }} />
-        <DocumentScanner open={scannerOpen} onClose={() => setScannerOpen(false)} baseName={docType.key} onCapture={handleFile} />
+        {scannerOpen && (
+          <Suspense fallback={null}>
+            <LazyDocumentScanner open onClose={() => setScannerOpen(false)} baseName={docType.key} onCapture={handleFile} />
+          </Suspense>
+        )}
       </div>
       </>
     );
@@ -2154,12 +2224,16 @@ function ApplyDropZone({ docType, uploaded, onFile, onUpload, onRemove }: {
       >
         <Camera className="w-3 h-3" /> {t("scanner.scanWithCamera")}
       </button>
-      <DocumentScanner
-        open={scannerOpen}
-        onClose={() => setScannerOpen(false)}
-        baseName={docType.key}
-        onCapture={handleFile}
-      />
+      {scannerOpen && (
+        <Suspense fallback={null}>
+          <LazyDocumentScanner
+            open
+            onClose={() => setScannerOpen(false)}
+            baseName={docType.key}
+            onCapture={handleFile}
+          />
+        </Suspense>
+      )}
     </div>
     </>
   );
