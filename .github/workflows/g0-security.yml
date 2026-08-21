@@ -1,0 +1,77 @@
+name: G0 Security Gate
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: g0-security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  g0-security:
+    name: Migration, isolation, and control-plane checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ALLOW_LIVE_INTEGRATIONS: "false"
+      CI: "true"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5433/fasos_apply_local
+      NODE_ENV: test
+      NO_COLOR: "1"
+
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Activate the repository-pinned pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.2 --activate
+          test "$(pnpm --version)" = "10.33.2"
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate the migration ledger
+        run: node lib/db/validate-migrations.mjs
+
+      - name: Type-check the workspace
+        run: pnpm run typecheck
+
+      - name: Build the API artifact
+        run: pnpm --filter @workspace/api-server run build
+
+      - name: Run G0 security and control-plane tests
+        run: |
+          pnpm --filter @workspace/api-server run test:change-set-command
+          pnpm --filter @workspace/api-server run test:change-set-policy
+          pnpm --filter @workspace/api-server run test:active-tenant-context
+          pnpm --filter @workspace/api-server run test:security-regressions
+          pnpm --filter @workspace/api-server run test:session-lifetime
+          pnpm --filter @workspace/api-server run test:user-management-policy
+          pnpm --filter @workspace/api-server run test:impersonation-policy
+          pnpm --filter @workspace/api-server run test:ai-delivery-safety
+          pnpm --filter @workspace/api-server run test:migration-authority
+
+      - name: Run production safety contract tests
+        run: |
+          pnpm run test:pm2-safety
+          pnpm run test:data-boundaries
+
+      - name: Detect tenant-writer inventory drift
+        run: pnpm run audit:tenant-writers
+
+      - name: Detect legacy role-gate inventory drift
+        run: pnpm run audit:legacy-role-gates

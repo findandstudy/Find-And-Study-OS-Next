@@ -171,11 +171,14 @@ test("release cutover rejects canonical processes outside the current symlink", 
 });
 
 test("deploy entrypoints use preflight and contain no blind fallback", () => {
-  const deploy = readFileSync(path.join(__dirname, "deploy.sh"), "utf8");
+  const deploy = readFileSync(
+    path.join(__dirname, "deploy.sh"),
+    "utf8",
+  ).replace(/\r\n?/g, "\n");
   const compatibility = readFileSync(
     path.join(root, "scripts/deploy.sh"),
     "utf8",
-  );
+  ).replace(/\r\n?/g, "\n");
   assert.match(deploy, /node deploy\/pm2-preflight\.cjs/);
   assert.match(deploy, /node deploy\/nginx-preflight\.cjs/);
   assert.match(deploy, /CANDIDATE_PORT/);
@@ -268,7 +271,15 @@ test("Nginx preflight rejects direct, missing-backup and unrelated host routes",
   );
 });
 
-test("Nginx installer changes only explicit files and keeps rollback copies", () => {
+test("Nginx installer changes only explicit files and keeps rollback copies", (t) => {
+  const bashProbe = spawnSync("bash", ["-c", "exit 0"], {
+    encoding: "utf8",
+  });
+  if (bashProbe.error || bashProbe.status !== 0) {
+    t.skip("a working bash runtime is unavailable on this host");
+    return;
+  }
+
   const directory = mkdtempSync(
     path.join(tmpdir(), "fasos-nginx-install-test-"),
   );
