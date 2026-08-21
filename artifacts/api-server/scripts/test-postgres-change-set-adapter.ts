@@ -522,6 +522,7 @@ async function main() {
     idle_in_transaction_session_timeout: 15_000,
   });
   try {
+    const evidenceFailures: string[] = [];
     const store = new PostgresChangeSetCommandStore(executorPool, {
       expectedRole: ROLE.commandExecutor,
       expectedEnvironmentId: "test-ci",
@@ -532,6 +533,7 @@ async function main() {
         stepUpSatisfied: false,
         stepUpReceiptId: null,
       }),
+      onEvidenceVerificationFailure: (reason) => evidenceFailures.push(reason),
     });
     const context = verifiedContext();
     const created = await executeCreateR1ChangeSetCommand({
@@ -715,7 +717,7 @@ async function main() {
         transitionReceiptId: ID.transitionReceipt,
         approvalReceiptId: null,
       },
-    });
+    }, `evidence failures: ${evidenceFailures.join(", ")}`);
 
     const replayed = await executeTransitionR1ChangeSetCommand({
       context,

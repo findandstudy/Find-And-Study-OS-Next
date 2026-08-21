@@ -72,6 +72,7 @@ export type PostgresChangeSetCommandStoreOptions = {
   expectedEnvironmentId: string;
   expectedCellId: string;
   resolveMutationAssurance: PostgresMutationAssuranceResolver;
+  onEvidenceVerificationFailure?: (reason: string) => void;
   now?: () => number;
 };
 
@@ -130,6 +131,15 @@ class PostgresChangeSetCommandTransaction
     if (this.tenantId !== tenantId) {
       throw new Error("change_set_transaction_tenant_mismatch");
     }
+  }
+
+  private evidenceUnavailable(reason: string): null {
+    try {
+      this.options.onEvidenceVerificationFailure?.(reason);
+    } catch {
+      // A diagnostic observer must never turn a fail-closed decision into an error path.
+    }
+    return null;
   }
 
   private async rpc<T>(name: string, values: readonly unknown[]): Promise<T> {
@@ -243,13 +253,19 @@ class PostgresChangeSetCommandTransaction
       input.actorPrincipalId,
       input.toState,
     ]);
-    if (!Array.isArray(rows) || rows.length === 0) return null;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return this.evidenceUnavailable("evidence_rows_unavailable");
+    }
     const now = this.options.now?.() ?? Date.now();
-    if (!Number.isSafeInteger(now) || now < 0) return null;
+    if (!Number.isSafeInteger(now) || now < 0) {
+      return this.evidenceUnavailable("evidence_clock_invalid");
+    }
 
     const receipts: VerifiedTransitionEvidence["receipts"] = [];
     for (const row of rows) {
-      if (!isRecord(row)) return null;
+      if (!isRecord(row)) {
+        return this.evidenceUnavailable("evidence_row_invalid");
+      }
       try {
         const publicKey = crypto.createPublicKey({
           key: Buffer.from(String(row.publicKeySpkiBase64), "base64"),
@@ -294,7 +310,9 @@ class PostgresChangeSetCommandTransaction
           expectedEnvironmentId: this.options.expectedEnvironmentId,
           expectedCellId: this.options.expectedCellId,
         });
-        if (!verified.ok) return null;
+        if (!verified.ok) {
+          return this.evidenceUnavailable(`evidence_${verified.reason}`);
+        }
         const claims = verified.claims;
         receipts.push({
           id: claims.receiptId,
@@ -316,7 +334,7 @@ class PostgresChangeSetCommandTransaction
           consumedAt: null,
         });
       } catch {
-        return null;
+        return this.evidenceUnavailable("evidence_key_or_claim_invalid");
       }
     }
     return { receipts };
@@ -426,7 +444,9 @@ export class PostgresChangeSetCommandStore implements ChangeSetCommandStore {
     if (
       !IDENTIFIER_RE.test(options.expectedEnvironmentId) ||
       !IDENTIFIER_RE.test(options.expectedCellId) ||
-      typeof options.resolveMutationAssurance !== "function"
+      typeof options.resolveMutationAssurance !== "function" ||
+      (options.onEvidenceVerificationFailure !== undefined &&
+        typeof options.onEvidenceVerificationFailure !== "function")
     ) {
       throw new Error("change_set_store_configuration_invalid");
     }
@@ -489,6 +509,7 @@ export function createPostgresChangeSetCommandStore(
     expectedEnvironmentId: options.expectedEnvironmentId,
     expectedCellId: options.expectedCellId,
     resolveMutationAssurance: options.resolveMutationAssurance,
+    onEvidenceVerificationFailure: options.onEvidenceVerificationFailure,
     now: options.now,
   });
 }
