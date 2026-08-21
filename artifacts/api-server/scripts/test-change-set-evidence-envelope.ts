@@ -298,6 +298,7 @@ test("0058 keeps keys opaque, tenant grants scoped, and audit append-only", () =
   );
   assert.match(migration, /change_set_command_audit_events_immutable/);
   assert.match(migration, /audit chain must begin with ATTEMPT_STARTED/);
+  assert.match(migration, /pg_advisory_xact_lock/);
   assert.match(
     migration,
     /REVOKE ALL ON TABLE public\.change_set_evidence_signing_keys FROM PUBLIC/,

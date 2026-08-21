@@ -599,12 +599,16 @@ DECLARE
   prior_hash text;
 BEGIN
   NEW.occurred_at := statement_timestamp();
+  -- The audit table intentionally has no UPDATE policy. Serialize each
+  -- tenant/attempt chain without requiring row-update visibility or DML.
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(NEW.tenant_id::text || ':' || NEW.attempt_id::text, 0)
+  );
   SELECT sequence, event_hash INTO prior_sequence, prior_hash
   FROM public.change_set_command_audit_events
   WHERE tenant_id = NEW.tenant_id AND attempt_id = NEW.attempt_id
   ORDER BY sequence DESC
-  LIMIT 1
-  FOR UPDATE;
+  LIMIT 1;
 
   IF prior_sequence IS NULL THEN
     IF NEW.sequence <> 1 OR NEW.previous_hash IS NOT NULL OR NEW.phase <> 'ATTEMPT_STARTED' THEN
