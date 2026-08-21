@@ -4,10 +4,11 @@ const path = require("node:path");
 const FOREIGN_LOCKFILES = ["package-lock.json", "yarn.lock"];
 const REQUIRED_USER_AGENT = /^pnpm\/10\.33\.2(?:\s|$)/;
 
-function enforcePnpm({
-  repoRoot = path.resolve(__dirname, ".."),
-  userAgent = process.env.npm_config_user_agent,
-} = {}) {
+function enforcePnpm(options = {}) {
+  const repoRoot = options.repoRoot ?? path.resolve(__dirname, "..");
+  const userAgent = Object.prototype.hasOwnProperty.call(options, "userAgent")
+    ? options.userAgent
+    : process.env.npm_config_user_agent;
   if (typeof userAgent !== "string" || !REQUIRED_USER_AGENT.test(userAgent)) {
     return {
       allowed: false,
