@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
@@ -15,6 +16,7 @@ import {
   type ChangeSetApprovalInsert,
   type ChangeSetCommandClaim,
   type ChangeSetCommandClaimResult,
+  type ChangeSetCommandAttemptReceiptInsert,
   type ChangeSetCommandStore,
   type ChangeSetCommandSuccess,
   type ChangeSetCommandTransaction,
@@ -24,6 +26,7 @@ import {
   type VerifiedTransitionEvidence,
 } from "../src/lib/changeSetCommand.js";
 import type { R1ChangeSetDraft } from "../src/lib/changeSetPolicy.js";
+import { canonicalJson } from "../src/lib/jsonCanonical.js";
 
 const NOW = 2_000_000_000_000;
 const SECRET = "change-set-command-test-secret-32-bytes-minimum";
@@ -139,6 +142,7 @@ type ClaimRow = ChangeSetCommandClaim & {
 };
 
 const DEFAULT_AUTHORITATIVE_CONFIGURATION: AuthoritativeR1Configuration = {
+  configurationKey: "journey.beta",
   version: 1,
   activeProposalId: null,
   config: {
@@ -155,7 +159,9 @@ class MemoryStore implements ChangeSetCommandStore {
   receipts: ChangeSetTransitionReceiptInsert[] = [];
   approvals: ChangeSetApprovalInsert[] = [];
   accessDecisions: AccessDecisionReceiptInsert[] = [];
+  commandAttempts: ChangeSetCommandAttemptReceiptInsert[] = [];
   drafts: R1ChangeSetDraft[] = [];
+  consumedEvidenceIds = new Set<string>();
   verifiedEvidenceOverride: VerifiedTransitionEvidence | null | undefined;
   events: string[] = [];
 
@@ -179,7 +185,9 @@ class MemoryStore implements ChangeSetCommandStore {
     const receipts = structuredClone(this.receipts);
     const approvals = structuredClone(this.approvals);
     const accessDecisions = structuredClone(this.accessDecisions);
+    const commandAttempts = structuredClone(this.commandAttempts);
     const drafts = structuredClone(this.drafts);
+    const consumedEvidenceIds = new Set(this.consumedEvidenceIds);
     const events: string[] = [];
     let activeTenant: string | null = null;
     const requireTenant = (tenantId: string) => {
@@ -193,6 +201,7 @@ class MemoryStore implements ChangeSetCommandStore {
       loadAuthoritativeR1ConfigurationForUpdate: async ({
         tenantId,
         changeType,
+        configurationKey,
         targetScope,
       }) => {
         requireTenant(tenantId);
@@ -202,6 +211,7 @@ class MemoryStore implements ChangeSetCommandStore {
           (draft) =>
             draft.tenantId === tenantId &&
             draft.changeType === changeType &&
+            draft.configurationKey === configurationKey &&
             JSON.stringify(draft.targetScope) === JSON.stringify(targetScope),
         );
         return {
@@ -211,12 +221,12 @@ class MemoryStore implements ChangeSetCommandStore {
             (activeIndex >= 0 ? [...changes.keys()][activeIndex] : null),
         };
       },
-      resolveActiveContextState: async (context) => {
+      resolveActiveContextStateForUpdate: async (context) => {
         requireTenant(context.tenantId);
         events.push("RESOLVE_STATE");
         return this.stateResolver(context);
       },
-      resolveMutationAssurance: async (context) => {
+      resolveMutationAssuranceForUpdate: async (context) => {
         requireTenant(context.tenantId);
         events.push("RESOLVE_ASSURANCE");
         return this.assurance;
@@ -237,7 +247,9 @@ class MemoryStore implements ChangeSetCommandStore {
         }
         if (
           existing.requestHash !== claim.requestHash ||
-          existing.actorPrincipalId !== claim.actorPrincipalId
+          existing.contextId !== claim.contextId ||
+          existing.actorPrincipalId !== claim.actorPrincipalId ||
+          existing.actorMembershipId !== claim.actorMembershipId
         )
           return { kind: "CONFLICT", commandReceiptId: existing.id };
         if (existing.status !== "COMPLETED") {
@@ -247,7 +259,9 @@ class MemoryStore implements ChangeSetCommandStore {
           kind: "REPLAY",
           commandReceiptId: existing.id,
           requestHash: existing.requestHash,
+          contextId: existing.contextId,
           actorPrincipalId: existing.actorPrincipalId,
+          actorMembershipId: existing.actorMembershipId,
           result: existing.result,
           resultHash: existing.resultHash,
         } satisfies ChangeSetCommandClaimResult;
@@ -284,52 +298,56 @@ class MemoryStore implements ChangeSetCommandStore {
                 | "ROLLBACK_PLAN"
                 | "CANARY_PLAN"
               ),
+              number | null,
             ]
           >,
-          evidence: Record<string, unknown>,
         ) => ({
-          receipts: receiptSpecs.map(([id, kind]) => ({
-            id,
-            kind,
-            issuer: "fas-evidence-service",
-            toolVersion: "test-v1",
-            tenantId,
-            changeSetId,
-            targetState: toState,
-            requestedByPrincipalId: actorPrincipalId,
-            subjectHash: changeSet.proposedHash,
-            policyVersionId: changeSet.approvalPolicyVersion,
-            issuedAt: NOW - 1_000,
-            expiresAt: NOW + 60_000,
-            consumedAt: null,
-          })),
-          evidence,
+          receipts: receiptSpecs.map(([id, kind, artifactCount]) => {
+            const outcome = "PASSED" as const;
+            const outcomeHash = crypto
+              .createHash("sha256")
+              .update(canonicalJson({ kind, outcome, artifactCount }), "utf8")
+              .digest("hex");
+            return {
+              id,
+              kind,
+              issuer: "fas-evidence-service",
+              toolVersion: "test-v1",
+              tenantId,
+              changeSetId,
+              targetState: toState,
+              requestedByPrincipalId: actorPrincipalId,
+              requestedByMembershipId:
+                actorPrincipalId === ID.maker
+                  ? ID.makerMembership
+                  : ID.checkerMembership,
+              subjectHash: changeSet.proposedHash,
+              policyVersionId: changeSet.approvalPolicyVersion,
+              outcome,
+              artifactCount,
+              outcomeHash,
+              issuedAt: NOW - 1_000,
+              expiresAt: NOW + 60_000,
+              consumedAt: consumedEvidenceIds.has(id) ? NOW : null,
+            };
+          }),
         });
         if (toState === "VALIDATED") {
-          return envelope([[ID.validationReceipt, "VALIDATION"]], {
-            validationPassed: true,
-          });
+          return envelope([[ID.validationReceipt, "VALIDATION", null]]);
         }
         if (toState === "SIMULATED") {
-          return envelope([[ID.simulationReceipt, "SIMULATION"]], {
-            simulationPassed: true,
-          });
+          return envelope([[ID.simulationReceipt, "SIMULATION", null]]);
         }
         if (toState === "IN_REVIEW") {
           return envelope(
             [
-              [ID.testArtifactReceipt, "TEST_ARTIFACT"],
-              [ID.rollbackPlanReceipt, "ROLLBACK_PLAN"],
-              [ID.canaryPlanReceipt, "CANARY_PLAN"],
+              [ID.testArtifactReceipt, "TEST_ARTIFACT", 1],
+              [ID.rollbackPlanReceipt, "ROLLBACK_PLAN", null],
+              [ID.canaryPlanReceipt, "CANARY_PLAN", null],
             ],
-            {
-              rollbackReady: true,
-              canaryPrepared: true,
-              testEvidenceCount: 1,
-            },
           );
         }
-        return envelope([[ID.validationReceipt, "VALIDATION"]], {});
+        return envelope([[ID.validationReceipt, "VALIDATION", null]]);
       },
       loadLatestTransitionReceiptHash: async (tenantId, changeSetId) => {
         requireTenant(tenantId);
@@ -350,6 +368,23 @@ class MemoryStore implements ChangeSetCommandStore {
         events.push("INSERT_ACCESS_DECISION");
         accessDecisions.push(receipt);
       },
+      insertCommandAttemptReceipt: async (receipt) => {
+        requireTenant(receipt.tenantId);
+        events.push("INSERT_COMMAND_ATTEMPT");
+        commandAttempts.push(receipt);
+      },
+      consumeVerifiedTransitionEvidence: async ({
+        tenantId,
+        changeSetId,
+        receiptIds,
+      }) => {
+        requireTenant(tenantId);
+        events.push("CONSUME_VERIFIED_EVIDENCE");
+        if (!changes.has(changeSetId)) return false;
+        if (receiptIds.some((id) => consumedEvidenceIds.has(id))) return false;
+        receiptIds.forEach((id) => consumedEvidenceIds.add(id));
+        return true;
+      },
       insertChangeSet: async ({ id, draft }) => {
         requireTenant(draft.tenantId);
         events.push("INSERT_CHANGE_SET");
@@ -357,6 +392,7 @@ class MemoryStore implements ChangeSetCommandStore {
         changes.set(id, {
           id,
           tenantId: draft.tenantId,
+          configurationKey: draft.configurationKey,
           makerPrincipalId: draft.makerPrincipalId,
           targetScope: draft.targetScope,
           proposedHash: draft.proposedHash,
@@ -416,7 +452,9 @@ class MemoryStore implements ChangeSetCommandStore {
     this.receipts = receipts;
     this.approvals = approvals;
     this.accessDecisions = accessDecisions;
+    this.commandAttempts = commandAttempts;
     this.drafts = drafts;
+    this.consumedEvidenceIds = consumedEvidenceIds;
     this.events.push(...events);
     return result;
   }
@@ -426,6 +464,24 @@ function idFactory(start = 100) {
   let counter = start;
   return () =>
     `018f2000-0000-7000-8000-${(counter++).toString(16).padStart(12, "0")}`;
+}
+
+function evidenceOutcomeHash(
+  kind:
+    | "VALIDATION"
+    | "SIMULATION"
+    | "TEST_ARTIFACT"
+    | "ROLLBACK_PLAN"
+    | "CANARY_PLAN",
+  artifactCount: number | null,
+) {
+  return crypto
+    .createHash("sha256")
+    .update(
+      canonicalJson({ kind, outcome: "PASSED", artifactCount }),
+      "utf8",
+    )
+    .digest("hex");
 }
 
 function createCommand(idempotencyKey = "create:journey-beta:0001") {
@@ -452,6 +508,7 @@ function existingChangeSet(): StoredR1ChangeSet {
   return {
     id: ID.existingChangeSet,
     tenantId: ID.tenant,
+    configurationKey: "journey.beta",
     makerPrincipalId: ID.maker,
     targetScope: {
       type: "TENANT",
@@ -493,8 +550,10 @@ test("create derives authority from verified context and commits one idempotent 
     "RESOLVE_STATE",
     "RESOLVE_ASSURANCE",
     "CLAIM",
-    "INSERT_ACCESS_DECISION",
     "LOAD_AUTHORITATIVE_CONFIG",
+    "RESOLVE_STATE",
+    "RESOLVE_ASSURANCE",
+    "INSERT_ACCESS_DECISION",
     "INSERT_CHANGE_SET",
     "COMPLETE_COMMAND",
   ]);
@@ -570,6 +629,26 @@ test("create rejects client authority fields and requires a server baseline", as
   });
   assert.equal(missingBaseline.claims.size, 0);
   assert.equal(missingBaseline.accessDecisions.length, 0);
+
+  const wrongIdentity = new MemoryStore(stateResolver, assurance, {
+    ...DEFAULT_AUTHORITATIVE_CONFIGURATION,
+    configurationKey: "another.flag",
+  });
+  const identityRejected = await executeCreateR1ChangeSetCommand({
+    context,
+    command: createCommand("create:wrong-config-identity:0001"),
+    dependencies: {
+      store: wrongIdentity,
+      nextUuidV7: idFactory(),
+      now: () => NOW,
+    },
+  });
+  assert.deepEqual(identityRejected, {
+    ok: false,
+    reason: "draft_rejected",
+    detail: "authoritative_baseline_unavailable",
+  });
+  assert.equal(wrongIdentity.claims.size, 0);
 });
 
 test("both command entrypoints reject an unverified runtime context", async () => {
@@ -625,6 +704,55 @@ test("a previously verified context fails closed after its TTL", async () => {
   assert.deepEqual(store.events, []);
 });
 
+test("context expiry and authorization revoke during a locked command roll the transaction back", async () => {
+  const context = verifiedContext("maker");
+  const expiringStore = new MemoryStore(
+    (active) => resolvedState(active, ["control_plane.flag.create"]),
+    { impersonating: false, stepUpSatisfied: false, stepUpReceiptId: null },
+  );
+  const clockValues = [NOW, NOW, NOW + 60_000];
+  const expired = await executeCreateR1ChangeSetCommand({
+    context,
+    command: createCommand("create:expires-during-lock:0001"),
+    dependencies: {
+      store: expiringStore,
+      nextUuidV7: idFactory(),
+      now: () => clockValues.shift() ?? NOW + 60_000,
+    },
+  });
+  assert.deepEqual(expired, { ok: false, reason: "unverified_context" });
+  assert.equal(expiringStore.claims.size, 0);
+  assert.equal(expiringStore.accessDecisions.length, 0);
+  assert.equal(expiringStore.changes.size, 0);
+
+  let resolutions = 0;
+  const revokedStore = new MemoryStore(
+    (active) => {
+      resolutions += 1;
+      const value = resolvedState(active, ["control_plane.flag.create"]);
+      if (resolutions > 1) value.membership.status = "REVOKED";
+      return value;
+    },
+    { impersonating: false, stepUpSatisfied: false, stepUpReceiptId: null },
+  );
+  const revoked = await executeCreateR1ChangeSetCommand({
+    context,
+    command: createCommand("create:revoked-during-lock:0001"),
+    dependencies: {
+      store: revokedStore,
+      nextUuidV7: idFactory(),
+      now: () => NOW,
+    },
+  });
+  assert.equal(revoked.ok, false);
+  if (revoked.ok) throw new Error("unexpected allow");
+  assert.equal(revoked.reason, "authorization_denied");
+  assert.equal(revoked.authorizationReason, "membership_inactive");
+  assert.equal(revokedStore.claims.size, 0);
+  assert.equal(revokedStore.accessDecisions.length, 0);
+  assert.equal(revokedStore.changes.size, 0);
+});
+
 test("missing capability and impersonation deny before an idempotency claim", async () => {
   const context = verifiedContext("maker");
   const denied = new MemoryStore((active) => resolvedState(active, []), {
@@ -641,6 +769,9 @@ test("missing capability and impersonation deny before an idempotency claim", as
   if (deniedResult.ok) throw new Error("unexpected allow");
   assert.equal(deniedResult.reason, "authorization_denied");
   assert.equal(denied.claims.size, 0);
+  assert.equal(denied.accessDecisions.length, 1);
+  assert.equal(denied.accessDecisions[0].decision, "DENY");
+  assert.equal(denied.accessDecisions[0].reasonCode, "capability_missing");
 
   const impersonating = new MemoryStore(
     (active) => resolvedState(active, ["control_plane.flag.create"]),
@@ -659,6 +790,47 @@ test("missing capability and impersonation deny before an idempotency claim", as
   if (impersonatedResult.ok) throw new Error("unexpected allow");
   assert.equal(impersonatedResult.reason, "impersonation_forbidden");
   assert.equal(impersonating.claims.size, 0);
+  assert.equal(impersonating.accessDecisions.length, 1);
+  assert.equal(impersonating.accessDecisions[0].decision, "DENY");
+  assert.equal(
+    impersonating.accessDecisions[0].reasonCode,
+    "impersonation_forbidden",
+  );
+});
+
+test("malformed mutation assurance fails closed before an idempotency claim", async () => {
+  const context = verifiedContext("maker");
+  for (const assurance of [
+    {
+      impersonating: undefined,
+      stepUpSatisfied: false,
+      stepUpReceiptId: null,
+    },
+    {
+      impersonating: false,
+      stepUpSatisfied: "yes",
+      stepUpReceiptId: ID.stepUp,
+    },
+    {
+      impersonating: false,
+      stepUpSatisfied: true,
+      stepUpReceiptId: null,
+    },
+  ]) {
+    const store = new MemoryStore(
+      (active) => resolvedState(active, ["control_plane.flag.create"]),
+      assurance as unknown as MutationAssurance,
+    );
+    const result = await executeCreateR1ChangeSetCommand({
+      context,
+      command: createCommand(`create:bad-assurance:${store.accessDecisions.length}:0001`),
+      dependencies: { store, nextUuidV7: idFactory(62), now: () => NOW },
+    });
+    assert.deepEqual(result, { ok: false, reason: "invalid_mutation_assurance" });
+    assert.equal(store.claims.size, 0);
+    assert.equal(store.accessDecisions.length, 1);
+    assert.equal(store.accessDecisions[0].reasonCode, "invalid_mutation_assurance");
+  }
 });
 
 test("idempotency key reuse with a changed request fails closed", async () => {
@@ -681,6 +853,8 @@ test("idempotency key reuse with a changed request fails closed", async () => {
   });
   assert.deepEqual(reused, { ok: false, reason: "idempotency_key_reused" });
   assert.equal(store.changes.size, 1);
+  assert.equal(store.commandAttempts.length, 1);
+  assert.equal(store.commandAttempts[0].outcome, "CONFLICT");
 });
 
 test("a second active proposal for the same scope, type, and base is rejected", async () => {
@@ -732,6 +906,28 @@ test("runtime scope, clock, generated IDs, and replay projections fail closed", 
     },
   });
   assert.deepEqual(invalidScope, {
+    ok: false,
+    reason: "draft_rejected",
+    detail: "invalid_scope",
+  });
+  const smuggledScope = await executeCreateR1ChangeSetCommand({
+    context,
+    command: {
+      ...createCommand("create:scope-smuggling:0001"),
+      targetScope: {
+        type: "TENANT",
+        organizationId: null,
+        legacyBranchId: null,
+        tenantId: ID.tenant,
+      } as unknown as ReturnType<typeof createCommand>["targetScope"],
+    },
+    dependencies: {
+      store: makeStore(),
+      nextUuidV7: idFactory(),
+      now: () => NOW,
+    },
+  });
+  assert.deepEqual(smuggledScope, {
     ok: false,
     reason: "draft_rejected",
     detail: "invalid_scope",
@@ -825,9 +1021,12 @@ test("validated transition is atomic, idempotent, and audit-correlated", async (
     "RESOLVE_STATE",
     "RESOLVE_ASSURANCE",
     "CLAIM",
-    "INSERT_ACCESS_DECISION",
     "LOAD_RECEIPT_HASH",
     "LOAD_VERIFIED_EVIDENCE",
+    "RESOLVE_STATE",
+    "RESOLVE_ASSURANCE",
+    "INSERT_ACCESS_DECISION",
+    "CONSUME_VERIFIED_EVIDENCE",
     "INSERT_TRANSITION_RECEIPT",
     "UPDATE_CHANGE_SET",
     "COMPLETE_COMMAND",
@@ -878,8 +1077,12 @@ test("transition rejects missing or mismatched server-issued evidence receipts",
     changeSetId: ID.existingChangeSet,
     targetState: "VALIDATED" as const,
     requestedByPrincipalId: ID.maker,
+    requestedByMembershipId: ID.makerMembership,
     subjectHash: "b".repeat(64),
     policyVersionId: ID.policy,
+    outcome: "PASSED" as const,
+    artifactCount: null,
+    outcomeHash: evidenceOutcomeHash("VALIDATION", null),
     issuedAt: NOW - 1_000,
     expiresAt: NOW + 60_000,
     consumedAt: null,
@@ -893,35 +1096,72 @@ test("transition rejects missing or mismatched server-issued evidence receipts",
       label: "subject",
       override: {
         receipts: [{ ...validReceipt, subjectHash: "c".repeat(64) }],
-        evidence: { validationPassed: true },
       },
     },
     {
       label: "policy",
       override: {
         receipts: [{ ...validReceipt, policyVersionId: ID.package }],
-        evidence: { validationPassed: true },
+      },
+    },
+    {
+      label: "membership",
+      override: {
+        receipts: [
+          { ...validReceipt, requestedByMembershipId: ID.checkerMembership },
+        ],
+      },
+    },
+    {
+      label: "issuer-tool",
+      override: {
+        receipts: [{ ...validReceipt, toolVersion: "unregistered-v9" }],
+      },
+    },
+    {
+      label: "failed-outcome",
+      override: {
+        receipts: [
+          {
+            ...validReceipt,
+            outcome: "FAILED",
+            outcomeHash: crypto
+              .createHash("sha256")
+              .update(
+                canonicalJson({
+                  kind: "VALIDATION",
+                  outcome: "FAILED",
+                  artifactCount: null,
+                }),
+                "utf8",
+              )
+              .digest("hex"),
+          },
+        ],
+      } as unknown as VerifiedTransitionEvidence,
+    },
+    {
+      label: "outcome-hash",
+      override: {
+        receipts: [{ ...validReceipt, outcomeHash: "c".repeat(64) }],
       },
     },
     {
       label: "kind",
       override: {
         receipts: [{ ...validReceipt, kind: "SIMULATION" }],
-        evidence: { validationPassed: true },
       },
     },
     {
       label: "expired",
       override: {
         receipts: [{ ...validReceipt, expiresAt: NOW }],
-        evidence: { validationPassed: true },
       },
     },
     {
       label: "cross-change-set",
       override: {
         receipts: [{ ...validReceipt, changeSetId: ID.tenant }],
-        evidence: { validationPassed: true },
       },
     },
     {
@@ -933,7 +1173,6 @@ test("transition rejects missing or mismatched server-issued evidence receipts",
             consumedAt: NOW,
           } as unknown as typeof validReceipt,
         ],
-        evidence: { validationPassed: true },
       },
     },
   ];
@@ -959,6 +1198,53 @@ test("transition rejects missing or mismatched server-issued evidence receipts",
     assert.equal(store.claims.size, 0);
     assert.equal(store.receipts.length, 0);
   }
+});
+
+test("transition evidence is consumed atomically and cannot be reused by another command", async () => {
+  const context = verifiedContext("maker");
+  const store = new MemoryStore(
+    (active) => resolvedState(active, ["control_plane.change.validate"]),
+    { impersonating: false, stepUpSatisfied: true, stepUpReceiptId: ID.stepUp },
+  );
+  store.changes.set(ID.existingChangeSet, {
+    ...existingChangeSet(),
+    status: "DRAFT",
+    version: 1,
+    reviewRound: 0,
+  });
+  const dependencies = { store, nextUuidV7: idFactory(800), now: () => NOW };
+  const base = {
+    changeSetId: ID.existingChangeSet,
+    expectedVersion: 1,
+    toState: "VALIDATED" as const,
+    reasonCode: "consume_validation_receipt",
+  };
+  const first = await executeTransitionR1ChangeSetCommand({
+    context,
+    command: { ...base, idempotencyKey: "validate:consume-once:0001" },
+    dependencies,
+  });
+  assert.equal(first.ok, true);
+  assert.equal(store.consumedEvidenceIds.has(ID.validationReceipt), true);
+
+  store.changes.set(ID.existingChangeSet, {
+    ...existingChangeSet(),
+    status: "DRAFT",
+    version: 1,
+    reviewRound: 0,
+  });
+  const reused = await executeTransitionR1ChangeSetCommand({
+    context,
+    command: { ...base, idempotencyKey: "validate:consume-once:0002" },
+    dependencies,
+  });
+  assert.deepEqual(reused, {
+    ok: false,
+    reason: "transition_rejected",
+    detail: "verified_evidence_unavailable",
+  });
+  assert.equal(store.claims.size, 1);
+  assert.equal(store.receipts.length, 1);
 });
 
 test("the first command slice rejects publish, decision, and client-supplied authority evidence", async () => {
@@ -1143,4 +1429,53 @@ test("idempotency migration forces RLS and allows only one-way completion", () =
     /change set command completion evidence is incomplete/,
   );
   assert.match(migration, /change_set_command_receipts_immutable_delete/);
+});
+
+test("0057 binds tenant branches, memberships, policy, and single-use evidence", () => {
+  const migration = readFileSync(
+    new URL(
+      "../../../lib/db/drizzle/0057_authorization_control_plane_db_hardening.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(
+    migration,
+    /requires empty default-unwired authorization\/control-plane tables/,
+  );
+  assert.match(migration, /tenant_organization_legacy_branches/);
+  assert.match(migration, /memberships_tenant_id_id_principal_id_uq/);
+  assert.match(migration, /change_sets_tenant_organization_branch_fk/);
+  assert.match(migration, /change_sets_one_active_proposal_per_target_uidx/);
+  assert.match(migration, /change_set_evidence_receipts/);
+  assert.match(migration, /change_set_command_attempt_receipts/);
+  assert.match(migration, /change set evidence is single-use/);
+  assert.match(migration, /change_set_transition_receipts_tenant_command_uq/);
+  assert.match(
+    migration,
+    /transition command completion requires its exact transition receipt/,
+  );
+  assert.match(
+    migration,
+    /transition command completion requires the exact typed evidence set/,
+  );
+  assert.match(
+    migration,
+    /transition receipt requires its atomically completed command and state/,
+  );
+  assert.match(migration, /FROM public\.policy_versions policy[\s\S]+FOR UPDATE/);
+  assert.match(migration, /FROM public\.memberships membership[\s\S]+FOR UPDATE/);
+  assert.match(
+    migration,
+    /change set evidence must be consumed by its bound transition command/,
+  );
+  assert.match(migration, /policy_version_id/);
+  assert.match(migration, /actor_membership_id/);
+  assert.match(migration, /FROM public\.change_sets/);
+  assert.match(migration, /FROM public\.change_set_transition_receipts/);
+  assert.match(migration, /SET search_path TO pg_catalog, public/);
+  assert.doesNotMatch(
+    migration,
+    /ON public\.change_set_evidence_receipts FOR DELETE/,
+  );
 });

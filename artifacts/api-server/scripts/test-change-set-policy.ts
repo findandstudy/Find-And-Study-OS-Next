@@ -22,6 +22,8 @@ const ID = {
   rollback: "018f1000-0000-7000-8000-000000000009",
   failure: "018f1000-0000-7000-8000-00000000000a",
   revocation: "018f1000-0000-7000-8000-00000000000b",
+  ownerMembership: "018f1000-0000-7000-8000-00000000000c",
+  makerMembership: "018f1000-0000-7000-8000-00000000000d",
 };
 
 const allCapabilities = [
@@ -71,6 +73,40 @@ function actor(overrides: Partial<ChangeSetActor> = {}): ChangeSetActor {
   };
 }
 
+function validDraftInput() {
+  return {
+    tenantId: ID.tenantA,
+    changeType: "FEATURE_FLAG",
+    title: "Enable journey beta",
+    purpose: "Canary the reversible journey beta for this tenant.",
+    ownerPrincipalId: ID.checker,
+    ownerMembershipId: ID.ownerMembership,
+    makerPrincipalId: ID.maker,
+    makerMembershipId: ID.makerMembership,
+    targetScope: {
+      type: "TENANT",
+      organizationId: null,
+      legacyBranchId: null,
+    } as const,
+    baseVersion: 7,
+    proposedVersion: 8,
+    baseConfig: {
+      flagKey: "journey.beta",
+      enabled: false,
+      cohortPercent: 0,
+      reason: "Baseline is disabled.",
+    },
+    proposedConfig: {
+      flagKey: "journey.beta",
+      enabled: true,
+      cohortPercent: 5,
+      reason: "Start a bounded internal canary.",
+    },
+    dataClass: "INTERNAL" as const,
+    approvalPolicyVersion: "r1-policy-v1",
+  };
+}
+
 function transition(
   status: ChangeSetState,
   toState: ChangeSetState,
@@ -102,7 +138,9 @@ test("typed feature-flag draft derives R1 risk, hashes, semantic diff, and rollb
     title: "Enable journey beta",
     purpose: "Canary the reversible journey beta for this tenant.",
     ownerPrincipalId: ID.checker,
+    ownerMembershipId: ID.ownerMembership,
     makerPrincipalId: ID.maker,
+    makerMembershipId: ID.makerMembership,
     targetScope: { type: "TENANT", organizationId: null, legacyBranchId: null },
     baseVersion: 7,
     proposedVersion: 8,
@@ -145,7 +183,9 @@ test("code, schema, secret, arbitrary field, and no-op proposals never enter R1"
     title: "Safe change",
     purpose: "A sufficiently detailed and reversible configuration purpose.",
     ownerPrincipalId: ID.checker,
+    ownerMembershipId: ID.ownerMembership,
     makerPrincipalId: ID.maker,
+    makerMembershipId: ID.makerMembership,
     targetScope: {
       type: "TENANT",
       organizationId: null,
@@ -180,6 +220,27 @@ test("code, schema, secret, arbitrary field, and no-op proposals never enter R1"
         enabled: true,
         cohortPercent: 5,
         reason: "Unregistered canary.",
+      },
+    }).reason,
+    "invalid_config_shape",
+  );
+  assert.equal(
+    createR1ChangeSetDraft({
+      ...common,
+      changeType: "NOTIFICATION_TEMPLATE",
+      baseConfig: {
+        templateKey: "application.update",
+        locale: "en",
+        subject: "Application update",
+        body: "There is an update.",
+        variableKeys: [],
+      },
+      proposedConfig: {
+        templateKey: "application.decision",
+        locale: "en",
+        subject: "Application decision",
+        body: "There is a decision.",
+        variableKeys: [],
       },
     }).reason,
     "invalid_config_shape",
@@ -279,6 +340,40 @@ test("code, schema, secret, arbitrary field, and no-op proposals never enter R1"
     }).reason,
     "no_semantic_change",
   );
+});
+
+test("persistent titles, purposes, and transition reasons reject secret-shaped values", () => {
+  const secret = `sk-${"x".repeat(24)}`;
+  const titleSecret = createR1ChangeSetDraft({
+    ...validDraftInput(),
+    title: `Rotate ${secret}`,
+  });
+  assert.deepEqual(titleSecret, {
+    ok: false,
+    reason: "sensitive_material_forbidden",
+  });
+  const purposeSecret = createR1ChangeSetDraft({
+    ...validDraftInput(),
+    purpose: `Enable the rollout with ${secret}`,
+  });
+  assert.deepEqual(purposeSecret, {
+    ok: false,
+    reason: "sensitive_material_forbidden",
+  });
+
+  const current = snapshot("DRAFT");
+  const transition = evaluateR1ChangeSetTransition({
+    changeSet: current,
+    actor: actor(),
+    toState: "VALIDATED",
+    expectedVersion: current.version,
+    reasonCode: `validated ${secret}`,
+    evidence: { validationPassed: true },
+    policyVersion: current.approvalPolicyVersion,
+    previousReceiptHash: null,
+    now: NOW,
+  });
+  assert.deepEqual(transition, { allowed: false, reason: "evidence_invalid" });
 });
 
 test("state skipping, stale versions, cross-tenant actors, and impersonation fail closed", () => {
@@ -489,7 +584,9 @@ test("runtime-shaped invalid input, policy drift, failure, and revocation fail c
       title: "Invalid scope",
       purpose: "Prove runtime input cannot bypass the typed scope union.",
       ownerPrincipalId: ID.checker,
+      ownerMembershipId: ID.ownerMembership,
       makerPrincipalId: ID.maker,
+      makerMembershipId: ID.makerMembership,
       targetScope: null as unknown as Parameters<
         typeof createR1ChangeSetDraft
       >[0]["targetScope"],
@@ -621,4 +718,26 @@ test("migration forces tenant RLS, immutable receipts, SoD, and state receipts",
   );
   assert.match(migration, /change_set_approvals_immutable/);
   assert.match(migration, /change_set_transition_receipts_immutable/);
+});
+
+test("0057 hardens ChangeSet identity and checker separation with membership tuples", () => {
+  const migration = readFileSync(
+    new URL(
+      "../../../lib/db/drizzle/0057_authorization_control_plane_db_hardening.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(migration, /configuration_key text NOT NULL/);
+  assert.match(migration, /owner_membership_id uuid NOT NULL/);
+  assert.match(migration, /maker_membership_id uuid NOT NULL/);
+  assert.match(migration, /checker_membership_id uuid/);
+  assert.match(migration, /approval_policy_version_id uuid NOT NULL/);
+  assert.match(migration, /change set maker cannot act as checker/);
+  assert.match(
+    migration,
+    /change set identity, memberships, maker and policy are immutable/,
+  );
+  assert.match(migration, /approval\.checker_membership_id <> NEW\.maker_membership_id/);
+  assert.match(migration, /transition\.actor_membership_id = approval\.checker_membership_id/);
 });

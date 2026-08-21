@@ -159,6 +159,66 @@ test("a signed, current, server-resolved context allows its exact capability and
   assert.equal(decision.receipt.policyVersionId, ID.policy);
 });
 
+test("malformed capability metadata fails closed instead of becoming an implicit allow", () => {
+  for (const malformed of [
+    {
+      key: "students.view",
+      effect: "UNKNOWN",
+      status: "ACTIVE",
+      stepUpRequired: false,
+      approvalRequired: false,
+    },
+    {
+      key: "students.view",
+      effect: "ALLOW",
+      status: "ACTIVE",
+      approvalRequired: false,
+    },
+    {
+      key: "students.view",
+      effect: "ALLOW",
+      status: "ACTIVE",
+      stepUpRequired: false,
+    },
+  ]) {
+    const resolved = state();
+    resolved.assignments[0].capabilities = [malformed] as never;
+    const decision = decide(verifiedContext(), resolved);
+    assert.equal(decision.allowed, false);
+    assert.equal(decision.reason, "resolved_state_invalid");
+  }
+});
+
+test("malformed resolved scope and time fields fail closed without coercion", () => {
+  const wildcard = state();
+  wildcard.assignments[0].scopeType = "WILDCARD" as never;
+  assert.equal(
+    decide(verifiedContext(), wildcard).reason,
+    "resolved_state_invalid",
+  );
+
+  const membershipTime = state();
+  membershipTime.membership.validFrom = String(NOW - 10_000) as never;
+  assert.equal(
+    decide(verifiedContext(), membershipTime).reason,
+    "resolved_state_invalid",
+  );
+
+  const assignmentTime = state();
+  assignmentTime.assignments[0].validUntil = String(NOW + 60_000) as never;
+  assert.equal(
+    decide(verifiedContext(), assignmentTime).reason,
+    "resolved_state_invalid",
+  );
+
+  const policyTime = state();
+  policyTime.policy.effectiveAt = String(NOW - 10_000) as never;
+  assert.equal(
+    decide(verifiedContext(), policyTime).reason,
+    "resolved_state_invalid",
+  );
+});
+
 test("unsigned, tampered, weak-secret, future, and expired contexts fail closed", () => {
   const token = signActiveTenantContext(claims(), SECRET);
   const [payload, signature] = token.split(".");
@@ -253,6 +313,21 @@ test("step-up and approval metadata are enforced after allow resolution", () => 
   const stepUp = state();
   stepUp.assignments[0].capabilities[0].stepUpRequired = true;
   assert.equal(decide(verifiedContext(), stepUp).reason, "step_up_required");
+  const malformedStepUp = evaluateActiveTenantCapability({
+    context: verifiedContext(),
+    state: stepUp,
+    capabilityKey: "students.view",
+    resource: {
+      type: "student",
+      id: "student-1",
+      tenantId: ID.tenantA,
+      organizationId: ID.organizationA,
+      legacyBranchId: 10,
+    },
+    stepUpSatisfied: "yes" as never,
+    now: NOW,
+  });
+  assert.equal(malformedStepUp.reason, "step_up_required");
 
   const approval = state();
   approval.assignments[0].capabilities[0].approvalRequired = true;

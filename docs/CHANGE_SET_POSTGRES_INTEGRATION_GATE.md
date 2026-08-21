@@ -2,8 +2,8 @@
 
 Status: **BLOCKED / NO-GO for runtime wiring**.
 
-This gate is not a delivery estimate and is not proof that migrations `0055`
-or `0056` have run. The approved local PostgreSQL endpoint
+This gate is not a delivery estimate and is not proof that migrations `0055`,
+`0056`, or `0057` have run in a long-lived environment. The approved local PostgreSQL endpoint
 `127.0.0.1:5433/fasos_apply_local` was unavailable during this slice, and the
 workspace had no Docker or `psql` executable. No database was mutated.
 
@@ -20,13 +20,18 @@ The harness must prove two distinct login roles and secrets:
 The API, workers, schedulers, webhooks, exports, AI tools, and future ChangeSet
 adapter must use only the runtime application credential. A passing test under
 the table owner is not evidence that forced RLS protects the runtime path.
+The candidate grant contract gives the runtime role no direct control-plane
+table access; only tenant-scoped membership reads needed by the RLS probe are
+allowed. A future command adapter requires a separately reviewed, narrow writer
+role or procedure contract; granting generic ChangeSet DML to the shared
+application role is forbidden.
 
 ## Disposable harness contract
 
 The test environment must use a disposable PostgreSQL instance matching the
 production major version and pinned by immutable image digest. It must create a
 random `fas_it_*` database, set statement, lock, and idle-transaction timeouts,
-and apply the real migration runner from `0000` through `0056` using only the
+and apply the real migration runner from `0000` through `0057` using only the
 migrator role.
 
 The harness is opt-in and must fail closed unless all of these are true:
@@ -67,6 +72,32 @@ The gate passes only when CI records all of the following:
     tenant, ChangeSet, target state, requesting principal, proposed hash,
     policy/tool version, issued/expiry window, and consumption state;
 12. hardened `search_path` and temporary-object behavior for both roles.
+
+## Candidate CI harness
+
+`.github/workflows/postgres-control-plane-gate.yml` and
+`artifacts/api-server/scripts/test-postgres-control-plane-gate.ts` define the
+first disposable PostgreSQL 16 candidate gate. It uses an immutable official
+image digest, a per-run `fas_it_*` database, separate `fas_migrator` and
+`fas_app` logins, applies all 58 migrations twice, and directly exercises:
+
+- authority attributes, forced RLS under owner and runtime roles, no-context and
+  two-tenant isolation;
+- commit, rollback, and error cleanup of transaction-local tenant context plus
+  two concurrent tenant connections;
+- no runtime DDL, temporary table, role creation, migrator assumption, legacy
+  business-table write, control-plane write, or receipt deletion;
+- tenant/organization/legacy-branch and principal/membership tuple negatives;
+- active-proposal uniqueness, transition receipt/state ordering, one-way
+  command completion, atomic evidence consumption/finalization, and concurrent
+  evidence reuse under the migrator-owned invariant harness.
+
+This workflow is a candidate, not yet a passed or required check. It does not
+yet provide a runtime writer contract or cover cancellation cleanup,
+HTTP-to-DB context mismatch, revoke/policy rotation races through a real
+adapter, all idempotency/result replay races, failure injection between every
+write, or decision/step-up paths. Those gaps keep the full matrix and runtime
+wiring at NO-GO even if the candidate job is green.
 
 ## Runtime-wiring gate
 

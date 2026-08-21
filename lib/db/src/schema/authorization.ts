@@ -102,6 +102,36 @@ export const organizationsTable = pgTable(
   ],
 ).enableRLS();
 
+export const tenantOrganizationLegacyBranchesTable = pgTable(
+  "tenant_organization_legacy_branches",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenantsTable.id, { onDelete: "restrict" }),
+    organizationId: uuid("organization_id").notNull(),
+    legacyBranchId: integer("legacy_branch_id")
+      .notNull()
+      .references(() => branchesTable.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.tenantId, table.organizationId, table.legacyBranchId],
+      name: "tenant_organization_legacy_branches_pk",
+    }),
+    unique("tenant_organization_legacy_branches_branch_uq").on(
+      table.legacyBranchId,
+    ),
+    foreignKey({
+      columns: [table.tenantId, table.organizationId],
+      foreignColumns: [organizationsTable.tenantId, organizationsTable.id],
+      name: "tenant_organization_legacy_branches_organization_fk",
+    }).onDelete("restrict"),
+  ],
+).enableRLS();
+
 export const principalsTable = pgTable(
   "principals",
   {
@@ -176,6 +206,11 @@ export const membershipsTable = pgTable(
   },
   (table) => [
     unique("memberships_tenant_id_id_uq").on(table.tenantId, table.id),
+    unique("memberships_tenant_id_id_principal_id_uq").on(
+      table.tenantId,
+      table.id,
+      table.principalId,
+    ),
     index("memberships_principal_tenant_status_idx").on(
       table.principalId,
       table.tenantId,
@@ -186,6 +221,15 @@ export const membershipsTable = pgTable(
       foreignColumns: [organizationsTable.tenantId, organizationsTable.id],
       name: "memberships_tenant_organization_fk",
     }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.organizationId, table.legacyBranchId],
+      foreignColumns: [
+        tenantOrganizationLegacyBranchesTable.tenantId,
+        tenantOrganizationLegacyBranchesTable.organizationId,
+        tenantOrganizationLegacyBranchesTable.legacyBranchId,
+      ],
+      name: "memberships_tenant_organization_branch_fk",
+    }).onDelete("restrict"),
     check("memberships_id_uuidv7_chk", uuidV7(table.id)),
     check(
       "memberships_status_chk",
@@ -194,6 +238,10 @@ export const membershipsTable = pgTable(
     check(
       "memberships_validity_chk",
       sql`${table.validUntil} IS NULL OR ${table.validUntil} > ${table.validFrom}`,
+    ),
+    check(
+      "memberships_branch_requires_organization_chk",
+      sql`${table.legacyBranchId} IS NULL OR ${table.organizationId} IS NOT NULL`,
     ),
     check("memberships_version_chk", sql`${table.version} > 0`),
   ],
@@ -390,6 +438,7 @@ export const authorizationChangeReceiptsTable = pgTable(
     actorPrincipalId: uuid("actor_principal_id")
       .notNull()
       .references(() => principalsTable.id, { onDelete: "restrict" }),
+    actorMembershipId: uuid("actor_membership_id").notNull(),
     resourceType: text("resource_type").notNull(),
     resourceId: uuid("resource_id").notNull(),
     reasonCode: text("reason_code").notNull(),
@@ -420,6 +469,19 @@ export const authorizationChangeReceiptsTable = pgTable(
       table.tenantId,
       table.createdAt,
     ),
+    foreignKey({
+      columns: [
+        table.tenantId,
+        table.actorMembershipId,
+        table.actorPrincipalId,
+      ],
+      foreignColumns: [
+        membershipsTable.tenantId,
+        membershipsTable.id,
+        membershipsTable.principalId,
+      ],
+      name: "authorization_change_receipts_actor_membership_fk",
+    }).onDelete("restrict"),
     check("authorization_change_receipts_id_uuidv7_chk", uuidV7(table.id)),
     check(
       "authorization_change_receipts_resource_uuidv7_chk",
@@ -461,6 +523,7 @@ export const accessAssignmentsTable = pgTable(
     grantedByPrincipalId: uuid("granted_by_principal_id")
       .notNull()
       .references(() => principalsTable.id, { onDelete: "restrict" }),
+    grantedByMembershipId: uuid("granted_by_membership_id").notNull(),
     grantReceiptId: uuid("grant_receipt_id").notNull(),
     grantReceiptType: text("grant_receipt_type").notNull().default("GRANT"),
     version: bigint("version", { mode: "number" }).notNull().default(1),
@@ -488,6 +551,28 @@ export const accessAssignmentsTable = pgTable(
       columns: [table.tenantId, table.organizationId],
       foreignColumns: [organizationsTable.tenantId, organizationsTable.id],
       name: "access_assignments_tenant_organization_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.organizationId, table.legacyBranchId],
+      foreignColumns: [
+        tenantOrganizationLegacyBranchesTable.tenantId,
+        tenantOrganizationLegacyBranchesTable.organizationId,
+        tenantOrganizationLegacyBranchesTable.legacyBranchId,
+      ],
+      name: "access_assignments_tenant_organization_branch_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [
+        table.tenantId,
+        table.grantedByMembershipId,
+        table.grantedByPrincipalId,
+      ],
+      foreignColumns: [
+        membershipsTable.tenantId,
+        membershipsTable.id,
+        membershipsTable.principalId,
+      ],
+      name: "access_assignments_grantor_membership_fk",
     }).onDelete("restrict"),
     foreignKey({
       columns: [
@@ -565,6 +650,15 @@ export const accessDecisionReceiptsTable = pgTable(
       name: "access_decision_receipts_tenant_membership_fk",
     }).onDelete("restrict"),
     foreignKey({
+      columns: [table.tenantId, table.membershipId, table.actorPrincipalId],
+      foreignColumns: [
+        membershipsTable.tenantId,
+        membershipsTable.id,
+        membershipsTable.principalId,
+      ],
+      name: "access_decision_receipts_actor_membership_fk",
+    }).onDelete("restrict"),
+    foreignKey({
       columns: [table.tenantId, table.policyVersionId],
       foreignColumns: [policyVersionsTable.tenantId, policyVersionsTable.id],
       name: "access_decision_receipts_tenant_policy_fk",
@@ -585,6 +679,8 @@ export const accessDecisionReceiptsTable = pgTable(
 
 export type Tenant = typeof tenantsTable.$inferSelect;
 export type Organization = typeof organizationsTable.$inferSelect;
+export type TenantOrganizationLegacyBranch =
+  typeof tenantOrganizationLegacyBranchesTable.$inferSelect;
 export type Principal = typeof principalsTable.$inferSelect;
 export type Membership = typeof membershipsTable.$inferSelect;
 export type AccessAssignment = typeof accessAssignmentsTable.$inferSelect;

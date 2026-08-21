@@ -8,7 +8,9 @@ import {
 } from "./activeTenantContext";
 import {
   createR1ChangeSetDraft,
+  deriveR1ConfigurationKey,
   evaluateR1ChangeSetTransition,
+  normalizeChangeSetScope,
   R1_CHANGE_TYPES,
   R1_FEATURE_FLAG_REGISTRY,
   requiredCapabilityForChangeSetTarget,
@@ -30,6 +32,9 @@ const EARLY_COMMAND_TARGETS: readonly ChangeSetState[] = [
   "SIMULATED",
   "IN_REVIEW",
 ];
+const TRUSTED_EVIDENCE_TOOLS: Readonly<Record<string, readonly string[]>> = {
+  "fas-evidence-service": ["test-v1"],
+};
 export type ChangeSetCommandSuccess = {
   changeSetId: string;
   status: ChangeSetState;
@@ -44,6 +49,7 @@ export type ChangeSetCommandFailureReason =
   | "invalid_generated_id"
   | "invalid_clock"
   | "impersonation_forbidden"
+  | "invalid_mutation_assurance"
   | "authorization_denied"
   | "change_set_not_found"
   | "idempotency_key_reused"
@@ -71,6 +77,7 @@ export type CreateR1ChangeSetCommand = {
 };
 
 export type AuthoritativeR1Configuration = {
+  configurationKey: string;
   version: number;
   config: unknown;
   activeProposalId: string | null;
@@ -90,8 +97,12 @@ export type VerifiedTransitionEvidenceReceipt = {
   changeSetId: string;
   targetState: ChangeSetState;
   requestedByPrincipalId: string;
+  requestedByMembershipId: string;
   subjectHash: string;
   policyVersionId: string;
+  outcome: "PASSED" | "FAILED";
+  artifactCount: number | null;
+  outcomeHash: string;
   issuedAt: number;
   expiresAt: number;
   consumedAt: null;
@@ -99,7 +110,6 @@ export type VerifiedTransitionEvidenceReceipt = {
 
 export type VerifiedTransitionEvidence = {
   receipts: VerifiedTransitionEvidenceReceipt[];
-  evidence: Record<string, unknown>;
 };
 
 export type TransitionR1ChangeSetCommand = {
@@ -111,6 +121,7 @@ export type TransitionR1ChangeSetCommand = {
 };
 
 export type StoredR1ChangeSet = ChangeSetSnapshot & {
+  configurationKey: string;
   targetScope: ChangeSetScope;
   proposedHash: string;
 };
@@ -128,7 +139,9 @@ export type ChangeSetCommandClaim = {
   requestHash: string;
   contextId: string;
   actorPrincipalId: string;
+  actorMembershipId: string;
   commandType: "CREATE" | "TRANSITION";
+  targetState: ChangeSetState | null;
   changeSetId: string | null;
   claimedAt: number;
 };
@@ -139,7 +152,9 @@ export type ChangeSetCommandClaimResult =
       kind: "REPLAY";
       commandReceiptId: string;
       requestHash: string;
+      contextId: string;
       actorPrincipalId: string;
+      actorMembershipId: string;
       result: unknown;
       resultHash: unknown;
     }
@@ -152,9 +167,11 @@ export type ChangeSetApprovalInsert = {
   changeSetId: string;
   reviewRound: number;
   checkerPrincipalId: string;
+  checkerMembershipId: string;
   decision: "APPROVED" | "RETURNED" | "REJECTED";
   reasonCode: string;
   approvalPolicyVersion: string;
+  approvalPolicyVersionId: string;
   stepUpReceiptId: string;
   evidence: Record<string, unknown>;
   decisionHash: string;
@@ -163,18 +180,33 @@ export type ChangeSetApprovalInsert = {
 
 export type ChangeSetTransitionReceiptInsert = {
   id: string;
+  commandReceiptId: string;
   tenantId: string;
   changeSetId: string;
   sequence: number;
   actorPrincipalId: string;
+  actorMembershipId: string;
   fromState: ChangeSetState;
   toState: ChangeSetState;
   reasonCode: string;
   policyVersion: string;
+  policyVersionId: string;
   evidence: Record<string, unknown>;
   evidenceHash: string;
   previousHash: string | null;
   receiptHash: string;
+  occurredAt: number;
+};
+
+export type ChangeSetCommandAttemptReceiptInsert = {
+  id: string;
+  tenantId: string;
+  contextId: string;
+  actorPrincipalId: string;
+  actorMembershipId: string;
+  commandReceiptId: string;
+  requestHash: string;
+  outcome: "CONFLICT" | "IN_PROGRESS";
   occurredAt: number;
 };
 
@@ -189,8 +221,11 @@ export type AccessDecisionReceiptInsert = {
   capabilityKey: string;
   resourceType: string;
   resourceId: string;
-  decision: "ALLOW";
-  reasonCode: "allowed";
+  decision: "ALLOW" | "DENY";
+  reasonCode:
+    | ActiveContextDecisionReason
+    | "impersonation_forbidden"
+    | "invalid_mutation_assurance";
   policyVersionId: string;
   correlationId: string;
   occurredAt: number;
@@ -201,12 +236,13 @@ export interface ChangeSetCommandTransaction {
   loadAuthoritativeR1ConfigurationForUpdate(input: {
     tenantId: string;
     changeType: string;
+    configurationKey: string;
     targetScope: ChangeSetScope;
   }): Promise<AuthoritativeR1Configuration | null>;
-  resolveActiveContextState(
+  resolveActiveContextStateForUpdate(
     context: VerifiedActiveTenantContext,
   ): Promise<ResolvedActiveContextState>;
-  resolveMutationAssurance(
+  resolveMutationAssuranceForUpdate(
     context: VerifiedActiveTenantContext,
   ): Promise<MutationAssurance>;
   claimCommand(
@@ -229,6 +265,16 @@ export interface ChangeSetCommandTransaction {
   insertAccessDecisionReceipt(
     input: AccessDecisionReceiptInsert,
   ): Promise<void>;
+  insertCommandAttemptReceipt(
+    input: ChangeSetCommandAttemptReceiptInsert,
+  ): Promise<void>;
+  consumeVerifiedTransitionEvidence(input: {
+    tenantId: string;
+    changeSetId: string;
+    commandReceiptId: string;
+    receiptIds: string[];
+    consumedAt: number;
+  }): Promise<boolean>;
   insertChangeSet(input: {
     id: string;
     draft: R1ChangeSetDraft;
@@ -300,23 +346,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function validScope(value: unknown): value is ChangeSetScope {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const scope = value as Partial<ChangeSetScope>;
-  if (scope.type === "TENANT") {
-    return scope.organizationId === null && scope.legacyBranchId === null;
-  }
-  if (scope.type === "ORGANIZATION") {
-    return isUuidV7(scope.organizationId) && scope.legacyBranchId === null;
-  }
-  return (
-    scope.type === "LEGACY_BRANCH" &&
-    isUuidV7(scope.organizationId) &&
-    Number.isSafeInteger(scope.legacyBranchId) &&
-    Number(scope.legacyBranchId) > 0
-  );
-}
-
 function isR1ChangeType(value: unknown): value is R1ChangeType {
   return R1_CHANGE_TYPES.includes(value as R1ChangeType);
 }
@@ -347,13 +376,27 @@ const R1_CREATE_POLICY: Record<
 function resolveR1CreatePolicy(
   command: CreateR1ChangeSetCommand,
 ):
-  | { ok: true; capabilityKey: string; dataClass: R1DataClass }
+  | {
+      ok: true;
+      capabilityKey: string;
+      dataClass: R1DataClass;
+      configurationKey: string;
+    }
   | { ok: false; detail: string } {
   if (!isR1ChangeType(command.changeType)) {
     return { ok: false, detail: "unsupported_change_type" };
   }
   const policy = R1_CREATE_POLICY[command.changeType];
-  if (command.changeType !== "FEATURE_FLAG") return { ok: true, ...policy };
+  const configurationKey = deriveR1ConfigurationKey(
+    command.changeType,
+    command.proposedConfig,
+  );
+  if (configurationKey === null) {
+    return { ok: false, detail: "invalid_config_shape" };
+  }
+  if (command.changeType !== "FEATURE_FLAG") {
+    return { ok: true, ...policy, configurationKey };
+  }
   if (!isRecord(command.proposedConfig)) {
     return { ok: false, detail: "invalid_config_shape" };
   }
@@ -369,6 +412,7 @@ function resolveR1CreatePolicy(
     ok: true,
     capabilityKey: registryEntry.requiredCapability,
     dataClass: policy.dataClass,
+    configurationKey,
   };
 }
 
@@ -439,7 +483,9 @@ function parseReplayResult(value: unknown): ChangeSetCommandSuccess | null {
 function replayOrFailure(
   claim: ChangeSetCommandClaimResult,
   requestHash: string,
+  contextId: string,
   actorPrincipalId: string,
+  actorMembershipId: string,
 ): ChangeSetCommandResult | null {
   if (claim.kind === "CLAIMED") return null;
   if (claim.kind === "CONFLICT") {
@@ -450,7 +496,9 @@ function replayOrFailure(
   }
   if (
     claim.requestHash !== requestHash ||
-    claim.actorPrincipalId !== actorPrincipalId
+    claim.contextId !== contextId ||
+    claim.actorPrincipalId !== actorPrincipalId ||
+    claim.actorMembershipId !== actorMembershipId
   )
     return { ok: false, reason: "idempotency_key_reused" };
   if (
@@ -483,6 +531,7 @@ function validVerifiedTransitionEvidence(
     toState: ChangeSetState;
     policyVersionId: string;
     actorPrincipalId: string;
+    actorMembershipId: string;
     now: number;
   },
 ): value is VerifiedTransitionEvidence {
@@ -496,7 +545,6 @@ function validVerifiedTransitionEvidence(
   const expectedKinds = requiredKinds[input.toState];
   if (
     !value ||
-    !isRecord(value.evidence) ||
     !expectedKinds ||
     !Array.isArray(value.receipts) ||
     value.receipts.length !== expectedKinds.length ||
@@ -504,16 +552,29 @@ function validVerifiedTransitionEvidence(
       (receipt) =>
         !isUuidV7(receipt.id) ||
         !expectedKinds.includes(receipt.kind) ||
-        typeof receipt.issuer !== "string" ||
-        !/^[a-z][a-z0-9_.-]{2,79}$/.test(receipt.issuer) ||
-        typeof receipt.toolVersion !== "string" ||
-        !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,79}$/.test(receipt.toolVersion) ||
+        !Object.hasOwn(TRUSTED_EVIDENCE_TOOLS, receipt.issuer) ||
+        !TRUSTED_EVIDENCE_TOOLS[receipt.issuer]?.includes(
+          receipt.toolVersion,
+        ) ||
         receipt.tenantId !== input.changeSet.tenantId ||
         receipt.changeSetId !== input.changeSet.id ||
         receipt.targetState !== input.toState ||
         receipt.requestedByPrincipalId !== input.actorPrincipalId ||
+        receipt.requestedByMembershipId !== input.actorMembershipId ||
         receipt.subjectHash !== input.changeSet.proposedHash ||
         receipt.policyVersionId !== input.policyVersionId ||
+        receipt.outcome !== "PASSED" ||
+        (receipt.kind === "TEST_ARTIFACT"
+          ? !Number.isSafeInteger(receipt.artifactCount) ||
+            Number(receipt.artifactCount) < 1
+          : receipt.artifactCount !== null) ||
+        !SHA256_RE.test(receipt.outcomeHash) ||
+        receipt.outcomeHash !==
+          hashValue({
+            kind: receipt.kind,
+            outcome: receipt.outcome,
+            artifactCount: receipt.artifactCount,
+          }) ||
         !Number.isSafeInteger(receipt.issuedAt) ||
         !Number.isSafeInteger(receipt.expiresAt) ||
         receipt.issuedAt > input.now ||
@@ -531,6 +592,27 @@ function validVerifiedTransitionEvidence(
   return true;
 }
 
+function policyEvidenceFromReceipts(
+  value: VerifiedTransitionEvidence,
+  toState: ChangeSetState,
+): Record<string, unknown> {
+  const receiptIds = value.receipts.map((receipt) => receipt.id);
+  if (toState === "VALIDATED") {
+    return { validationPassed: true, evidenceReceiptIds: receiptIds };
+  }
+  if (toState === "SIMULATED") {
+    return { simulationPassed: true, evidenceReceiptIds: receiptIds };
+  }
+  return {
+    rollbackReady: true,
+    canaryPrepared: true,
+    testEvidenceCount: value.receipts
+      .filter((receipt) => receipt.kind === "TEST_ARTIFACT")
+      .reduce((total, receipt) => total + Number(receipt.artifactCount), 0),
+    evidenceReceiptIds: receiptIds,
+  };
+}
+
 async function resolveAuthorization(input: {
   tx: ChangeSetCommandTransaction;
   context: VerifiedActiveTenantContext;
@@ -538,14 +620,74 @@ async function resolveAuthorization(input: {
   resource: ReturnType<typeof scopeResource>;
   now: number;
 }) {
-  const state = await input.tx.resolveActiveContextState(input.context);
-  const assurance = await input.tx.resolveMutationAssurance(input.context);
+  const state = await input.tx.resolveActiveContextStateForUpdate(input.context);
+  const assurance = await input.tx.resolveMutationAssuranceForUpdate(
+    input.context,
+  );
+  const validAssurance =
+    isRecord(assurance) &&
+    typeof assurance.impersonating === "boolean" &&
+    typeof assurance.stepUpSatisfied === "boolean" &&
+    (assurance.stepUpReceiptId === null ||
+      (typeof assurance.stepUpReceiptId === "string" &&
+        isUuidV7(assurance.stepUpReceiptId))) &&
+    ((assurance.stepUpSatisfied && assurance.stepUpReceiptId !== null) ||
+      (!assurance.stepUpSatisfied && assurance.stepUpReceiptId === null));
+  if (!validAssurance) {
+    return {
+      ok: false as const,
+      result: {
+        ok: false as const,
+        reason: "invalid_mutation_assurance" as const,
+      },
+      decisionReceipt: {
+        tenantId: input.context.tenantId,
+        contextId: input.context.contextId,
+        actorPrincipalId: input.context.principalId,
+        membershipId: input.context.membershipId,
+        assignmentIds: [...input.context.assignmentIds],
+        rolePackageVersionIds: [
+          ...new Set(
+            state.assignments.map(
+              (assignment) => assignment.rolePackageVersionId,
+            ),
+          ),
+        ].sort(),
+        capabilityKey: input.capabilityKey,
+        resourceType: input.resource.type,
+        resourceId: input.resource.id,
+        decision: "DENY" as const,
+        reasonCode: "invalid_mutation_assurance" as const,
+        policyVersionId: input.context.policyVersionId,
+      },
+    };
+  }
   if (assurance.impersonating) {
     return {
       ok: false as const,
       result: {
         ok: false as const,
-        reason: "impersonation_forbidden" as const,
+          reason: "impersonation_forbidden" as const,
+        },
+      decisionReceipt: {
+        tenantId: input.context.tenantId,
+        contextId: input.context.contextId,
+        actorPrincipalId: input.context.principalId,
+        membershipId: input.context.membershipId,
+        assignmentIds: [...input.context.assignmentIds],
+        rolePackageVersionIds: [
+          ...new Set(
+            state.assignments.map(
+              (assignment) => assignment.rolePackageVersionId,
+            ),
+          ),
+        ].sort(),
+        capabilityKey: input.capabilityKey,
+        resourceType: input.resource.type,
+        resourceId: input.resource.id,
+        decision: "DENY" as const,
+        reasonCode: "impersonation_forbidden" as const,
+        policyVersionId: input.context.policyVersionId,
       },
     };
   }
@@ -566,6 +708,7 @@ async function resolveAuthorization(input: {
         reason: "authorization_denied" as const,
         authorizationReason: decision.reason,
       },
+      decisionReceipt: decision.receipt,
     };
   }
   return { ok: true as const, assurance, decisionReceipt: decision.receipt };
@@ -576,6 +719,23 @@ function freshUuidV7(dependencies: ChangeSetCommandDependencies): string {
   if (!isUuidV7(candidate))
     throw new RollbackCommand({ ok: false, reason: "invalid_generated_id" });
   return candidate.toLowerCase();
+}
+
+function freshCommandNow(dependencies: ChangeSetCommandDependencies): number {
+  const now = dependencies.now?.() ?? Date.now();
+  if (!Number.isSafeInteger(now) || now < 0) {
+    throw new RollbackCommand({ ok: false, reason: "invalid_clock" });
+  }
+  return now;
+}
+
+function requireCurrentContext(
+  context: VerifiedActiveTenantContext,
+  now: number,
+): void {
+  if (!isVerifiedActiveTenantContext(context, now)) {
+    throw new RollbackCommand({ ok: false, reason: "unverified_context" });
+  }
 }
 
 export async function executeCreateR1ChangeSetCommand(input: {
@@ -626,10 +786,11 @@ export async function executeCreateR1ChangeSetCommand(input: {
   if (!validIdempotencyKey(input.command.idempotencyKey)) {
     return { ok: false, reason: "invalid_idempotency_key" };
   }
-  if (!validScope(input.command.targetScope)) {
+  const targetScope = normalizeChangeSetScope(input.command.targetScope);
+  if (!targetScope) {
     return { ok: false, reason: "draft_rejected", detail: "invalid_scope" };
   }
-  if (input.command.targetScope.type === "LEGACY_BRANCH") {
+  if (targetScope.type === "LEGACY_BRANCH") {
     return {
       ok: false,
       reason: "draft_rejected",
@@ -640,26 +801,41 @@ export async function executeCreateR1ChangeSetCommand(input: {
     commandType: "CREATE",
     tenantId: input.context.tenantId,
     actorPrincipalId: input.context.principalId,
-    command: { ...input.command, idempotencyKey: undefined },
+    command: {
+      ...input.command,
+      targetScope,
+      idempotencyKey: undefined,
+    },
   });
   try {
     return await input.dependencies.store.transaction(async (tx) => {
       await tx.setLocalTenant(input.context.tenantId);
+      const authorizationNow = freshCommandNow(input.dependencies);
+      requireCurrentContext(input.context, authorizationNow);
       const resourceId =
-        input.command.targetScope.organizationId ?? input.context.tenantId;
+        targetScope.organizationId ?? input.context.tenantId;
       const authorization = await resolveAuthorization({
         tx,
         context: input.context,
         capabilityKey: createPolicy.capabilityKey,
         resource: scopeResource(
           input.context.tenantId,
-          input.command.targetScope,
+          targetScope,
           `CHANGE_SET_${input.command.changeType}`,
           resourceId,
         ),
-        now,
+        now: authorizationNow,
       });
-      if (!authorization.ok) return authorization.result;
+      if (!authorization.ok) {
+        const denialReceiptId = freshUuidV7(input.dependencies);
+        await tx.insertAccessDecisionReceipt({
+          id: denialReceiptId,
+          ...authorization.decisionReceipt,
+          correlationId: denialReceiptId,
+          occurredAt: authorizationNow,
+        });
+        return authorization.result;
+      }
 
       const commandReceiptId = freshUuidV7(input.dependencies);
       const accessDecisionReceiptId = freshUuidV7(input.dependencies);
@@ -670,34 +846,79 @@ export async function executeCreateR1ChangeSetCommand(input: {
         requestHash,
         contextId: input.context.contextId,
         actorPrincipalId: input.context.principalId,
+        actorMembershipId: input.context.membershipId,
         commandType: "CREATE",
+        targetState: null,
         changeSetId: null,
-        claimedAt: now,
+        claimedAt: authorizationNow,
       });
       const replay = replayOrFailure(
         claim,
         requestHash,
+        input.context.contextId,
         input.context.principalId,
+        input.context.membershipId,
       );
-      if (replay && claim.kind !== "REPLAY") return replay;
+      if (
+        replay &&
+        (claim.kind === "CONFLICT" || claim.kind === "IN_PROGRESS")
+      ) {
+        const existingCommandReceiptId = commandCorrelationId(
+          claim,
+          commandReceiptId,
+        );
+        await tx.insertCommandAttemptReceipt({
+          id: freshUuidV7(input.dependencies),
+          tenantId: input.context.tenantId,
+          contextId: input.context.contextId,
+          actorPrincipalId: input.context.principalId,
+          actorMembershipId: input.context.membershipId,
+          commandReceiptId: existingCommandReceiptId,
+          requestHash,
+          outcome: claim.kind,
+          occurredAt: authorizationNow,
+        });
+        return replay;
+      }
       const correlationId = commandCorrelationId(claim, commandReceiptId);
-      await tx.insertAccessDecisionReceipt({
-        id: accessDecisionReceiptId,
-        ...authorization.decisionReceipt,
-        decision: "ALLOW",
-        reasonCode: "allowed",
-        correlationId,
-        occurredAt: now,
-      });
-      if (replay) return replay;
+      if (replay) {
+        const replayNow = freshCommandNow(input.dependencies);
+        requireCurrentContext(input.context, replayNow);
+        const replayAuthorization = await resolveAuthorization({
+          tx,
+          context: input.context,
+          capabilityKey: createPolicy.capabilityKey,
+          resource: scopeResource(
+            input.context.tenantId,
+            targetScope,
+            `CHANGE_SET_${input.command.changeType}`,
+            resourceId,
+          ),
+          now: replayNow,
+        });
+        if (!replayAuthorization.ok) {
+          throw new RollbackCommand(replayAuthorization.result);
+        }
+        await tx.insertAccessDecisionReceipt({
+          id: accessDecisionReceiptId,
+          ...replayAuthorization.decisionReceipt,
+          decision: "ALLOW",
+          reasonCode: "allowed",
+          correlationId,
+          occurredAt: replayNow,
+        });
+        return replay;
+      }
 
       const authoritative = await tx.loadAuthoritativeR1ConfigurationForUpdate({
         tenantId: input.context.tenantId,
         changeType: input.command.changeType,
-        targetScope: input.command.targetScope,
+        configurationKey: createPolicy.configurationKey,
+        targetScope,
       });
       if (
         !authoritative ||
+        authoritative.configurationKey !== createPolicy.configurationKey ||
         !Number.isSafeInteger(authoritative.version) ||
         authoritative.version < 0 ||
         !(
@@ -718,7 +939,31 @@ export async function executeCreateR1ChangeSetCommand(input: {
           detail: "active_proposal_exists",
         });
       }
-
+      const mutationNow = freshCommandNow(input.dependencies);
+      requireCurrentContext(input.context, mutationNow);
+      const currentAuthorization = await resolveAuthorization({
+        tx,
+        context: input.context,
+        capabilityKey: createPolicy.capabilityKey,
+        resource: scopeResource(
+          input.context.tenantId,
+          targetScope,
+          `CHANGE_SET_${input.command.changeType}`,
+          resourceId,
+        ),
+        now: mutationNow,
+      });
+      if (!currentAuthorization.ok) {
+        throw new RollbackCommand(currentAuthorization.result);
+      }
+      await tx.insertAccessDecisionReceipt({
+        id: accessDecisionReceiptId,
+        ...currentAuthorization.decisionReceipt,
+        decision: "ALLOW",
+        reasonCode: "allowed",
+        correlationId,
+        occurredAt: mutationNow,
+      });
       const changeSetId = freshUuidV7(input.dependencies);
       const draft = createR1ChangeSetDraft({
         tenantId: input.context.tenantId,
@@ -726,8 +971,10 @@ export async function executeCreateR1ChangeSetCommand(input: {
         title: input.command.title,
         purpose: input.command.purpose,
         ownerPrincipalId: input.context.principalId,
+        ownerMembershipId: input.context.membershipId,
         makerPrincipalId: input.context.principalId,
-        targetScope: input.command.targetScope,
+        makerMembershipId: input.context.membershipId,
+        targetScope,
         baseVersion: authoritative.version,
         proposedVersion: authoritative.version + 1,
         baseConfig: authoritative.config,
@@ -755,7 +1002,7 @@ export async function executeCreateR1ChangeSetCommand(input: {
         changeSetId,
         result,
         resultHash: hashValue(result),
-        completedAt: now,
+        completedAt: freshCommandNow(input.dependencies),
       });
       return { ok: true, replayed: false, result };
     });
@@ -838,7 +1085,15 @@ export async function executeTransitionR1ChangeSetCommand(input: {
         input.command.changeSetId,
       );
       if (!changeSet) return { ok: false, reason: "change_set_not_found" };
-      if (changeSet.targetScope.type === "LEGACY_BRANCH") {
+      const targetScope = normalizeChangeSetScope(changeSet.targetScope);
+      if (!targetScope) {
+        throw new RollbackCommand({
+          ok: false,
+          reason: "transition_rejected",
+          detail: "invalid_scope",
+        });
+      }
+      if (targetScope.type === "LEGACY_BRANCH") {
         return {
           ok: false,
           reason: "transition_rejected",
@@ -846,19 +1101,30 @@ export async function executeTransitionR1ChangeSetCommand(input: {
         };
       }
 
+      const authorizationNow = freshCommandNow(input.dependencies);
+      requireCurrentContext(input.context, authorizationNow);
       const authorization = await resolveAuthorization({
         tx,
         context: input.context,
         capabilityKey,
         resource: scopeResource(
           input.context.tenantId,
-          changeSet.targetScope,
+          targetScope,
           "CHANGE_SET",
           changeSet.id,
         ),
-        now,
+        now: authorizationNow,
       });
-      if (!authorization.ok) return authorization.result;
+      if (!authorization.ok) {
+        const denialReceiptId = freshUuidV7(input.dependencies);
+        await tx.insertAccessDecisionReceipt({
+          id: denialReceiptId,
+          ...authorization.decisionReceipt,
+          correlationId: denialReceiptId,
+          occurredAt: authorizationNow,
+        });
+        return authorization.result;
+      }
 
       const commandReceiptId = freshUuidV7(input.dependencies);
       const accessDecisionReceiptId = freshUuidV7(input.dependencies);
@@ -869,26 +1135,69 @@ export async function executeTransitionR1ChangeSetCommand(input: {
         requestHash,
         contextId: input.context.contextId,
         actorPrincipalId: input.context.principalId,
+        actorMembershipId: input.context.membershipId,
         commandType: "TRANSITION",
+        targetState: input.command.toState,
         changeSetId: changeSet.id,
-        claimedAt: now,
+        claimedAt: authorizationNow,
       });
       const replay = replayOrFailure(
         claim,
         requestHash,
+        input.context.contextId,
         input.context.principalId,
+        input.context.membershipId,
       );
-      if (replay && claim.kind !== "REPLAY") return replay;
+      if (
+        replay &&
+        (claim.kind === "CONFLICT" || claim.kind === "IN_PROGRESS")
+      ) {
+        const existingCommandReceiptId = commandCorrelationId(
+          claim,
+          commandReceiptId,
+        );
+        await tx.insertCommandAttemptReceipt({
+          id: freshUuidV7(input.dependencies),
+          tenantId: input.context.tenantId,
+          contextId: input.context.contextId,
+          actorPrincipalId: input.context.principalId,
+          actorMembershipId: input.context.membershipId,
+          commandReceiptId: existingCommandReceiptId,
+          requestHash,
+          outcome: claim.kind,
+          occurredAt: authorizationNow,
+        });
+        return replay;
+      }
       const correlationId = commandCorrelationId(claim, commandReceiptId);
-      await tx.insertAccessDecisionReceipt({
-        id: accessDecisionReceiptId,
-        ...authorization.decisionReceipt,
-        decision: "ALLOW",
-        reasonCode: "allowed",
-        correlationId,
-        occurredAt: now,
-      });
-      if (replay) return replay;
+      if (replay) {
+        const replayNow = freshCommandNow(input.dependencies);
+        requireCurrentContext(input.context, replayNow);
+        const replayAuthorization = await resolveAuthorization({
+          tx,
+          context: input.context,
+          capabilityKey,
+          resource: scopeResource(
+            input.context.tenantId,
+            targetScope,
+            "CHANGE_SET",
+            changeSet.id,
+          ),
+          now: replayNow,
+        });
+        if (!replayAuthorization.ok) {
+          throw new RollbackCommand(replayAuthorization.result);
+        }
+        await tx.insertAccessDecisionReceipt({
+          id: accessDecisionReceiptId,
+          ...replayAuthorization.decisionReceipt,
+          decision: "ALLOW",
+          reasonCode: "allowed",
+          correlationId,
+          occurredAt: replayNow,
+        });
+        return replay;
+      }
 
       const approvalTarget = ["APPROVED", "RETURNED", "REJECTED"].includes(
         input.command.toState,
@@ -909,13 +1218,31 @@ export async function executeTransitionR1ChangeSetCommand(input: {
           toState: input.command.toState,
         },
       );
+      const mutationNow = freshCommandNow(input.dependencies);
+      requireCurrentContext(input.context, mutationNow);
+      const currentAuthorization = await resolveAuthorization({
+        tx,
+        context: input.context,
+        capabilityKey,
+        resource: scopeResource(
+          input.context.tenantId,
+          targetScope,
+          "CHANGE_SET",
+          changeSet.id,
+        ),
+        now: mutationNow,
+      });
+      if (!currentAuthorization.ok) {
+        throw new RollbackCommand(currentAuthorization.result);
+      }
       if (
         !validVerifiedTransitionEvidence(verifiedEvidence, {
           changeSet,
           toState: input.command.toState,
           policyVersionId: input.context.policyVersionId,
           actorPrincipalId: input.context.principalId,
-          now,
+          actorMembershipId: input.context.membershipId,
+          now: mutationNow,
         })
       ) {
         throw new RollbackCommand({
@@ -924,18 +1251,24 @@ export async function executeTransitionR1ChangeSetCommand(input: {
           detail: "verified_evidence_unavailable",
         });
       }
-      const policyEvidence: Record<string, unknown> = {
-        ...verifiedEvidence.evidence,
-        evidenceReceiptIds: verifiedEvidence.receipts.map(
-          (receipt) => receipt.id,
-        ),
-      };
+      const policyEvidence = policyEvidenceFromReceipts(
+        verifiedEvidence,
+        input.command.toState,
+      );
+      await tx.insertAccessDecisionReceipt({
+        id: accessDecisionReceiptId,
+        ...currentAuthorization.decisionReceipt,
+        decision: "ALLOW",
+        reasonCode: "allowed",
+        correlationId,
+        occurredAt: mutationNow,
+      });
       if (approvalTarget) {
         policyEvidence.decision = input.command.toState;
         policyEvidence.reviewRound = changeSet.reviewRound;
         policyEvidence.approvalReceiptId = approvalReceiptId;
         policyEvidence.stepUpReceiptId =
-          authorization.assurance.stepUpReceiptId;
+          currentAuthorization.assurance.stepUpReceiptId;
       }
       const transition = evaluateR1ChangeSetTransition({
         changeSet,
@@ -943,10 +1276,10 @@ export async function executeTransitionR1ChangeSetCommand(input: {
           tenantId: input.context.tenantId,
           principalId: input.context.principalId,
           capabilities: [capabilityKey],
-          stepUpReceiptId: authorization.assurance.stepUpSatisfied
-            ? authorization.assurance.stepUpReceiptId
+          stepUpReceiptId: currentAuthorization.assurance.stepUpSatisfied
+            ? currentAuthorization.assurance.stepUpReceiptId
             : null,
-          impersonating: authorization.assurance.impersonating,
+          impersonating: currentAuthorization.assurance.impersonating,
         },
         expectedVersion: input.command.expectedVersion,
         toState: input.command.toState,
@@ -954,7 +1287,7 @@ export async function executeTransitionR1ChangeSetCommand(input: {
         policyVersion: input.context.policyVersionId,
         evidence: policyEvidence,
         previousReceiptHash,
-        now,
+        now: mutationNow,
       });
       if (!transition.allowed) {
         throw new RollbackCommand({
@@ -964,16 +1297,28 @@ export async function executeTransitionR1ChangeSetCommand(input: {
         });
       }
 
+      const evidenceConsumed = await tx.consumeVerifiedTransitionEvidence({
+        tenantId: input.context.tenantId,
+        changeSetId: changeSet.id,
+        commandReceiptId,
+        receiptIds: verifiedEvidence.receipts.map((receipt) => receipt.id),
+        consumedAt: mutationNow,
+      });
+      if (!evidenceConsumed) {
+        throw new RollbackCommand({
+          ok: false,
+          reason: "transition_rejected",
+          detail: "verified_evidence_consumption_conflict",
+        });
+      }
+
       if (approvalTarget && approvalReceiptId) {
         const decision = input.command.toState as
           | "APPROVED"
           | "RETURNED"
           | "REJECTED";
         const approvalEvidence = {
-          ...verifiedEvidence.evidence,
-          evidenceReceiptIds: verifiedEvidence.receipts.map(
-            (receipt) => receipt.id,
-          ),
+          ...policyEvidence,
           reviewRound: changeSet.reviewRound,
         };
         await tx.insertApproval({
@@ -982,10 +1327,13 @@ export async function executeTransitionR1ChangeSetCommand(input: {
           changeSetId: changeSet.id,
           reviewRound: changeSet.reviewRound,
           checkerPrincipalId: input.context.principalId,
+          checkerMembershipId: input.context.membershipId,
           decision,
           reasonCode: input.command.reasonCode,
           approvalPolicyVersion: input.context.policyVersionId,
-          stepUpReceiptId: authorization.assurance.stepUpReceiptId as string,
+          approvalPolicyVersionId: input.context.policyVersionId,
+          stepUpReceiptId: currentAuthorization.assurance
+            .stepUpReceiptId as string,
           evidence: approvalEvidence,
           decisionHash: hashValue({
             tenantId: input.context.tenantId,
@@ -995,15 +1343,18 @@ export async function executeTransitionR1ChangeSetCommand(input: {
             decision,
             reasonCode: input.command.reasonCode,
             approvalPolicyVersion: input.context.policyVersionId,
-            stepUpReceiptId: authorization.assurance.stepUpReceiptId,
+            stepUpReceiptId: currentAuthorization.assurance.stepUpReceiptId,
             evidenceHash: hashValue(approvalEvidence),
-            createdAt: now,
+            createdAt: mutationNow,
           }),
-          createdAt: now,
+          createdAt: mutationNow,
         });
       }
       await tx.insertTransitionReceipt({
         id: transitionReceiptId,
+        commandReceiptId,
+        actorMembershipId: input.context.membershipId,
+        policyVersionId: input.context.policyVersionId,
         ...transition.receipt,
       });
       await tx.updateChangeSet({
@@ -1025,7 +1376,7 @@ export async function executeTransitionR1ChangeSetCommand(input: {
         changeSetId: changeSet.id,
         result,
         resultHash: hashValue(result),
-        completedAt: now,
+        completedAt: freshCommandNow(input.dependencies),
       });
       return { ok: true, replayed: false, result };
     });

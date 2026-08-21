@@ -346,9 +346,15 @@ importers:
       '@types/nodemailer':
         specifier: ^7.0.11
         version: 7.0.11
+      '@types/pg':
+        specifier: ^8.18.0
+        version: 8.18.0
       esbuild:
         specifier: 0.28.1
         version: 0.28.1
+      pg:
+        specifier: ^8.20.0
+        version: 8.20.0
       tsx:
         specifier: 'catalog:'
         version: 4.21.0

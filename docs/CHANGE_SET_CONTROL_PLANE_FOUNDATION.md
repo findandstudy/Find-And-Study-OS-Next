@@ -1,9 +1,10 @@
 # ChangeSet Control Plane Foundation
 
 Status: additive, default-unwired foundation. This document is a security and
-delivery contract, not evidence that the feature is enabled. Migrations `0055`
-and `0056` have not been applied to any database. There is no PostgreSQL command
-adapter, Super Admin route, publisher, worker, or UI wired to these tables yet.
+delivery contract, not evidence that the feature is enabled. Migrations `0055`,
+`0056`, and the additive hardening migration `0057` have not been applied to a
+long-lived database. There is no PostgreSQL command adapter, Super Admin route,
+publisher, worker, or UI wired to these tables yet.
 
 ## Outcome
 
@@ -46,9 +47,10 @@ mutation and result projection in one transaction. A policy rejection after a
 claim throws an internal rollback signal, so a failed command cannot leave a
 stuck claim. Access-decision receipts are written only after the idempotency
 claim result is known and correlate to the persisted command receipt for a new
-command or replay. Conflict and in-progress attempts fail without incorrectly
-attaching a new access decision to the old command; a future attempt-receipt
-model must represent those attempts separately.
+command or replay. Authorization denials receive a DENY decision receipt before
+any idempotency claim. Conflict and in-progress attempts do not attach a new
+access decision to the old command; `0057` adds a separate immutable attempt
+receipt for those outcomes.
 
 Migration `0056_change_set_command_idempotency.sql` stores only the SHA-256 hash
 of an idempotency key. A tenant/key pair can move only from a clean `CLAIMED`
@@ -90,14 +92,21 @@ The future route must execute this trust order:
 5. evaluate the typed ChangeSet policy with the server-derived actor;
 6. use optimistic concurrency against the current ChangeSet version.
 
-RLS is enabled and forced on all three tables. There are no delete policies.
-Approval and transition receipts are immutable. Missing tenant context returns
-no tenant-owned rows.
+RLS is enabled and forced on every tenant-owned authorization and ChangeSet
+foundation table. Receipt tables have no delete policy. Approval, transition,
+command-attempt, access-decision, and authorization-change receipts are
+immutable; verified evidence permits only an atomic, one-way unconsumed to
+consumed update. Each early transition receipt is uniquely bound to its claimed
+command; command completion requires the exact typed evidence set and a deferred
+constraint requires receipt, state and command completion in the same commit.
+Missing tenant context returns no tenant-owned rows.
 
-`LEGACY_BRANCH` remains a compatibility scope, but the command orchestrator now
-rejects it. It may be enabled only after a tenant-owned binding proves the exact
-tenant, organization, and legacy branch tuple through composite constraints;
-the raw branch ID by itself is never authority.
+`LEGACY_BRANCH` remains a compatibility scope, but the command orchestrator
+still rejects it. Migration `0057` adds the tenant-owned
+`tenant_organization_legacy_branches` map and composite membership, assignment,
+and ChangeSet constraints. The scope remains closed until a future narrow
+writer/procedure contract proves those constraints without granting generic DML
+to the shared `fas_app` credential; the raw branch ID by itself is never authority.
 
 ## State and review contract
 
@@ -138,14 +147,15 @@ has no previous hash.
 The command orchestrator requires its future PostgreSQL adapter to perform each
 flow in one database transaction. Both flows first establish transaction-local
 tenant context and resolve current authorization. Create then claims the
-idempotency key, records the correlated access decision, locks and reads the
-authoritative configuration, derives the next version, inserts the draft, and
-completes the command with a canonical result hash. Transition locks and
-re-reads the ChangeSet, authorizes its stored scope, claims the idempotency key,
-records the correlated access decision, reads the latest receipt hash, writes
-the receipt, updates state/version, and completes the command. A future enabled
-decision target must insert the current-round approval before its transition
-receipt.
+idempotency key, locks and reads the authoritative configuration identity,
+re-resolves authorization and time after the lock, records the correlated
+access decision, derives the next version, inserts the draft, and completes the
+command with a canonical result hash. Transition locks and re-reads the
+ChangeSet, authorizes its exact stored scope, claims the idempotency key, locks
+server-issued evidence, re-resolves authorization and time, records the
+correlated access decision, atomically consumes evidence, writes the receipt,
+updates state/version, and completes the command. A future enabled decision
+target must insert the current-round approval before its transition receipt.
 
 The authoritative configuration lock must also return any active proposal for
 the same tenant/scope/type while holding that lock. A competing active proposal
@@ -179,20 +189,24 @@ gate.
 `VALIDATED`, `SIMULATED`, and `IN_REVIEW` do not trust command-body booleans or
 counts. The future store must load immutable server-issued evidence receipts
 under the same transaction. Each typed receipt binds its UUIDv7 ID, kind,
-issuer, tool version, tenant, ChangeSet, target state, requesting principal,
-proposed hash, policy version, issued/expiry window, and unconsumed state.
+issuer, tool version, tenant, ChangeSet, target state, requesting principal and
+membership, proposed hash, policy version, pass/fail outcome, artifact count,
+outcome hash, issued/expiry window, and unconsumed state.
 Review submission requires distinct `TEST_ARTIFACT`, `ROLLBACK_PLAN`, and
 `CANARY_PLAN` receipts. Missing, duplicate, expired, consumed, cross-ChangeSet,
-wrong-kind, or mismatched evidence rolls back the claim and state change.
+wrong-kind, failed-outcome, wrong-outcome-hash, or mismatched evidence rolls
+back the claim and state change. All required receipts are consumed atomically
+by the exact transition command; concurrent reuse admits at most one consumer.
 
 Notification template variables must be declared whether referenced in the
 subject or body. Template variables that suggest passwords, secrets, tokens,
 passports, national IDs, or SSNs are not admitted. Plain-text fields reject
 obvious script/event-handler/javascript payloads.
 
-Sensitive material is rejected recursively from configuration and transition
-evidence. This is a guardrail, not a secret scanner guarantee; secrets belong in
-a dedicated secret manager and are referenced by opaque, non-sensitive handles
+Sensitive material is rejected recursively from configuration, transition
+evidence, title, purpose, and reason text. This is a guardrail, not a secret
+scanner guarantee; secrets belong in a dedicated secret manager and are
+referenced by opaque, non-sensitive handles
 through a separately designed higher-risk workflow.
 
 ## Rollout and rollback contract
@@ -216,11 +230,12 @@ This foundation does not yet deliver:
 - a publisher/worker or actual configuration materialization;
 - verified step-up issuance;
 - authoritative materialized-configuration repository;
-- immutable validation/simulation/test/rollback/canary evidence repository;
-- tenant/organization/legacy-branch composite binding;
-- separated migrator and runtime application database roles;
+- a production evidence issuer or outcome-hash signing service;
+- runtime adoption/backfill of the tenant/organization/legacy-branch map;
+- persistent environment grants for separated migrator and runtime application
+  database roles;
 - a notification preview sandbox;
-- database-backed integration tests;
+- a passed and required database-backed integration gate;
 - a production or local database migration;
 - R2/R3/R4 changes, multi-tenant changes, code, schema, infrastructure, or
   secret rotation;
@@ -231,10 +246,10 @@ writer quarantines remain authoritative.
 
 ## Next safe slice
 
-The next implementation slice is the disposable PostgreSQL integration harness
-and database-role boundary described in
-`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md`. The adapter must implement the exact
-transaction interface and statement order without a bypass path. No API route
-or Super Admin UI is connected until those tests pass. The publisher and
-configuration materialization adapters stay separate until that command path
-passes the relevant gate.
+The next implementation slice is to run and independently review the disposable
+PostgreSQL 16 workflow described in
+`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md`, close every failure, and make its
+exact check required. Only after that evidence may a PostgreSQL adapter
+implement the transaction interface; no API route or Super Admin UI is
+connected in that slice. Publisher and configuration materialization adapters
+remain separate and default-off.

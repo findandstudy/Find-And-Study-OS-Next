@@ -136,6 +136,8 @@ export type ActiveContextDecisionReason =
   | "principal_type_mismatch"
   | "unsupported_constraint"
   | "capability_missing"
+  | "capability_metadata_invalid"
+  | "resolved_state_invalid"
   | "capability_inactive"
   | "explicit_deny"
   | "step_up_required"
@@ -360,6 +362,7 @@ function assignmentMatchesContext(
   if (assignment.scopeType === "ORGANIZATION") {
     return assignment.organizationId === context.organizationId;
   }
+  if (assignment.scopeType !== "LEGACY_BRANCH") return false;
   return (
     assignment.organizationId === context.organizationId &&
     assignment.legacyBranchId === context.legacyBranchId
@@ -374,10 +377,136 @@ function assignmentMatchesResource(
   if (assignment.scopeType === "ORGANIZATION") {
     return assignment.organizationId === (resource.organizationId ?? null);
   }
+  if (assignment.scopeType !== "LEGACY_BRANCH") return false;
   return (
     assignment.organizationId === (resource.organizationId ?? null) &&
     assignment.legacyBranchId === (resource.legacyBranchId ?? null)
   );
+}
+
+function hasValidResolvedCapabilities(
+  value: unknown,
+): value is ResolvedCapability[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (capability) =>
+        capability !== null &&
+        typeof capability === "object" &&
+        !Array.isArray(capability) &&
+        typeof capability.key === "string" &&
+        CAPABILITY_RE.test(capability.key) &&
+        (capability.effect === "ALLOW" || capability.effect === "DENY") &&
+        ["ACTIVE", "DEPRECATED", "REVOKED"].includes(
+          String(capability.status),
+        ) &&
+        typeof capability.stepUpRequired === "boolean" &&
+        typeof capability.approvalRequired === "boolean",
+    )
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSafeTimestamp(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function isNullableSafeTimestamp(value: unknown): value is number | null {
+  return value === null || isSafeTimestamp(value);
+}
+
+function hasValidResolvedStateShape(
+  value: unknown,
+): value is ResolvedActiveContextState {
+  if (!isRecord(value)) return false;
+  const { tenant, principal, membership, policy, assignments } = value;
+  if (
+    !isRecord(tenant) ||
+    !isUuidV7(tenant.id) ||
+    !["PROVISIONING", "ACTIVE", "SUSPENDED", "OFFBOARDING", "CLOSED"].includes(
+      String(tenant.status),
+    ) ||
+    !Number.isSafeInteger(tenant.policyVersion) ||
+    Number(tenant.policyVersion) < 1 ||
+    !isRecord(principal) ||
+    !isUuidV7(principal.id) ||
+    !["HUMAN", "SERVICE", "INTEGRATION", "AI"].includes(
+      String(principal.principalType),
+    ) ||
+    !["ACTIVE", "SUSPENDED", "REVOKED"].includes(String(principal.status)) ||
+    !["NORMAL", "STEP_UP_REQUIRED", "LOCKED"].includes(
+      String(principal.riskState),
+    ) ||
+    !isRecord(membership) ||
+    !isUuidV7(membership.id) ||
+    !isUuidV7(membership.tenantId) ||
+    !isNullableUuidV7(membership.organizationId) ||
+    !isNullableBranchId(membership.legacyBranchId) ||
+    (membership.legacyBranchId !== null && membership.organizationId === null) ||
+    !isUuidV7(membership.principalId) ||
+    !["PENDING", "ACTIVE", "SUSPENDED", "REVOKED", "EXPIRED"].includes(
+      String(membership.status),
+    ) ||
+    !isSafeTimestamp(membership.validFrom) ||
+    !isNullableSafeTimestamp(membership.validUntil) ||
+    (membership.validUntil !== null &&
+      membership.validUntil <= membership.validFrom) ||
+    !isRecord(policy) ||
+    !isUuidV7(policy.id) ||
+    !isUuidV7(policy.tenantId) ||
+    !Number.isSafeInteger(policy.version) ||
+    Number(policy.version) < 1 ||
+    !["DRAFT", "ACTIVE", "REVOKED"].includes(String(policy.state)) ||
+    !isNullableSafeTimestamp(policy.effectiveAt) ||
+    !isNullableSafeTimestamp(policy.revokedAt) ||
+    !Array.isArray(assignments) ||
+    assignments.length > ACTIVE_CONTEXT_MAX_ASSIGNMENTS
+  ) {
+    return false;
+  }
+
+  return assignments.every((assignment) => {
+    if (!isRecord(assignment)) return false;
+    const scopeType = assignment.scopeType;
+    const scopeIsValid =
+      (scopeType === "TENANT" &&
+        assignment.organizationId === null &&
+        assignment.legacyBranchId === null) ||
+      (scopeType === "ORGANIZATION" &&
+        isUuidV7(assignment.organizationId) &&
+        assignment.legacyBranchId === null) ||
+      (scopeType === "LEGACY_BRANCH" &&
+        isUuidV7(assignment.organizationId) &&
+        isNullableBranchId(assignment.legacyBranchId) &&
+        assignment.legacyBranchId !== null);
+    return (
+      isUuidV7(assignment.id) &&
+      isUuidV7(assignment.tenantId) &&
+      isUuidV7(assignment.membershipId) &&
+      ["ACTIVE", "SUSPENDED", "REVOKED", "EXPIRED"].includes(
+        String(assignment.status),
+      ) &&
+      isSafeTimestamp(assignment.validFrom) &&
+      isNullableSafeTimestamp(assignment.validUntil) &&
+      (assignment.validUntil === null ||
+        assignment.validUntil > assignment.validFrom) &&
+      scopeIsValid &&
+      isRecord(assignment.constraintDocument) &&
+      isUuidV7(assignment.rolePackageVersionId) &&
+      ["DRAFT", "ACTIVE", "DEPRECATED", "REVOKED"].includes(
+        String(assignment.rolePackageStatus),
+      ) &&
+      ["HUMAN", "SERVICE", "INTEGRATION", "AI"].includes(
+        String(assignment.rolePackagePrincipalType),
+      ) &&
+      isNullableSafeTimestamp(assignment.rolePackageEffectiveAt) &&
+      isNullableSafeTimestamp(assignment.rolePackageDeprecatedAt) &&
+      hasValidResolvedCapabilities(assignment.capabilities)
+    );
+  });
 }
 
 export function evaluateActiveTenantCapability(input: {
@@ -391,10 +520,17 @@ export function evaluateActiveTenantCapability(input: {
 }): ActiveContextDecision {
   const { context, state, resource } = input;
   const now = input.now ?? Date.now();
-  const assignmentIds = state.assignments.map((assignment) => assignment.id);
+  const safeAssignments = Array.isArray(state?.assignments)
+    ? state.assignments.filter(isRecord)
+    : [];
+  const assignmentIds = safeAssignments
+    .map((assignment) => assignment.id)
+    .filter((id): id is string => typeof id === "string");
   const packageIds = [
     ...new Set(
-      state.assignments.map((assignment) => assignment.rolePackageVersionId),
+      safeAssignments
+        .map((assignment) => assignment.rolePackageVersionId)
+        .filter((id): id is string => typeof id === "string"),
     ),
   ].sort();
   const decide = (
@@ -421,6 +557,9 @@ export function evaluateActiveTenantCapability(input: {
 
   if (!isVerifiedActiveTenantContext(context, now)) {
     return decide(false, "context_not_current");
+  }
+  if (!hasValidResolvedStateShape(state)) {
+    return decide(false, "resolved_state_invalid");
   }
   if (!CAPABILITY_RE.test(input.capabilityKey))
     return decide(false, "capability_missing");
@@ -510,8 +649,16 @@ export function evaluateActiveTenantCapability(input: {
     if (assignment.rolePackagePrincipalType !== state.principal.principalType) {
       return decide(false, "principal_type_mismatch");
     }
-    if (Object.keys(assignment.constraintDocument).length > 0) {
+    if (
+      assignment.constraintDocument === null ||
+      typeof assignment.constraintDocument !== "object" ||
+      Array.isArray(assignment.constraintDocument) ||
+      Object.keys(assignment.constraintDocument).length > 0
+    ) {
       return decide(false, "unsupported_constraint");
+    }
+    if (!hasValidResolvedCapabilities(assignment.capabilities)) {
+      return decide(false, "capability_metadata_invalid");
     }
   }
 
@@ -527,18 +674,19 @@ export function evaluateActiveTenantCapability(input: {
   const allows = scopedCapabilities.filter(
     (capability) => capability.effect === "ALLOW",
   );
+  if (allows.length === 0) return decide(false, "capability_missing");
   if (allows.some((capability) => capability.status !== "ACTIVE")) {
     return decide(false, "capability_inactive");
   }
   if (
     allows.some((capability) => capability.stepUpRequired) &&
-    !input.stepUpSatisfied
+    input.stepUpSatisfied !== true
   ) {
     return decide(false, "step_up_required");
   }
   if (
     allows.some((capability) => capability.approvalRequired) &&
-    !input.approvalSatisfied
+    input.approvalSatisfied !== true
   ) {
     return decide(false, "approval_required");
   }

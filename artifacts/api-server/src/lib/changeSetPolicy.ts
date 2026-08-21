@@ -62,10 +62,13 @@ export type ChangeSetScope =
 export type R1ChangeSetDraft = {
   tenantId: string;
   changeType: R1ChangeType;
+  configurationKey: string;
   title: string;
   purpose: string;
   ownerPrincipalId: string;
+  ownerMembershipId: string;
   makerPrincipalId: string;
+  makerMembershipId: string;
   targetScope: ChangeSetScope;
   baseVersion: number;
   proposedVersion: number;
@@ -200,22 +203,45 @@ function isChangeSetState(value: unknown): value is ChangeSetState {
   );
 }
 
-function isChangeSetScope(value: unknown): value is ChangeSetScope {
-  if (!isRecord(value)) return false;
+export function normalizeChangeSetScope(
+  value: unknown,
+): ChangeSetScope | null {
+  if (!isRecord(value)) return null;
+  const keys = Object.keys(value).sort();
+  if (
+    canonicalJson(keys) !==
+    canonicalJson(["legacyBranchId", "organizationId", "type"])
+  ) {
+    return null;
+  }
   if (value.type === "TENANT") {
-    return value.organizationId === null && value.legacyBranchId === null;
+    return value.organizationId === null && value.legacyBranchId === null
+      ? { type: "TENANT", organizationId: null, legacyBranchId: null }
+      : null;
   }
   if (value.type === "ORGANIZATION") {
-    return isUuidV7(value.organizationId) && value.legacyBranchId === null;
+    return isUuidV7(value.organizationId) && value.legacyBranchId === null
+      ? {
+          type: "ORGANIZATION",
+          organizationId: value.organizationId.toLowerCase(),
+          legacyBranchId: null,
+        }
+      : null;
   }
   if (value.type === "LEGACY_BRANCH") {
     return (
       isUuidV7(value.organizationId) &&
       Number.isSafeInteger(value.legacyBranchId) &&
       Number(value.legacyBranchId) > 0
+        ? {
+            type: "LEGACY_BRANCH",
+            organizationId: value.organizationId.toLowerCase(),
+            legacyBranchId: Number(value.legacyBranchId),
+          }
+        : null
     );
   }
-  return false;
+  return null;
 }
 
 function hasBoundedText(
@@ -373,6 +399,19 @@ function validateTypedConfig(
   return endsAt > startsAt && endsAt - startsAt <= 7 * 24 * 60 * 60 * 1000;
 }
 
+export function deriveR1ConfigurationKey(
+  type: R1ChangeType,
+  value: unknown,
+): string | null {
+  if (!validateTypedConfig(type, value)) return null;
+  if (type === "BRAND" || type === "LOCALE") return "default";
+  if (type === "NOTIFICATION_TEMPLATE") {
+    return `${String(value.templateKey)}:${String(value.locale)}`;
+  }
+  if (type === "FEATURE_FLAG") return String(value.flagKey);
+  return String(value.locale);
+}
+
 function hashJson(value: unknown): string {
   return crypto
     .createHash("sha256")
@@ -386,7 +425,9 @@ export function createR1ChangeSetDraft(input: {
   title: string;
   purpose: string;
   ownerPrincipalId: string;
+  ownerMembershipId: string;
   makerPrincipalId: string;
+  makerMembershipId: string;
   targetScope: ChangeSetScope;
   baseVersion: number;
   proposedVersion: number;
@@ -402,10 +443,13 @@ export function createR1ChangeSetDraft(input: {
   if (
     !isUuidV7(input.tenantId) ||
     !isUuidV7(input.ownerPrincipalId) ||
-    !isUuidV7(input.makerPrincipalId)
+    !isUuidV7(input.ownerMembershipId) ||
+    !isUuidV7(input.makerPrincipalId) ||
+    !isUuidV7(input.makerMembershipId)
   )
     return { ok: false, reason: "invalid_identity" };
-  if (!isChangeSetScope(input.targetScope)) {
+  const targetScope = normalizeChangeSetScope(input.targetScope);
+  if (!targetScope) {
     return { ok: false, reason: "invalid_scope" };
   }
   if (
@@ -415,6 +459,9 @@ export function createR1ChangeSetDraft(input: {
     !["PUBLIC", "INTERNAL"].includes(input.dataClass)
   )
     return { ok: false, reason: "invalid_metadata" };
+  if (hasSensitiveMaterial(input.title) || hasSensitiveMaterial(input.purpose)) {
+    return { ok: false, reason: "sensitive_material_forbidden" };
+  }
   if (
     !Number.isSafeInteger(input.baseVersion) ||
     input.baseVersion < 0 ||
@@ -435,9 +482,15 @@ export function createR1ChangeSetDraft(input: {
   ) {
     return { ok: false, reason: "invalid_config_shape" };
   }
+  const baseConfigurationKey = deriveR1ConfigurationKey(type, baseConfig);
+  const proposedConfigurationKey = deriveR1ConfigurationKey(
+    type,
+    proposedConfig,
+  );
   if (
-    type === "FEATURE_FLAG" &&
-    baseConfig.flagKey !== proposedConfig.flagKey
+    baseConfigurationKey === null ||
+    proposedConfigurationKey === null ||
+    baseConfigurationKey !== proposedConfigurationKey
   ) {
     return { ok: false, reason: "invalid_config_shape" };
   }
@@ -458,11 +511,14 @@ export function createR1ChangeSetDraft(input: {
     draft: {
       tenantId: input.tenantId.toLowerCase(),
       changeType: type,
+      configurationKey: proposedConfigurationKey,
       title: input.title.trim(),
       purpose: input.purpose.trim(),
       ownerPrincipalId: input.ownerPrincipalId.toLowerCase(),
+      ownerMembershipId: input.ownerMembershipId.toLowerCase(),
       makerPrincipalId: input.makerPrincipalId.toLowerCase(),
-      targetScope: input.targetScope,
+      makerMembershipId: input.makerMembershipId.toLowerCase(),
+      targetScope,
       baseVersion: input.baseVersion,
       proposedVersion: input.proposedVersion,
       baseHash,
@@ -481,7 +537,7 @@ export function createR1ChangeSetDraft(input: {
       riskTier: "R1",
       dataClass: input.dataClass,
       affectedTenantCount: 1,
-      affectedBranchCount: input.targetScope.type === "LEGACY_BRANCH" ? 1 : 0,
+      affectedBranchCount: targetScope.type === "LEGACY_BRANCH" ? 1 : 0,
       affectedPrincipalCount: 0,
       affectedCaseCount: 0,
       affectedIntegrationCount: 0,
@@ -494,7 +550,7 @@ export function createR1ChangeSetDraft(input: {
       },
       canaryScope: {
         kind: "SERVER_SELECTED_SAFE_COHORT",
-        targetScope: input.targetScope,
+        targetScope,
       },
       abortConditions: [
         { metric: "policy_violation_count", operator: ">", threshold: 0 },
@@ -763,6 +819,7 @@ export function evaluateR1ChangeSetTransition(input: {
   if (
     !isRecord(evidence) ||
     hasSensitiveMaterial(evidence) ||
+    hasSensitiveMaterial(input.reasonCode) ||
     canonicalJson(evidence).length > 16_384 ||
     !hasBoundedText(input.policyVersion, 1, 120) ||
     (input.previousReceiptHash != null &&
