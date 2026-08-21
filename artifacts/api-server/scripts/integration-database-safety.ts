@@ -29,15 +29,19 @@ function parseDatabaseUrl(databaseUrl: string): URL {
   return parsed;
 }
 
-export function assertSafeSignedContractAuthzDatabase({
-  allowLiveIntegrations = process.env.ALLOW_LIVE_INTEGRATIONS,
-  allowMutation = process.env.OBJECT_AUTHZ_TEST_ALLOW_DATABASE_MUTATION,
-  ci = process.env.CI,
-  databaseUrl = process.env.DATABASE_URL,
-  githubActions = process.env.GITHUB_ACTIONS,
-  githubRunAttempt = process.env.GITHUB_RUN_ATTEMPT,
-  githubRunId = process.env.GITHUB_RUN_ID,
-}: IntegrationDatabaseSafetyInput = {}): void {
+export function assertSafeSignedContractAuthzDatabase(
+  options: IntegrationDatabaseSafetyInput = {},
+): void {
+  const option = (key: keyof IntegrationDatabaseSafetyInput, fallback: string | undefined) =>
+    Object.prototype.hasOwnProperty.call(options, key) ? options[key] : fallback;
+  const allowLiveIntegrations = option("allowLiveIntegrations", process.env.ALLOW_LIVE_INTEGRATIONS);
+  const allowMutation = option("allowMutation", process.env.OBJECT_AUTHZ_TEST_ALLOW_DATABASE_MUTATION);
+  const ci = option("ci", process.env.CI);
+  const databaseUrl = option("databaseUrl", process.env.DATABASE_URL);
+  const githubActions = option("githubActions", process.env.GITHUB_ACTIONS);
+  const githubRunAttempt = option("githubRunAttempt", process.env.GITHUB_RUN_ATTEMPT);
+  const githubRunId = option("githubRunId", process.env.GITHUB_RUN_ID);
+
   if (allowLiveIntegrations !== "false") {
     throw new Error("[integration DB safety] ALLOW_LIVE_INTEGRATIONS must be false");
   }
