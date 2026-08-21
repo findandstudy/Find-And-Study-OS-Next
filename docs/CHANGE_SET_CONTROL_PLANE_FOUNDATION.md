@@ -1,11 +1,10 @@
 # ChangeSet Control Plane Foundation
 
-Status: additive, default-unwired foundation plus a tested PostgreSQL adapter
-candidate. This document is a security and delivery contract, not evidence that
-the feature is enabled. Migrations `0055` through `0059` have not been applied
-to a long-lived database. The command-store and evidence-issuer adapters exist,
-but no API route, Super Admin UI, publisher, worker, or materializer is wired to
-them.
+Status: additive, default-unwired foundation plus tested PostgreSQL command,
+evidence, and durable-audit adapter candidates. This document is a security and
+delivery contract, not evidence that the feature is enabled. Migrations `0055`
+through `0060` have not been applied to a long-lived database. No API route,
+Super Admin UI, publisher, worker, or materializer is wired to these adapters.
 
 ## Outcome
 
@@ -260,8 +259,21 @@ than raw idempotency keys, request bodies, titles, reasons, errors, stack traces
 secrets, or PII. The database serializes each attempt, preserves actor/context/
 request identity, and forbids appends after one terminal event. The `event_hash`
 is still an adapter-computed keyed value; the default-unwired table does not
-recompute that MAC. This is only the storage contract. The outer-attempt/business-
-transaction/terminal-event adapter wiring remains deliberately absent.
+recompute that MAC.
+
+Migration `0060_change_set_durable_audit_adapter.sql` and
+`postgresChangeSetAuditWriter.ts` add the first optional outer-attempt writer.
+It commits `ATTEMPT_STARTED` before the business transaction and commits one
+terminal success/deny/reject/conflict/error event after the business transaction
+returns or rolls back. CREATE and TRANSITION start unbound; only a terminal
+success can bind a verified ChangeSet ID, and that identity cannot later be
+cleared or changed. The writer uses domain-separated HMAC-SHA-256 fingerprints,
+re-verifies the stored chain head before appending, and fails closed if the
+start event cannot be persisted. The disposable harness gives it a dedicated
+EXECUTE-only login and a separate `NOLOGIN` function owner. It is still
+default-unwired and uses only an ephemeral CI key; production KMS/HSM custody,
+signed-context-to-DB binding, ambiguous-commit reconciliation, and the full
+race/failure matrix remain mandatory before any runtime route can use it.
 
 Notification template variables must be declared whether referenced in the
 subject or body. Template variables that suggest passwords, secrets, tokens,
@@ -299,7 +311,8 @@ This foundation does not yet deliver:
 - a KMS/HSM-backed production signer, key rotation ceremony, or issuer runtime
   credential;
 - production command-executor/evidence-issuer role bootstrap and credentials;
-- durable audit transaction wiring around the command orchestrator;
+- production audit-key custody/rotation, incomplete-attempt reconciliation,
+  and signed active-context-to-audit-tenant binding;
 - runtime adoption/backfill of the tenant/organization/legacy-branch map;
 - persistent environment grants for separated migrator and runtime application
   database roles;
@@ -317,16 +330,18 @@ writer quarantines remain authoritative.
 
 ## Next safe slice
 
-The 60-migration PostgreSQL 16 foundation and default-unwired adapter workflows
-described in `CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on implementation
-head `ddf07dbd1da3729b966f06323a70cb0a2f427f59` (runs `32535620767` and
-`32535620838`). G0 Linux and Windows also pass on run `32535620757`.
+The 61-migration PostgreSQL 16 foundation and default-unwired command, evidence,
+and durable-audit adapter workflows described in
+`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on audit implementation head
+`8579a54f44e5c75537dcd31dba0e661f8223b367` (foundation run `32537777722`,
+adapter run `32537777669`, audit run `32537777763`, and G0 Linux/Windows run
+`32537777745`).
 
-The next safe slice is the durable outer-attempt audit transaction plus the
+The next safe slice is signed active-context-to-DB invocation binding plus the
 remaining adapter race/failure matrix: cancellation, ambiguous commit replay,
 membership/policy/key revocation in both lock orders, injected failure at every
-write boundary and keyed audit-chain verification. The shared runtime role must
-not receive generic Control Plane DML. No API route or Super Admin UI may be
-connected before those controls, required checks, production role/bootstrap
+write boundary, and incomplete-attempt reconciliation. The shared runtime role
+must not receive generic Control Plane DML. No API route or Super Admin UI may
+be connected before those controls, required checks, production role/bootstrap
 review and independent approval exist. Publisher and configuration
 materialization adapters remain separate and default-off.

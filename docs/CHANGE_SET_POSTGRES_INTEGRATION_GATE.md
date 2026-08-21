@@ -1,15 +1,16 @@
 # ChangeSet PostgreSQL Integration Gate
 
-Status: **60-MIGRATION FOUNDATION AND DEFAULT-UNWIRED ADAPTER CI GREEN;
-NO-GO for runtime wiring**.
+Status: **61-MIGRATION FOUNDATION, DEFAULT-UNWIRED COMMAND/EVIDENCE ADAPTER,
+AND DURABLE-AUDIT ADAPTER CI GREEN; NO-GO for runtime wiring**.
 
 This gate is not a delivery estimate and is not proof that migrations `0055`
-through `0059` have run in a long-lived environment. The approved local
+through `0060` have run in a long-lived environment. The approved local
 PostgreSQL endpoint `127.0.0.1:5433/fasos_apply_local` was unavailable. GitHub
-run `32535620767` applied all 60 reviewed migrations twice to an isolated
+run `32537777722` applied all 61 reviewed migrations twice to an isolated
 disposable PostgreSQL 16 database and passed the direct-SQL foundation matrix.
-Run `32535620838` passed the real default-unwired command-store and
-evidence-issuer adapter candidate on the same implementation head. No
+Run `32537777669` passed the real default-unwired command-store and
+evidence-issuer adapter candidate; run `32537777763` passed the separate
+durable-audit adapter. No
 long-lived, production, staging, or production-derived database was mutated.
 
 ## Required database authority split
@@ -31,7 +32,8 @@ allowed. A command adapter requires a separately reviewed, narrow writer role
 or procedure contract; granting generic ChangeSet DML to the shared
 application role is forbidden. The adapter harness additionally creates
 separate command-executor and evidence-issuer login roles plus separate
-`NOLOGIN` function owners. The login roles receive execute on their exact RPC
+`NOLOGIN` function owners. The durable-audit harness adds a separate audit
+writer login and audit function owner. Login roles receive execute on their exact RPC
 façade only; they do not receive Control Plane table DML and cannot assume an
 owner or migrator role. This is disposable test bootstrap, not a production
 credential rollout.
@@ -41,7 +43,7 @@ credential rollout.
 The test environment must use a disposable PostgreSQL instance matching the
 production major version and pinned by immutable image digest. It must create a
 random `fas_it_*` database, set statement, lock, and idle-transaction timeouts,
-and apply the real migration runner from `0000` through `0059` using only the
+and apply the real migration runner from `0000` through `0060` using only the
 migrator role.
 
 The harness is opt-in and must fail closed unless all of these are true:
@@ -111,7 +113,7 @@ The gate passes only when CI records all of the following:
 `artifacts/api-server/scripts/test-postgres-control-plane-gate.ts` define the
 foundation PostgreSQL 16 gate. It uses an immutable official
 image digest, a per-run `fas_it_*` database, separate `fas_migrator` and
-`fas_app` logins. The current candidate targets all 60 migrations twice. It
+`fas_app` logins. The current candidate targets all 61 migrations twice. It
 directly
 exercises:
 
@@ -138,14 +140,24 @@ canonical replay, rollback, same-client tenant-context cleanup and direct-role
 denials. The command validator independently binds artifact count and manifest
 hash into the signed outcome hash.
 
-Both checks passed on implementation head
-`ddf07dbd1da3729b966f06323a70cb0a2f427f59` in runs `32535620767` and
-`32535620838`; G0 Linux/Windows passed in `32535620757`. The checks are not yet
-required by a repository ruleset. The adapter candidate still does not cover
-HTTP-to-DB context wiring, every cancellation/ambiguous-commit path, both lock
+`.github/workflows/postgres-control-plane-audit-gate.yml` and
+`test-postgres-change-set-audit.ts` add the durable outer-attempt candidate.
+They prove a separately committed start event, terminal success and rejection
+after business commit/rollback, terminal-only ChangeSet identity binding,
+domain-separated HMAC chain verification, cross-tenant and no-context denial,
+direct-table denial for the audit login, transaction-local context cleanup, and
+one terminal winner under a same-attempt race.
+
+All checks passed on audit implementation head
+`8579a54f44e5c75537dcd31dba0e661f8223b367`: foundation run `32537777722`,
+command/evidence adapter run `32537777669`, durable-audit run `32537777763`,
+and G0 Linux/Windows run `32537777745`. The checks are not yet required by a
+repository ruleset. The adapter candidate still does not cover signed
+HTTP-to-DB context binding, every cancellation/ambiguous-commit path, both lock
 orders for membership/policy/key revocation, injected failure between every
-write, durable rollback-safe denial audit, or decision/step-up paths. Those gaps
-keep the full matrix and runtime wiring at NO-GO.
+write, production KMS/HSM audit-key custody, incomplete-attempt reconciliation,
+or decision/step-up paths. Those gaps keep the full matrix and runtime wiring at
+NO-GO.
 
 ## Runtime-wiring gate
 
