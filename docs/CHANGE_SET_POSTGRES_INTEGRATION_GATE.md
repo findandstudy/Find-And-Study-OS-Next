@@ -47,6 +47,14 @@ The harness is opt-in and must fail closed unless all of these are true:
 - migration and runtime URLs are distinct;
 - no production or staging hostname, secret, or tunnel is present.
 
+The reviewed migration runner independently enforces the explicit target class
+and connected database identity. Disposable `test` runs accept only
+loopback:5432, a `fas_it_*` database, and `fas_migrator`. Other target classes
+require exact host/database/user confirmations; staging and production also
+require a separate long-lived-target approval flag. These controls authorize
+neither a production rollout nor migration `0058` adoption into a non-empty
+evidence table.
+
 ## Mandatory evidence matrix
 
 The gate passes only when CI records all of the following:

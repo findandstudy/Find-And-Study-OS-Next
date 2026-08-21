@@ -257,6 +257,49 @@ test("migration command requires explicit approval and has no push fallback", ()
   );
 });
 
+test("reviewed migration runner pins target class, endpoint, database, and role", () => {
+  const runner = path.join(root, "lib/db/run-migrations.mjs");
+  const remoteTest = spawnSync(process.execPath, [runner], {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH ?? "",
+      ALLOW_REVIEWED_MIGRATIONS: "true",
+      MIGRATION_TARGET_ENV: "test",
+      DATABASE_URL:
+        "postgresql://fas_migrator:blocked@db.example.test:5432/fas_it_blocked",
+    },
+  });
+  assert.equal(remoteTest.status, 1);
+  assert.match(remoteTest.stderr, /test migrations require loopback:5432/);
+
+  const unconfirmedProduction = spawnSync(process.execPath, [runner], {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH ?? "",
+      ALLOW_REVIEWED_MIGRATIONS: "true",
+      MIGRATION_TARGET_ENV: "production",
+      DATABASE_URL:
+        "postgresql://fas_migrator:blocked@db.example.test:5432/fasos",
+      MIGRATION_CONFIRMED_HOST: "db.example.test",
+      MIGRATION_CONFIRMED_DATABASE: "fasos",
+      MIGRATION_CONFIRMED_USER: "fas_migrator",
+    },
+  });
+  assert.equal(unconfirmedProduction.status, 1);
+  assert.match(
+    unconfirmedProduction.stderr,
+    /ALLOW_LONG_LIVED_MIGRATIONS=true/,
+  );
+
+  const source = readFileSync(runner, "utf8");
+  assert.match(source, /current_database\(\) AS database_name/);
+  assert.match(source, /current_user AS user_name/);
+  assert.match(source, /MIGRATION_CONFIRMED_DATABASE/);
+  assert.match(source, /fas_it_\[a-z0-9_\]/);
+});
+
 test("ledger baseline requires explicit audit and exact database confirmation before DB access", () => {
   const baseline = spawnSync(
     process.execPath,
