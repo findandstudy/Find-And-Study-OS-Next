@@ -4,7 +4,8 @@ import pg from "pg";
 import { canonicalJson } from "../src/lib/jsonCanonical.js";
 
 const { Client } = pg;
-const mode = process.argv[2];
+const cliArgs = process.argv.slice(2).filter((arg) => arg !== "--");
+const mode = cliArgs.length === 1 ? cliArgs[0] : undefined;
 const adminUrl = process.env.PG_GATE_ADMIN_URL ?? "";
 const migratorUrl = process.env.PG_GATE_MIGRATOR_URL ?? "";
 const appUrl = process.env.PG_GATE_APP_URL ?? "";
