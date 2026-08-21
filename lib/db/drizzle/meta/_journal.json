@@ -393,6 +393,13 @@
       "when": 1787292000000,
       "tag": "0055_change_set_control_plane_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1787295600000,
+      "tag": "0056_change_set_command_idempotency",
+      "breakpoints": true
     }
   ]
 }

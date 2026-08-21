@@ -310,7 +310,69 @@ export const changeSetTransitionReceiptsTable = pgTable(
   ],
 ).enableRLS();
 
+export const changeSetCommandReceiptsTable = pgTable(
+  "change_set_command_receipts",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenantsTable.id, { onDelete: "restrict" }),
+    idempotencyKeyHash: text("idempotency_key_hash").notNull(),
+    requestHash: text("request_hash").notNull(),
+    contextId: uuid("context_id").notNull(),
+    actorPrincipalId: uuid("actor_principal_id")
+      .notNull()
+      .references(() => principalsTable.id, { onDelete: "restrict" }),
+    commandType: text("command_type").notNull(),
+    changeSetId: uuid("change_set_id"),
+    status: text("status").notNull().default("CLAIMED"),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    resultHash: text("result_hash"),
+    version: bigint("version", { mode: "number" }).notNull().default(1),
+    claimedAt: timestamp("claimed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("change_set_command_receipts_tenant_key_uq").on(
+      table.tenantId,
+      table.idempotencyKeyHash,
+    ),
+    index("change_set_command_receipts_change_set_idx").on(
+      table.tenantId,
+      table.changeSetId,
+      table.claimedAt,
+    ),
+    foreignKey({
+      columns: [table.tenantId, table.changeSetId],
+      foreignColumns: [changeSetsTable.tenantId, changeSetsTable.id],
+      name: "change_set_command_receipts_tenant_change_set_fk",
+    }).onDelete("restrict"),
+    check("change_set_command_receipts_id_uuidv7_chk", uuidV7(table.id)),
+    check(
+      "change_set_command_receipts_context_uuidv7_chk",
+      uuidV7(table.contextId),
+    ),
+    check(
+      "change_set_command_receipts_hashes_chk",
+      sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$' AND ${table.requestHash} ~ '^[0-9a-f]{64}$' AND (${table.resultHash} IS NULL OR ${table.resultHash} ~ '^[0-9a-f]{64}$')`,
+    ),
+    check(
+      "change_set_command_receipts_type_chk",
+      sql`${table.commandType} IN ('CREATE', 'TRANSITION')`,
+    ),
+    check(
+      "change_set_command_receipts_status_chk",
+      sql`${table.status} IN ('CLAIMED', 'COMPLETED')`,
+    ),
+    check("change_set_command_receipts_version_chk", sql`${table.version} > 0`),
+  ],
+).enableRLS();
+
 export type ChangeSet = typeof changeSetsTable.$inferSelect;
 export type ChangeSetApproval = typeof changeSetApprovalsTable.$inferSelect;
 export type ChangeSetTransitionReceipt =
   typeof changeSetTransitionReceiptsTable.$inferSelect;
+export type ChangeSetCommandReceipt =
+  typeof changeSetCommandReceiptsTable.$inferSelect;

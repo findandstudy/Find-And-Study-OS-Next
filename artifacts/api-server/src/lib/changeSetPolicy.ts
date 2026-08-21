@@ -616,6 +616,12 @@ const CAPABILITY_BY_TARGET: Record<ChangeSetState, string> = {
   REVOKED: "control_plane.change.revoke",
 };
 
+export function requiredCapabilityForChangeSetTarget(
+  target: unknown,
+): string | null {
+  return isChangeSetState(target) ? CAPABILITY_BY_TARGET[target] : null;
+}
+
 const STATES_REQUIRING_REVIEW_ROUND: readonly ChangeSetState[] = [
   "IN_REVIEW",
   "APPROVED",

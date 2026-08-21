@@ -1,9 +1,9 @@
 # ChangeSet Control Plane Foundation
 
 Status: additive, default-unwired foundation. This document is a security and
-delivery contract, not evidence that the feature is enabled. Migration `0055`
-has not been applied to any database. There is no Super Admin route, worker, or
-UI wired to these tables yet.
+delivery contract, not evidence that the feature is enabled. Migrations `0055`
+and `0056` have not been applied to any database. There is no PostgreSQL command
+adapter, Super Admin route, publisher, worker, or UI wired to these tables yet.
 
 ## Outcome
 
@@ -25,6 +25,30 @@ The foundation deliberately admits only reversible, single-tenant, R1 changes:
 Only `PUBLIC` and `INTERNAL` data classes are allowed. Code, database schema,
 infrastructure, arbitrary scripts, raw SQL, credentials, secrets, private keys,
 and cross-tenant changes are outside this path and fail closed.
+
+## Default-off command orchestrator
+
+`artifacts/api-server/src/lib/changeSetCommand.ts` provides a storage-agnostic
+create/transition orchestrator. It does not accept tenant IDs, actor IDs,
+capability strings, policy versions, step-up receipts, owner IDs, or approval
+receipt IDs from the command body. Those values are derived from a verified
+active-tenant context, current server-resolved authorization state, server-side
+session assurance, and a server UUIDv7 factory.
+
+The orchestrator always establishes transaction-local tenant context before
+state resolution or repository access. It authorizes the exact loaded scope,
+rejects impersonation, claims a hashed idempotency key, and commits the domain
+mutation and result projection in one transaction. A policy rejection after a
+claim throws an internal rollback signal, so a failed command cannot leave a
+stuck claim.
+
+Migration `0056_change_set_command_idempotency.sql` stores only the SHA-256 hash
+of an idempotency key. A tenant/key pair can move only from a clean `CLAIMED`
+record to a complete evidence-bearing `COMPLETED` record. Claim identity is
+immutable, delete is unavailable, and RLS is enabled and forced. A replay must
+match both request hash and actor and must contain the exact PII-free result
+projection; changed requests, corrupt projections, and in-progress claims fail
+closed.
 
 ## Security boundary
 
@@ -90,7 +114,8 @@ current database state, its policy version must match the ChangeSet, and its
 `previous_hash` must equal the latest receipt hash. The first transition receipt
 has no previous hash.
 
-The future command handler must perform this order in one database transaction:
+The command orchestrator requires its future PostgreSQL adapter to perform this
+order in one database transaction:
 
 1. lock and re-read the ChangeSet under tenant RLS;
 2. write the current-round approval decision first when the target is
@@ -140,7 +165,7 @@ receipts. Failed, rejected, rolled-back, and revoked states are closed.
 This foundation does not yet deliver:
 
 - a Super Admin ChangeSet inbox or editor;
-- API routes or a command handler;
+- a PostgreSQL adapter or API route for the default-off command orchestrator;
 - a publisher/worker or actual configuration materialization;
 - verified step-up issuance;
 - a notification preview sandbox;
@@ -155,9 +180,10 @@ writer quarantines remain authoritative.
 
 ## Next safe slice
 
-The next implementation slice is a default-off command handler for create,
-validate, simulate, submit, and decide actions. It must use verified active
-tenant context, one-transaction receipt ordering, idempotency keys, and
-database-backed concurrency/RLS tests before any Super Admin UI is connected.
-The publisher and configuration adapters stay separate until that command path
+The next implementation slice is the PostgreSQL adapter for the default-off
+command orchestrator, followed by database-backed concurrency/RLS tests on the
+approved isolated local database. The adapter must implement the exact
+transaction interface and statement order without a bypass path. No API route
+or Super Admin UI is connected until those tests pass. The publisher and
+configuration materialization adapters stay separate until that command path
 passes the relevant gate.

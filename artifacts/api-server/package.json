@@ -41,6 +41,7 @@
     "test:session-lifetime": "tsx --test ./scripts/test-session-lifetime.ts",
     "test:active-tenant-context": "tsx --test ./scripts/test-active-tenant-context.ts",
     "test:change-set-policy": "tsx --test ./scripts/test-change-set-policy.ts",
+    "test:change-set-command": "tsx --test ./scripts/test-change-set-command.ts",
     "test:ai-agent-admin": "tsx --test ./scripts/test-ai-agent-admin.ts",
     "test:ai-agent-models": "tsx --test ./scripts/test-ai-agent-models.ts",
     "test:academy-knowledge": "tsx --test ./scripts/test-academy-knowledge.ts",
