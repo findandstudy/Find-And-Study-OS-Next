@@ -10,6 +10,7 @@
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
     "test:pm2-safety": "node --test deploy/test-pm2-safety.cjs",
     "test:data-boundaries": "node --test deploy/test-data-boundaries.cjs",
+    "audit:tenant-writers": "node scripts/audit-tenant-writers.mjs",
     "test:e2e": "E2E_ALLOW_DATABASE_MUTATION=1 PLAYWRIGHT_BASE_URL=http://localhost:25197 playwright test",
     "portal:dry": "pnpm --filter @workspace/portal-automation-worker run portal:dry"
   },

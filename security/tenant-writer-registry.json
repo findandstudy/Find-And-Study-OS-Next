@@ -1,0 +1,1168 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "scripts/audit-tenant-writers.mjs",
+  "policy": {
+    "defaultExternalPilot": "deny",
+    "note": "Classification is complete at file level; quarantine is intentional until a scoped runtime/DB/receipt control and negative boundary test are evidenced. A registry entry is not authorization."
+  },
+  "precedence": {
+    "current": "Legacy routes may read users.role, roles.permissions, permission overrides, or route-local checks; each path remains quarantined until its decision source is evidenced.",
+    "corridorTarget": "Signed active tenant context plus versioned grant/capability is deny-by-default and becomes the sole authorization source.",
+    "legacyRole": "After corridor migration users.role is a read-only compatibility projection and must not grant access.",
+    "impersonation": "External-tenant impersonation remains disabled until actor, target, tenant context, step-up, receipt, and unsafe-action deny tests pass."
+  },
+  "files": [
+    {
+      "path": "artifacts/api-server/src/index.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/agencyStaff.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/agentProfileNotif.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/agentVisibility.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/aiExtractorService.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "AI Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/apiTokenAuth.ts",
+      "ownership": "privileged_config",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Platform Security",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/assignmentConsistencyChecker.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/auditLog.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/auth.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Platform Security",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/backgroundJobs.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/companyContractChecker.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Finance & Contracts",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/contractChecker.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Finance & Contracts",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/dataCleanup.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/docCatalog.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Catalog & Content",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/docNaming.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/documentAiConnection.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "AI Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/educationAutoExtract.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/email.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "AI Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/emailVerificationToken.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "AI Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/feedBus.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/followUpChecker.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/ftcLeadAutomation.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/academyKnowledgeSync.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/aiAgentConfig.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/assignmentSync.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/attachmentNames.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/botAutoReply.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/channels/instagram.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/channels/messenger.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/channels/whatsapp.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/dormBookingFollowupWorker.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/dormBookingKnowledgeSync.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/eventBus.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/identityResolver.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/knowledgeIngest.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/knowledgeSources.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/knowledgeSourcesAdmin.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/leadCapture.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/messageCampaignWorker.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/outboundMessage.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/processInbound.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/qualityScoring.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/startWhatsAppTemplate.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/inbox/zernioSend.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/leadAssignment.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/leadDedup.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/leadDocAdoption.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/mandatoryDocs.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/missingDocsFulfillment.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/notificationBus.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/notificationDispatcher.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/objectAuthz.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Evidence & Storage",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/objectStorage.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Evidence & Storage",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/offerExpiryChecker.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/personaService.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "AI Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/pgRateLimiter.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/portalAddressAutoExtract.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/portalAiGuardian.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/portalAutoTrigger.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/portalBirthCityAutoExtract.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/portalCredentials.ts",
+      "ownership": "privileged_config",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/portalLifecycleGuardian.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/portalManualEnqueue.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/portalProfileAutoExtract.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/portalUniversityLinker.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/replitAuth.ts",
+      "ownership": "privileged_config",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Platform Security",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/season.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Catalog & Content",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/signContract.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Finance & Contracts",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/signedContractDelivery.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Finance & Contracts",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/stageFinance.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Finance & Contracts",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/stuckConversationAssigner.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/studentPhoto.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Evidence & Storage",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/studentPhotoThumbnail.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "AI Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/toolRegistry.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/universityContractChecker.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Finance & Contracts",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/uploads/processUpload.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Evidence & Storage",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/activity.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/activityV1.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/agentOnboarding.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/agents.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/ai-defaults.ts",
+      "ownership": "privileged_config",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "AI Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/ai-extract.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "AI Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/ai-extractors.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "AI Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/ai-personas.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "AI Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/aiBots.ts",
+      "ownership": "privileged_config",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "AI Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/apiTokens.ts",
+      "ownership": "privileged_config",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Platform Security",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/applicationStageDocuments.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Evidence & Storage",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/applications.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/auth.ts",
+      "ownership": "public_ingress",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Platform Security",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/branches.ts",
+      "ownership": "privileged_config",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Platform Security",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/campaigns.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/catalog.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Catalog & Content",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/channelAccounts.ts",
+      "ownership": "privileged_config",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Platform Security",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/cms.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Catalog & Content",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/companyContracts.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Finance & Contracts",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/content.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Catalog & Content",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/contractBrands.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Finance & Contracts",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/contractTemplates.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Finance & Contracts",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/contracts.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Finance & Contracts",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/course-finder.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Catalog & Content",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/dataQuality.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/degreeDocumentRequirements.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Evidence & Storage",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/documents.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Evidence & Storage",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/education-records.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/embed.ts",
+      "ownership": "public_ingress",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/finance.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Finance & Contracts",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/health.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/inbox.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/integrations.ts",
+      "ownership": "privileged_config",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Platform Security",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/leadAssignmentRules.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/leads.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/messageCampaigns.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/messages.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/notifications.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/personFeed.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/pipeline.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Catalog & Content",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/popups.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Catalog & Content",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/portalAutomation.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/portalMgmt.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/portalProgramFallbacks.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/portalUniversityExclusions.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/programDocumentRequirements.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Evidence & Storage",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/public-apply.ts",
+      "ownership": "public_ingress",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/publicSigning.ts",
+      "ownership": "public_ingress",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/quality.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/quickLinks.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Catalog & Content",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/roles.ts",
+      "ownership": "privileged_config",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Platform Security",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/settings.ts",
+      "ownership": "privileged_config",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Platform Security",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/staffCards.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Catalog & Content",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/stats.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/storage.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Evidence & Storage",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/students.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/tasks.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Admissions Platform",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/universities.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Catalog & Content",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/universityContracts.ts",
+      "ownership": "tenant_owned",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Finance & Contracts",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/users.ts",
+      "ownership": "privileged_config",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Platform Security",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/webhooks.ts",
+      "ownership": "public_ingress",
+      "enforcement": "quarantine_required",
+      "risk": "high",
+      "owner": "Communications",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/routes/website.ts",
+      "ownership": "platform_global",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Catalog & Content",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/scripts/seedCurrencies.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "medium",
+      "owner": "Platform Engineering",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/scripts/seedDocumentTypes.ts",
+      "ownership": "mixed_legacy",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Evidence & Storage",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/portal-automation-worker/src/credResolver.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/portal-automation-worker/src/profile.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/portal-automation-worker/src/runner.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/portal-automation-worker/src/worker.ts",
+      "ownership": "external_integration",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Portal Automation",
+      "externalPilot": "quarantine"
+    }
+  ]
+}
