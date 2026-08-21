@@ -170,13 +170,51 @@ test("code, schema, secret, arbitrary field, and no-op proposals never enter R1"
       ...common,
       changeType: "FEATURE_FLAG",
       baseConfig: {
-        flagKey: "safe.flag",
+        flagKey: "unregistered.flag",
+        enabled: false,
+        cohortPercent: 0,
+        reason: "Unregistered baseline.",
+      },
+      proposedConfig: {
+        flagKey: "unregistered.flag",
+        enabled: true,
+        cohortPercent: 5,
+        reason: "Unregistered canary.",
+      },
+    }).reason,
+    "invalid_config_shape",
+  );
+  assert.equal(
+    createR1ChangeSetDraft({
+      ...common,
+      changeType: "FEATURE_FLAG",
+      baseConfig: {
+        flagKey: "journey.beta",
+        enabled: false,
+        cohortPercent: 0,
+        reason: "Registered baseline.",
+      },
+      proposedConfig: {
+        flagKey: "journey.beta",
+        enabled: true,
+        cohortPercent: 11,
+        reason: "Oversized cohort.",
+      },
+    }).reason,
+    "invalid_config_shape",
+  );
+  assert.equal(
+    createR1ChangeSetDraft({
+      ...common,
+      changeType: "FEATURE_FLAG",
+      baseConfig: {
+        flagKey: "journey.beta",
         enabled: false,
         cohortPercent: 0,
         reason: "Safe baseline.",
       },
       proposedConfig: {
-        flagKey: "safe.flag",
+        flagKey: "journey.beta",
         enabled: true,
         cohortPercent: 5,
         reason: "Secret was added.",
@@ -190,13 +228,13 @@ test("code, schema, secret, arbitrary field, and no-op proposals never enter R1"
       ...common,
       changeType: "FEATURE_FLAG",
       baseConfig: {
-        flagKey: "safe.flag",
+        flagKey: "journey.beta",
         enabled: false,
         cohortPercent: 0,
         reason: "Safe baseline.",
       },
       proposedConfig: {
-        flagKey: "safe.flag",
+        flagKey: "journey.beta",
         enabled: true,
         cohortPercent: 5,
         reason: "Safe canary.",
@@ -227,7 +265,7 @@ test("code, schema, secret, arbitrary field, and no-op proposals never enter R1"
     "invalid_config_shape",
   );
   const same = {
-    flagKey: "safe.flag",
+    flagKey: "journey.beta",
     enabled: false,
     cohortPercent: 0,
     reason: "Safe baseline.",
@@ -458,13 +496,13 @@ test("runtime-shaped invalid input, policy drift, failure, and revocation fail c
       baseVersion: 1,
       proposedVersion: 2,
       baseConfig: {
-        flagKey: "safe.flag",
+        flagKey: "journey.beta",
         enabled: false,
         cohortPercent: 0,
         reason: "Base state.",
       },
       proposedConfig: {
-        flagKey: "safe.flag",
+        flagKey: "journey.beta",
         enabled: true,
         cohortPercent: 5,
         reason: "Canary state.",

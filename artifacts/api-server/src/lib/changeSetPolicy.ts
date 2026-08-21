@@ -10,6 +10,14 @@ export const R1_CHANGE_TYPES = [
 ] as const;
 
 export type R1ChangeType = (typeof R1_CHANGE_TYPES)[number];
+
+export const R1_FEATURE_FLAG_REGISTRY = {
+  "journey.beta": {
+    owner: "student-journey",
+    maxCohortPercent: 10,
+    requiredCapability: "control_plane.flag.create",
+  },
+} as const;
 export type R1DataClass = "PUBLIC" | "INTERNAL";
 export type ChangeSetState =
   | "DRAFT"
@@ -335,13 +343,18 @@ function validateTypedConfig(
     return referenced.every((key) => variableKeys.includes(key));
   }
   if (type === "FEATURE_FLAG") {
+    const registryEntry =
+      typeof value.flagKey === "string"
+        ? R1_FEATURE_FLAG_REGISTRY[
+            value.flagKey as keyof typeof R1_FEATURE_FLAG_REGISTRY
+          ]
+        : undefined;
     return (
-      typeof value.flagKey === "string" &&
-      /^[a-z][a-z0-9_.-]{2,79}$/.test(value.flagKey) &&
+      registryEntry !== undefined &&
       typeof value.enabled === "boolean" &&
       Number.isInteger(value.cohortPercent) &&
       Number(value.cohortPercent) >= 0 &&
-      Number(value.cohortPercent) <= 100 &&
+      Number(value.cohortPercent) <= registryEntry.maxCohortPercent &&
       hasBoundedText(value.reason, 3, 500)
     );
   }
@@ -419,6 +432,12 @@ export function createR1ChangeSetDraft(input: {
   if (
     !validateTypedConfig(type, baseConfig) ||
     !validateTypedConfig(type, proposedConfig)
+  ) {
+    return { ok: false, reason: "invalid_config_shape" };
+  }
+  if (
+    type === "FEATURE_FLAG" &&
+    baseConfig.flagKey !== proposedConfig.flagKey
   ) {
     return { ok: false, reason: "invalid_config_shape" };
   }
