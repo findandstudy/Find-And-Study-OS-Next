@@ -49,9 +49,17 @@ The harness is opt-in and must fail closed unless all of these are true:
 
 The reviewed migration runner independently enforces the explicit target class
 and connected database identity. Disposable `test` runs accept only
-loopback:5432, a `fas_it_*` database, and `fas_migrator`. Other target classes
-require exact host/database/user confirmations; staging and production also
-require a separate long-lived-target approval flag. These controls authorize
+literal loopback:5432, a `fas_it_*` database, and a cluster-unprivileged
+`fas_migrator` with no inherited role memberships.
+`local` and `development` are also loopback-only, require the approved local
+database naming contract and exact effective host/port/database/user
+confirmations. URL query parameters are rejected before connection. The
+effective client endpoint is pinned; the connected TCP endpoint and cluster
+role attributes are
+verified before the ledger preflight. This runner rejects `staging` and
+`production`: long-lived
+adoption requires a separate executor that proves cluster identity, verified
+TLS, same-executor migration semantics and rollback. These controls authorize
 neither a production rollout nor migration `0058` adoption into a non-empty
 evidence table.
 
