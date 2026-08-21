@@ -304,9 +304,19 @@ class MemoryStore implements ChangeSetCommandStore {
         ) => ({
           receipts: receiptSpecs.map(([id, kind, artifactCount]) => {
             const outcome = "PASSED" as const;
+            const artifactManifestHash =
+              kind === "TEST_ARTIFACT" ? "d".repeat(64) : null;
             const outcomeHash = crypto
               .createHash("sha256")
-              .update(canonicalJson({ kind, outcome, artifactCount }), "utf8")
+              .update(
+                canonicalJson({
+                  kind,
+                  outcome,
+                  artifactCount,
+                  artifactManifestHash,
+                }),
+                "utf8",
+              )
               .digest("hex");
             return {
               id,
@@ -325,6 +335,7 @@ class MemoryStore implements ChangeSetCommandStore {
               policyVersionId: changeSet.approvalPolicyVersion,
               outcome,
               artifactCount,
+              artifactManifestHash,
               outcomeHash,
               issuedAt: NOW - 1_000,
               expiresAt: NOW + 60_000,
