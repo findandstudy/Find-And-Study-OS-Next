@@ -104,10 +104,13 @@ test("release runtime env and logs must remain outside immutable release storage
 });
 
 test("deploy scripts contain no destructive clean or root rsync delete", () => {
-  const scripts = execFileSync("rg", ["--files", "-g", "*.sh", "-g", "*.bash"], {
+  const scripts = execFileSync("git", ["ls-files", "--", "*.sh", "*.bash"], {
     cwd: root,
     encoding: "utf8",
-  }).trim().split("\n").filter(Boolean);
+  })
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean);
   for (const script of scripts) {
     const source = readFileSync(path.join(root, script), "utf8");
     assert.doesNotMatch(source, /git\s+clean\s+[^\n]*-fdx/);
