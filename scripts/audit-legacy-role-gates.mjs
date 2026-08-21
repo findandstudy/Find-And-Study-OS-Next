@@ -35,7 +35,7 @@ function routePrefixes(source) {
 }
 
 function scanFile(path, previous) {
-  const source = readFileSync(path, "utf8");
+  const source = readFileSync(path, "utf8").replace(/\r\n?/g, "\n");
   const prefixes = routePrefixes(source);
   const routeRegistrations = prefixes.length;
   const authOnlyRouteCandidates = prefixes.filter((prefix) =>
