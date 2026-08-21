@@ -328,6 +328,7 @@ class PostgresChangeSetCommandTransaction
           policyVersionId: claims.policyVersionId,
           outcome: claims.outcome,
           artifactCount: claims.artifactCount,
+          artifactManifestHash: claims.artifactManifestHash,
           outcomeHash: claims.outcomeHash,
           issuedAt: claims.issuedAt,
           expiresAt: claims.expiresAt,

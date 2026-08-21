@@ -102,6 +102,7 @@ export type VerifiedTransitionEvidenceReceipt = {
   policyVersionId: string;
   outcome: "PASSED" | "FAILED";
   artifactCount: number | null;
+  artifactManifestHash: string | null;
   outcomeHash: string;
   issuedAt: number;
   expiresAt: number;
@@ -566,14 +567,17 @@ function validVerifiedTransitionEvidence(
         receipt.outcome !== "PASSED" ||
         (receipt.kind === "TEST_ARTIFACT"
           ? !Number.isSafeInteger(receipt.artifactCount) ||
-            Number(receipt.artifactCount) < 1
-          : receipt.artifactCount !== null) ||
+            Number(receipt.artifactCount) < 1 ||
+            !isValidChangeSetCommandHash(receipt.artifactManifestHash)
+          : receipt.artifactCount !== null ||
+            receipt.artifactManifestHash !== null) ||
         !SHA256_RE.test(receipt.outcomeHash) ||
         receipt.outcomeHash !==
           hashValue({
             kind: receipt.kind,
             outcome: receipt.outcome,
             artifactCount: receipt.artifactCount,
+            artifactManifestHash: receipt.artifactManifestHash,
           }) ||
         !Number.isSafeInteger(receipt.issuedAt) ||
         !Number.isSafeInteger(receipt.expiresAt) ||

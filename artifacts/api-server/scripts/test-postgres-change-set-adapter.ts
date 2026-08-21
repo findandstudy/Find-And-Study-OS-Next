@@ -59,7 +59,7 @@ const ID = {
   createCommand: "018f5000-0000-7000-8000-00000000000b",
   createAccess: "018f5000-0000-7000-8000-00000000000c",
   changeSet: "018f5000-0000-7000-8000-00000000000d",
-  evidencePrincipal: "018f5000-0000-7000-8000-00000000000e",
+  evidencePrincipal: "018f3000-0000-7000-8000-000000000211",
   evidenceGrant: "018f5000-0000-7000-8000-00000000000f",
   evidenceRequest: "018f5000-0000-7000-8000-000000000010",
   evidenceReceipt: "018f5000-0000-7000-8000-000000000011",
@@ -72,7 +72,7 @@ const ID = {
 const NOW = Date.now();
 const activeContextSecret = crypto.randomBytes(48).toString("base64url");
 const evidenceKeys = crypto.generateKeyPairSync("ed25519");
-const evidenceIssuerId = "fas-adapter-evidence-service";
+const evidenceIssuerId = "fas-evidence-service";
 const evidenceKeyId = "adapter-test-key-1";
 const evidenceToolId = "fas-evidence-service";
 const evidenceToolVersion = "test-v1";
@@ -347,10 +347,8 @@ async function seedFoundation() {
       await migrator.query(
         `INSERT INTO public.principals
           (id, principal_type, issuer, subject, status, risk_state)
-         VALUES
-          ($1, 'HUMAN', 'adapter-gate', 'maker', 'ACTIVE', 'NORMAL'),
-          ($2, 'SERVICE', 'adapter-gate', 'evidence-service', 'ACTIVE', 'NORMAL')`,
-        [ID.humanPrincipal, ID.evidencePrincipal],
+         VALUES ($1, 'HUMAN', 'adapter-gate', 'maker', 'ACTIVE', 'NORMAL')`,
+        [ID.humanPrincipal],
       );
       await migrator.query(
         `INSERT INTO public.tenants
@@ -572,12 +570,6 @@ async function main() {
       await migrator.query("BEGIN");
       try {
         await migrator.query(`SELECT set_config('app.tenant_id', $1, true)`, [ID.tenant]);
-        await migrator.query(
-          `INSERT INTO public.change_set_evidence_issuers
-            (id, principal_id, environment_id, cell_id, state)
-           VALUES ($1, $2, 'test-ci', 'cell-a', 'ACTIVE')`,
-          [evidenceIssuerId, ID.evidencePrincipal],
-        );
         await migrator.query(
           `INSERT INTO public.change_set_evidence_signing_keys (
             issuer_id, key_id, algorithm, public_key_spki_base64,

@@ -474,11 +474,17 @@ function evidenceOutcomeHash(
     | "ROLLBACK_PLAN"
     | "CANARY_PLAN",
   artifactCount: number | null,
+  artifactManifestHash: string | null = null,
 ) {
   return crypto
     .createHash("sha256")
     .update(
-      canonicalJson({ kind, outcome: "PASSED", artifactCount }),
+      canonicalJson({
+        kind,
+        outcome: "PASSED",
+        artifactCount,
+        artifactManifestHash,
+      }),
       "utf8",
     )
     .digest("hex");
@@ -1082,6 +1088,7 @@ test("transition rejects missing or mismatched server-issued evidence receipts",
     policyVersionId: ID.policy,
     outcome: "PASSED" as const,
     artifactCount: null,
+    artifactManifestHash: null,
     outcomeHash: evidenceOutcomeHash("VALIDATION", null),
     issuedAt: NOW - 1_000,
     expiresAt: NOW + 60_000,
@@ -1132,6 +1139,7 @@ test("transition rejects missing or mismatched server-issued evidence receipts",
                   kind: "VALIDATION",
                   outcome: "FAILED",
                   artifactCount: null,
+                  artifactManifestHash: null,
                 }),
                 "utf8",
               )
@@ -1139,6 +1147,14 @@ test("transition rejects missing or mismatched server-issued evidence receipts",
           },
         ],
       } as unknown as VerifiedTransitionEvidence,
+    },
+    {
+      label: "unexpected-artifact-manifest",
+      override: {
+        receipts: [
+          { ...validReceipt, artifactManifestHash: "c".repeat(64) },
+        ],
+      },
     },
     {
       label: "outcome-hash",
