@@ -636,7 +636,7 @@ async function verifyProposalAndEvidence(migrator: pg.Client) {
         actor_membership_id, from_state, to_state, reason_code, policy_version,
         policy_version_id, evidence, evidence_hash, previous_hash, receipt_hash
       ) VALUES (
-        $1, $9, $2, $3, 2, $4, $5, 'DRAFT', 'VALIDATED', 'pg_gate', $6, $6,
+        $1, $9, $2, $3, 2, $4, $5, 'DRAFT', 'VALIDATED', 'pg_gate', $6, $10,
         '{}'::jsonb, $7, NULL, $8
       )`,
       [
@@ -647,8 +647,9 @@ async function verifyProposalAndEvidence(migrator: pg.Client) {
         ID.membershipA,
         ID.policyA,
         "e".repeat(64),
-          "d".repeat(64),
-          ID.command,
+        "d".repeat(64),
+        ID.command,
+        ID.policyA,
       ],
     );
     await migrator.query(
@@ -702,7 +703,7 @@ async function consumeEvidence(commandId: string) {
           actor_membership_id, from_state, to_state, reason_code, policy_version,
           policy_version_id, evidence, evidence_hash, previous_hash, receipt_hash
         ) VALUES (
-          $1, $9, $2, $3, 2, $4, $5, 'DRAFT', 'VALIDATED', 'pg_race', $6, $6,
+          $1, $9, $2, $3, 2, $4, $5, 'DRAFT', 'VALIDATED', 'pg_race', $6, $10,
           '{}'::jsonb, $7, NULL, $8
         )`,
         [
@@ -715,6 +716,7 @@ async function consumeEvidence(commandId: string) {
           "e".repeat(64),
           receiptHash,
           commandId,
+          ID.policyA,
         ],
       );
       const state = await client.query(
