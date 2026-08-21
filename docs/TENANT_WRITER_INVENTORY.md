@@ -140,3 +140,8 @@ configuration audit receipts, credential-bearing settings are not returned,
 and a settings read no longer creates a missing configuration row. The exact
 scope and the remaining ChangeSet/maker-checker work are recorded in
 [`INTERIM_SUPER_ADMIN_CONFIG_BOUNDARY.md`](./INTERIM_SUPER_ADMIN_CONFIG_BOUNDARY.md).
+
+The complementary authorization-source denominator is frozen in
+[`LEGACY_ROLE_GATE_INVENTORY.md`](./LEGACY_ROLE_GATE_INVENTORY.md): 68 route
+files and 731 route registrations are tracked, with every legacy file still
+quarantined until signed active-context and grant/capability evidence exists.
