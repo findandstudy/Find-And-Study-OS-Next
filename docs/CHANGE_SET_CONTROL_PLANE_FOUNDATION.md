@@ -1,10 +1,10 @@
 # ChangeSet Control Plane Foundation
 
 Status: additive, default-unwired foundation. This document is a security and
-delivery contract, not evidence that the feature is enabled. Migrations `0055`,
-`0056`, and the additive hardening migration `0057` have not been applied to a
-long-lived database. There is no PostgreSQL command adapter, Super Admin route,
-publisher, worker, or UI wired to these tables yet.
+delivery contract, not evidence that the feature is enabled. Migrations `0055`
+through `0058` have not been applied to a long-lived database. There is no
+PostgreSQL command adapter, Super Admin route, publisher, worker, or UI wired to
+these tables yet.
 
 ## Outcome
 
@@ -189,14 +189,39 @@ gate.
 `VALIDATED`, `SIMULATED`, and `IN_REVIEW` do not trust command-body booleans or
 counts. The future store must load immutable server-issued evidence receipts
 under the same transaction. Each typed receipt binds its UUIDv7 ID, kind,
-issuer, tool version, tenant, ChangeSet, target state, requesting principal and
-membership, proposed hash, policy version, pass/fail outcome, artifact count,
-outcome hash, issued/expiry window, and unconsumed state.
+issuer and issuer principal, signing key, audience, environment/cell, single-use
+request and challenge, tool/version, tenant, ChangeSet, target state, requesting
+principal and membership, proposed hash, policy version, pass/fail outcome,
+artifact manifest, issued/expiry window, and unconsumed state.
 Review submission requires distinct `TEST_ARTIFACT`, `ROLLBACK_PLAN`, and
 `CANARY_PLAN` receipts. Missing, duplicate, expired, consumed, cross-ChangeSet,
 wrong-kind, failed-outcome, wrong-outcome-hash, or mismatched evidence rolls
 back the claim and state change. All required receipts are consumed atomically
 by the exact transition command; concurrent reuse admits at most one consumer.
+
+Migration `0058_change_set_evidence_identity_audit_foundation.sql` adds the
+default-unwired authenticity registry: issuer identity, public Ed25519 key and
+fingerprint, opaque KMS/HSM signing-key reference, exact tenant/kind/tool grant,
+single-use evidence request, and immutable signed-envelope bindings. Private
+key material is neither a column nor a configuration value. Key material,
+issuer identity, grants, requests, and consumed evidence cannot be rewritten;
+rotation creates a new key and moves the prior key through `VERIFY_ONLY` to a
+terminal revoked state. `REVOKED` and `COMPROMISED` keys fail closed.
+
+`changeSetEvidenceEnvelope.ts` implements the pure, KMS-compatible Ed25519
+issuer/verifier contract. Its domain-separated canonical claims bind every
+security-relevant identity and reject claim mutation, wrong key/fingerprint,
+wrong tenant grant, expiry, future issuance, malformed artifacts, and revoked
+or compromised keys. PostgreSQL records and locks these bindings, but does not
+perform Ed25519 verification itself: the future narrow adapter must verify the
+canonical envelope before its issuer-only insert procedure can persist a
+receipt.
+
+The same migration adds `change_set_command_audit_events`, a tenant-scoped,
+append-only attempt chain containing fixed enums and keyed fingerprints rather
+than raw idempotency keys, request bodies, titles, reasons, errors, stack traces,
+secrets, or PII. This is only the storage contract. The outer-attempt/business-
+transaction/terminal-event adapter wiring remains deliberately absent.
 
 Notification template variables must be declared whether referenced in the
 subject or body. Template variables that suggest passwords, secrets, tokens,
@@ -231,6 +256,10 @@ This foundation does not yet deliver:
 - verified step-up issuance;
 - authoritative materialized-configuration repository;
 - a production evidence issuer or outcome-hash signing service;
+- a KMS/HSM-backed production signer, key rotation ceremony, or issuer runtime
+  credential;
+- the narrow command-executor/evidence-issuer database procedures and roles;
+- durable audit transaction wiring around the command orchestrator;
 - runtime adoption/backfill of the tenant/organization/legacy-branch map;
 - persistent environment grants for separated migrator and runtime application
   database roles;
@@ -247,12 +276,13 @@ writer quarantines remain authoritative.
 
 ## Next safe slice
 
-The disposable PostgreSQL 16 foundation workflow described in
-`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` is green. The next implementation
-slice is to obtain independent review and make the exact checks required, then
-add a production evidence issuer/signing contract and a narrow, default-unwired
-PostgreSQL command-store adapter. The shared runtime role must not receive
-generic Control Plane DML. Cancellation/pool reuse, revoke/policy races,
-failure injection, replay, and durable denial audit must pass before any API
-route or Super Admin UI is connected. Publisher and configuration
+The 58-migration PostgreSQL 16 baseline workflow described in
+`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` is green. Migration `0058` and the
+pure signer/verifier are a new candidate slice and are not green PostgreSQL
+evidence until the updated disposable 59-migration harness passes. After that,
+the next slice is a narrow, default-unwired PostgreSQL command-store adapter and
+separate evidence-issuer procedure. The shared runtime role must not receive
+generic Control Plane DML. Cancellation/pool reuse, revoke/policy/key-rotation
+races, failure injection, replay, and durable denial audit must pass before any
+API route or Super Admin UI is connected. Publisher and configuration
 materialization adapters remain separate and default-off.

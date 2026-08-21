@@ -407,6 +407,13 @@
       "when": 1787299200000,
       "tag": "0057_authorization_control_plane_db_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1787302800000,
+      "tag": "0058_change_set_evidence_identity_audit_foundation",
+      "breakpoints": true
     }
   ]
 }

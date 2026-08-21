@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -548,6 +549,255 @@ export const changeSetCommandReceiptsTable = pgTable(
   ],
 ).enableRLS();
 
+export const changeSetEvidenceIssuersTable = pgTable(
+  "change_set_evidence_issuers",
+  {
+    id: text("id").primaryKey(),
+    principalId: uuid("principal_id")
+      .notNull()
+      .references(() => principalsTable.id, { onDelete: "restrict" }),
+    environmentId: text("environment_id").notNull(),
+    cellId: text("cell_id").notNull(),
+    state: text("state").notNull().default("ACTIVE"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("change_set_evidence_issuers_principal_environment_uq").on(
+      table.principalId,
+      table.environmentId,
+      table.cellId,
+    ),
+    check(
+      "change_set_evidence_issuers_identity_chk",
+      sql`${table.id} ~ '^[a-z][a-z0-9._:-]{2,95}$' AND ${table.environmentId} ~ '^[a-z][a-z0-9._:-]{2,95}$' AND ${table.cellId} ~ '^[a-z][a-z0-9._:-]{2,95}$'`,
+    ),
+    check(
+      "change_set_evidence_issuers_state_chk",
+      sql`${table.state} IN ('ACTIVE', 'REVOKED')`,
+    ),
+    check(
+      "change_set_evidence_issuers_revocation_chk",
+      sql`(${table.state} = 'ACTIVE' AND ${table.revokedAt} IS NULL) OR (${table.state} = 'REVOKED' AND ${table.revokedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const changeSetEvidenceSigningKeysTable = pgTable(
+  "change_set_evidence_signing_keys",
+  {
+    issuerId: text("issuer_id")
+      .notNull()
+      .references(() => changeSetEvidenceIssuersTable.id, {
+        onDelete: "restrict",
+      }),
+    keyId: text("key_id").notNull(),
+    algorithm: text("algorithm").notNull(),
+    publicKeySpkiBase64: text("public_key_spki_base64").notNull(),
+    publicKeyFingerprintSha256: text("public_key_fingerprint_sha256").notNull(),
+    opaqueSigningKeyRef: text("opaque_signing_key_ref").notNull(),
+    state: text("state").notNull().default("PENDING"),
+    validFrom: timestamp("valid_from", { withTimezone: true }).notNull(),
+    signUntil: timestamp("sign_until", { withTimezone: true }).notNull(),
+    verifyUntil: timestamp("verify_until", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.issuerId, table.keyId] }),
+    check(
+      "change_set_evidence_signing_keys_identity_chk",
+      sql`${table.keyId} ~ '^[a-z][a-z0-9._:-]{2,95}$'`,
+    ),
+    check(
+      "change_set_evidence_signing_keys_algorithm_chk",
+      sql`${table.algorithm} = 'Ed25519'`,
+    ),
+    check(
+      "change_set_evidence_signing_keys_fingerprint_chk",
+      sql`${table.publicKeyFingerprintSha256} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "change_set_evidence_signing_keys_state_chk",
+      sql`${table.state} IN ('PENDING', 'ACTIVE', 'VERIFY_ONLY', 'REVOKED', 'COMPROMISED')`,
+    ),
+    check(
+      "change_set_evidence_signing_keys_window_chk",
+      sql`${table.signUntil} > ${table.validFrom} AND ${table.verifyUntil} >= ${table.signUntil}`,
+    ),
+    check(
+      "change_set_evidence_signing_keys_revocation_chk",
+      sql`(${table.state} IN ('PENDING', 'ACTIVE', 'VERIFY_ONLY') AND ${table.revokedAt} IS NULL) OR (${table.state} IN ('REVOKED', 'COMPROMISED') AND ${table.revokedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const changeSetEvidenceIssuerTenantGrantsTable = pgTable(
+  "change_set_evidence_issuer_tenant_grants",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenantsTable.id, { onDelete: "restrict" }),
+    issuerId: text("issuer_id")
+      .notNull()
+      .references(() => changeSetEvidenceIssuersTable.id, {
+        onDelete: "restrict",
+      }),
+    kind: text("kind").notNull(),
+    toolId: text("tool_id").notNull(),
+    toolVersion: text("tool_version").notNull(),
+    state: text("state").notNull().default("ACTIVE"),
+    validFrom: timestamp("valid_from", { withTimezone: true }).notNull(),
+    validUntil: timestamp("valid_until", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("change_set_evidence_issuer_tenant_grants_tenant_id_id_uq").on(
+      table.tenantId,
+      table.id,
+    ),
+    uniqueIndex("change_set_evidence_issuer_tenant_grants_active_uidx")
+      .on(
+        table.tenantId,
+        table.issuerId,
+        table.kind,
+        table.toolId,
+        table.toolVersion,
+      )
+      .where(sql`${table.state} = 'ACTIVE'`),
+    check(
+      "change_set_evidence_issuer_tenant_grants_id_uuidv7_chk",
+      uuidV7(table.id),
+    ),
+    check(
+      "change_set_evidence_issuer_tenant_grants_kind_chk",
+      sql`${table.kind} IN ('VALIDATION', 'SIMULATION', 'TEST_ARTIFACT', 'ROLLBACK_PLAN', 'CANARY_PLAN')`,
+    ),
+    check(
+      "change_set_evidence_issuer_tenant_grants_tool_chk",
+      sql`${table.toolId} ~ '^[a-z][a-z0-9._:-]{2,95}$' AND ${table.toolVersion} ~ '^[a-z][a-z0-9._:-]{2,95}$'`,
+    ),
+    check(
+      "change_set_evidence_issuer_tenant_grants_state_chk",
+      sql`${table.state} IN ('ACTIVE', 'REVOKED')`,
+    ),
+    check(
+      "change_set_evidence_issuer_tenant_grants_window_chk",
+      sql`${table.validUntil} IS NULL OR ${table.validUntil} > ${table.validFrom}`,
+    ),
+    check(
+      "change_set_evidence_issuer_tenant_grants_revocation_chk",
+      sql`(${table.state} = 'ACTIVE' AND ${table.revokedAt} IS NULL) OR (${table.state} = 'REVOKED' AND ${table.revokedAt} IS NOT NULL)`,
+    ),
+  ],
+).enableRLS();
+
+export const changeSetEvidenceRequestsTable = pgTable(
+  "change_set_evidence_requests",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenantsTable.id, { onDelete: "restrict" }),
+    changeSetId: uuid("change_set_id").notNull(),
+    targetState: text("target_state").notNull(),
+    kind: text("kind").notNull(),
+    challengeNonceHash: text("challenge_nonce_hash").notNull(),
+    requestedByPrincipalId: uuid("requested_by_principal_id")
+      .notNull()
+      .references(() => principalsTable.id, { onDelete: "restrict" }),
+    requestedByMembershipId: uuid("requested_by_membership_id").notNull(),
+    subjectHash: text("subject_hash").notNull(),
+    policyVersionId: uuid("policy_version_id").notNull(),
+    toolId: text("tool_id").notNull(),
+    toolVersion: text("tool_version").notNull(),
+    state: text("state").notNull().default("OPEN"),
+    issuedReceiptId: uuid("issued_receipt_id"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("change_set_evidence_requests_tenant_id_id_uq").on(
+      table.tenantId,
+      table.id,
+    ),
+    unique("change_set_evidence_requests_tenant_receipt_uq").on(
+      table.tenantId,
+      table.issuedReceiptId,
+    ),
+    index("change_set_evidence_requests_lookup_idx").on(
+      table.tenantId,
+      table.changeSetId,
+      table.targetState,
+      table.kind,
+      table.state,
+    ),
+    foreignKey({
+      columns: [table.tenantId, table.changeSetId],
+      foreignColumns: [changeSetsTable.tenantId, changeSetsTable.id],
+      name: "change_set_evidence_requests_change_set_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [
+        table.tenantId,
+        table.requestedByMembershipId,
+        table.requestedByPrincipalId,
+      ],
+      foreignColumns: [
+        membershipsTable.tenantId,
+        membershipsTable.id,
+        membershipsTable.principalId,
+      ],
+      name: "change_set_evidence_requests_requester_membership_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.policyVersionId],
+      foreignColumns: [policyVersionsTable.tenantId, policyVersionsTable.id],
+      name: "change_set_evidence_requests_policy_version_fk",
+    }).onDelete("restrict"),
+    check("change_set_evidence_requests_id_uuidv7_chk", uuidV7(table.id)),
+    check(
+      "change_set_evidence_requests_target_state_chk",
+      sql`${table.targetState} IN ('VALIDATED', 'SIMULATED', 'IN_REVIEW')`,
+    ),
+    check(
+      "change_set_evidence_requests_kind_chk",
+      sql`${table.kind} IN ('VALIDATION', 'SIMULATION', 'TEST_ARTIFACT', 'ROLLBACK_PLAN', 'CANARY_PLAN')`,
+    ),
+    check(
+      "change_set_evidence_requests_hashes_chk",
+      sql`${table.challengeNonceHash} ~ '^[0-9a-f]{64}$' AND ${table.subjectHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "change_set_evidence_requests_tool_chk",
+      sql`${table.toolId} ~ '^[a-z][a-z0-9._:-]{2,95}$' AND ${table.toolVersion} ~ '^[a-z][a-z0-9._:-]{2,95}$'`,
+    ),
+    check(
+      "change_set_evidence_requests_state_chk",
+      sql`${table.state} IN ('OPEN', 'ISSUED', 'EXPIRED', 'REVOKED')`,
+    ),
+    check(
+      "change_set_evidence_requests_state_receipt_chk",
+      sql`(${table.state} = 'ISSUED') = (${table.issuedReceiptId} IS NOT NULL)`,
+    ),
+    check(
+      "change_set_evidence_requests_window_chk",
+      sql`${table.expiresAt} > ${table.createdAt}`,
+    ),
+  ],
+).enableRLS();
+
 export const changeSetEvidenceReceiptsTable = pgTable(
   "change_set_evidence_receipts",
   {
@@ -559,6 +809,18 @@ export const changeSetEvidenceReceiptsTable = pgTable(
     targetState: text("target_state").notNull(),
     kind: text("kind").notNull(),
     issuer: text("issuer").notNull(),
+    issuerPrincipalId: uuid("issuer_principal_id")
+      .notNull()
+      .references(() => principalsTable.id, { onDelete: "restrict" }),
+    signingKeyId: text("signing_key_id").notNull(),
+    algorithm: text("algorithm").notNull(),
+    schemaVersion: integer("schema_version").notNull(),
+    audience: text("audience").notNull(),
+    environmentId: text("environment_id").notNull(),
+    cellId: text("cell_id").notNull(),
+    evidenceRequestId: uuid("evidence_request_id").notNull(),
+    challengeNonceHash: text("challenge_nonce_hash").notNull(),
+    toolId: text("tool_id").notNull(),
     toolVersion: text("tool_version").notNull(),
     requestedByPrincipalId: uuid("requested_by_principal_id")
       .notNull()
@@ -568,7 +830,10 @@ export const changeSetEvidenceReceiptsTable = pgTable(
     policyVersionId: uuid("policy_version_id").notNull(),
     outcome: text("outcome").notNull(),
     artifactCount: integer("artifact_count"),
+    artifactManifestHash: text("artifact_manifest_hash"),
     outcomeHash: text("outcome_hash").notNull(),
+    signedClaimsHash: text("signed_claims_hash").notNull(),
+    signatureBase64Url: text("signature_base64url").notNull(),
     issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
@@ -590,6 +855,22 @@ export const changeSetEvidenceReceiptsTable = pgTable(
       table.consumedAt,
       table.expiresAt,
     ),
+    foreignKey({
+      columns: [table.issuer, table.signingKeyId],
+      foreignColumns: [
+        changeSetEvidenceSigningKeysTable.issuerId,
+        changeSetEvidenceSigningKeysTable.keyId,
+      ],
+      name: "change_set_evidence_receipts_signing_key_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.evidenceRequestId],
+      foreignColumns: [
+        changeSetEvidenceRequestsTable.tenantId,
+        changeSetEvidenceRequestsTable.id,
+      ],
+      name: "change_set_evidence_receipts_request_fk",
+    }).onDelete("restrict"),
     foreignKey({
       columns: [table.tenantId, table.changeSetId],
       foreignColumns: [changeSetsTable.tenantId, changeSetsTable.id],
@@ -636,7 +917,15 @@ export const changeSetEvidenceReceiptsTable = pgTable(
     ),
     check(
       "change_set_evidence_receipts_hashes_chk",
-      sql`${table.subjectHash} ~ '^[0-9a-f]{64}$' AND ${table.outcomeHash} ~ '^[0-9a-f]{64}$'`,
+      sql`${table.challengeNonceHash} ~ '^[0-9a-f]{64}$' AND ${table.subjectHash} ~ '^[0-9a-f]{64}$' AND ${table.outcomeHash} ~ '^[0-9a-f]{64}$' AND ${table.signedClaimsHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "change_set_evidence_receipts_envelope_identity_chk",
+      sql`${table.schemaVersion} = 1 AND ${table.audience} = 'fas.change-set.transition' AND ${table.algorithm} = 'Ed25519' AND ${table.environmentId} ~ '^[a-z][a-z0-9._:-]{2,95}$' AND ${table.cellId} ~ '^[a-z][a-z0-9._:-]{2,95}$' AND ${table.toolId} ~ '^[a-z][a-z0-9._:-]{2,95}$' AND ${table.toolVersion} ~ '^[a-z][a-z0-9._:-]{2,95}$'`,
+    ),
+    check(
+      "change_set_evidence_receipts_signature_chk",
+      sql`${table.signatureBase64Url} ~ '^[A-Za-z0-9_-]{86}$'`,
     ),
     check(
       "change_set_evidence_receipts_window_chk",
@@ -648,7 +937,7 @@ export const changeSetEvidenceReceiptsTable = pgTable(
     ),
     check(
       "change_set_evidence_receipts_artifact_count_chk",
-      sql`(${table.kind} = 'TEST_ARTIFACT' AND ${table.artifactCount} IS NOT NULL AND ${table.artifactCount} > 0) OR (${table.kind} <> 'TEST_ARTIFACT' AND ${table.artifactCount} IS NULL)`,
+      sql`(${table.kind} = 'TEST_ARTIFACT' AND ${table.artifactCount} IS NOT NULL AND ${table.artifactCount} > 0 AND ${table.artifactManifestHash} ~ '^[0-9a-f]{64}$') OR (${table.kind} <> 'TEST_ARTIFACT' AND ${table.artifactCount} IS NULL AND ${table.artifactManifestHash} IS NULL)`,
     ),
   ],
 ).enableRLS();
@@ -718,6 +1007,95 @@ export const changeSetCommandAttemptReceiptsTable = pgTable(
   ],
 ).enableRLS();
 
+export const changeSetCommandAuditEventsTable = pgTable(
+  "change_set_command_audit_events",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenantsTable.id, { onDelete: "restrict" }),
+    attemptId: uuid("attempt_id").notNull(),
+    sequence: integer("sequence").notNull(),
+    contextId: uuid("context_id").notNull(),
+    actorPrincipalId: uuid("actor_principal_id").notNull(),
+    actorMembershipId: uuid("actor_membership_id").notNull(),
+    changeSetId: uuid("change_set_id"),
+    commandType: text("command_type").notNull(),
+    targetState: text("target_state"),
+    capability: text("capability").notNull(),
+    policyVersionId: uuid("policy_version_id"),
+    phase: text("phase").notNull(),
+    outcome: text("outcome").notNull(),
+    reasonCode: text("reason_code").notNull(),
+    idempotencyKeyFingerprint: text("idempotency_key_fingerprint").notNull(),
+    requestFingerprint: text("request_fingerprint").notNull(),
+    fingerprintKeyId: text("fingerprint_key_id").notNull(),
+    previousHash: text("previous_hash"),
+    eventHash: text("event_hash").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("change_set_command_audit_events_attempt_sequence_uq").on(
+      table.tenantId,
+      table.attemptId,
+      table.sequence,
+    ),
+    index("change_set_command_audit_events_actor_idx").on(
+      table.tenantId,
+      table.actorPrincipalId,
+      table.occurredAt,
+    ),
+    index("change_set_command_audit_events_change_set_idx").on(
+      table.tenantId,
+      table.changeSetId,
+      table.occurredAt,
+    ),
+    check("change_set_command_audit_events_id_uuidv7_chk", uuidV7(table.id)),
+    check(
+      "change_set_command_audit_events_attempt_uuidv7_chk",
+      uuidV7(table.attemptId),
+    ),
+    check(
+      "change_set_command_audit_events_context_uuidv7_chk",
+      uuidV7(table.contextId),
+    ),
+    check(
+      "change_set_command_audit_events_sequence_chk",
+      sql`${table.sequence} > 0`,
+    ),
+    check(
+      "change_set_command_audit_events_command_chk",
+      sql`${table.commandType} IN ('CREATE', 'TRANSITION') AND ((${table.commandType} = 'CREATE' AND ${table.targetState} IS NULL) OR (${table.commandType} = 'TRANSITION' AND ${table.targetState} IS NOT NULL AND ${table.targetState} IN ('VALIDATED', 'SIMULATED', 'IN_REVIEW')))`,
+    ),
+    check(
+      "change_set_command_audit_events_capability_chk",
+      sql`${table.capability} ~ '^[a-z][a-z0-9._:-]{2,95}$'`,
+    ),
+    check(
+      "change_set_command_audit_events_phase_chk",
+      sql`${table.phase} IN ('ATTEMPT_STARTED', 'AUTHORIZATION', 'CLAIM', 'EVIDENCE', 'MUTATION', 'COMMIT', 'TERMINAL')`,
+    ),
+    check(
+      "change_set_command_audit_events_outcome_chk",
+      sql`${table.outcome} IN ('STARTED', 'ALLOW', 'DENY', 'REJECT', 'CONFLICT', 'ERROR', 'SUCCESS')`,
+    ),
+    check(
+      "change_set_command_audit_events_reason_chk",
+      sql`${table.reasonCode} ~ '^[A-Z][A-Z0-9_]{1,63}$'`,
+    ),
+    check(
+      "change_set_command_audit_events_hashes_chk",
+      sql`${table.idempotencyKeyFingerprint} ~ '^[0-9a-f]{64}$' AND ${table.requestFingerprint} ~ '^[0-9a-f]{64}$' AND ${table.eventHash} ~ '^[0-9a-f]{64}$' AND (${table.previousHash} IS NULL OR ${table.previousHash} ~ '^[0-9a-f]{64}$')`,
+    ),
+    check(
+      "change_set_command_audit_events_key_id_chk",
+      sql`${table.fingerprintKeyId} ~ '^[a-z][a-z0-9._:-]{2,95}$'`,
+    ),
+  ],
+).enableRLS();
+
 export type ChangeSet = typeof changeSetsTable.$inferSelect;
 export type ChangeSetApproval = typeof changeSetApprovalsTable.$inferSelect;
 export type ChangeSetTransitionReceipt =
@@ -726,5 +1104,15 @@ export type ChangeSetCommandReceipt =
   typeof changeSetCommandReceiptsTable.$inferSelect;
 export type ChangeSetEvidenceReceipt =
   typeof changeSetEvidenceReceiptsTable.$inferSelect;
+export type ChangeSetEvidenceIssuer =
+  typeof changeSetEvidenceIssuersTable.$inferSelect;
+export type ChangeSetEvidenceSigningKey =
+  typeof changeSetEvidenceSigningKeysTable.$inferSelect;
+export type ChangeSetEvidenceIssuerTenantGrant =
+  typeof changeSetEvidenceIssuerTenantGrantsTable.$inferSelect;
+export type ChangeSetEvidenceRequest =
+  typeof changeSetEvidenceRequestsTable.$inferSelect;
 export type ChangeSetCommandAttemptReceipt =
   typeof changeSetCommandAttemptReceiptsTable.$inferSelect;
+export type ChangeSetCommandAuditEvent =
+  typeof changeSetCommandAuditEventsTable.$inferSelect;

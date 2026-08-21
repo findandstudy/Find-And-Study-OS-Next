@@ -42,6 +42,7 @@
     "test:active-tenant-context": "tsx --test ./scripts/test-active-tenant-context.ts",
     "test:change-set-policy": "tsx --test ./scripts/test-change-set-policy.ts",
     "test:change-set-command": "tsx --test ./scripts/test-change-set-command.ts",
+    "test:change-set-evidence-envelope": "tsx --test ./scripts/test-change-set-evidence-envelope.ts",
     "test:postgres-control-plane-gate": "tsx ./scripts/test-postgres-control-plane-gate.ts",
     "test:ai-agent-admin": "tsx --test ./scripts/test-ai-agent-admin.ts",
     "test:ai-agent-models": "tsx --test ./scripts/test-ai-agent-models.ts",

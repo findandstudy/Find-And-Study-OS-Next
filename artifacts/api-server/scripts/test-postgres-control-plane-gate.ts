@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import pg from "pg";
+import {
+  fingerprintChangeSetEvidencePublicKey,
+  issueChangeSetEvidenceEnvelope,
+  type ChangeSetEvidenceSigner,
+} from "../src/lib/changeSetEvidenceEnvelope.js";
 import { canonicalJson } from "../src/lib/jsonCanonical.js";
 
 const { Client } = pg;
@@ -42,7 +47,10 @@ const databaseName = adminTarget.pathname.slice(1);
 const migratorRole = "fas_migrator";
 const appRole = "fas_app";
 
-async function withClient<T>(url: string, fn: (client: pg.Client) => Promise<T>) {
+async function withClient<T>(
+  url: string,
+  fn: (client: pg.Client) => Promise<T>,
+) {
   const client = new Client({
     connectionString: url,
     connectionTimeoutMillis: 10_000,
@@ -122,6 +130,13 @@ const ID = {
   transitionTwo: "018f3000-0000-7000-8000-00000000020e",
   transitionThree: "018f3000-0000-7000-8000-00000000020f",
   evidenceLessTransition: "018f3000-0000-7000-8000-000000000210",
+  issuerPrincipal: "018f3000-0000-7000-8000-000000000211",
+  evidenceRequest: "018f3000-0000-7000-8000-000000000212",
+  racingEvidenceRequest: "018f3000-0000-7000-8000-000000000213",
+  evidenceGrant: "018f3000-0000-7000-8000-000000000214",
+  auditAttempt: "018f3000-0000-7000-8000-000000000215",
+  auditEventOne: "018f3000-0000-7000-8000-000000000216",
+  auditEventTwo: "018f3000-0000-7000-8000-000000000217",
 } as const;
 
 const baseHash = "a".repeat(64);
@@ -131,6 +146,7 @@ const validationOutcomeHash = crypto
   .update(
     canonicalJson({
       artifactCount: null,
+      artifactManifestHash: null,
       kind: "VALIDATION",
       outcome: "PASSED",
     }),
@@ -152,10 +168,36 @@ const TENANT_OWNED_TABLES = [
   "change_set_command_receipts",
   "change_set_evidence_receipts",
   "change_set_command_attempt_receipts",
+  "change_set_evidence_issuer_tenant_grants",
+  "change_set_evidence_requests",
+  "change_set_command_audit_events",
 ] as const;
 
+const evidenceKeyPair = crypto.generateKeyPairSync("ed25519");
+const evidenceIssuerId = "fas-evidence-service";
+const evidenceKeyId = "pg-gate-key-1";
+const evidenceToolVersion = "test-v1";
+
+function evidenceSigner(now: number): ChangeSetEvidenceSigner {
+  return {
+    issuerId: evidenceIssuerId,
+    issuerPrincipalId: ID.issuerPrincipal,
+    keyId: evidenceKeyId,
+    algorithm: "Ed25519",
+    environmentId: "test-ci",
+    cellId: "cell-a",
+    state: "ACTIVE",
+    validFrom: now - 60 * 60 * 1000,
+    signUntil: now + 60 * 60 * 1000,
+    sign: async (payload) =>
+      crypto.sign(null, Buffer.from(payload), evidenceKeyPair.privateKey),
+  };
+}
+
 async function setTenant(client: pg.Client, tenantId: string) {
-  await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+  await client.query("SELECT set_config('app.tenant_id', $1, true)", [
+    tenantId,
+  ]);
 }
 
 async function inTenantTransaction<T>(
@@ -215,7 +257,12 @@ async function seedTenant(
       `INSERT INTO public.memberships
         (id, tenant_id, organization_id, principal_id, status)
        VALUES ($1, $2, $3, $4, 'ACTIVE')`,
-      [input.membershipId, input.tenantId, input.organizationId, input.principalId],
+      [
+        input.membershipId,
+        input.tenantId,
+        input.organizationId,
+        input.principalId,
+      ],
     );
   });
 }
@@ -261,9 +308,47 @@ async function insertChangeSet(
 }
 
 async function seedControlPlane(client: pg.Client) {
+  const registryNow = Date.now();
+  await client.query(
+    `INSERT INTO public.change_set_evidence_issuers
+      (id, principal_id, environment_id, cell_id, state)
+     VALUES ($1, $2, 'test-ci', 'cell-a', 'ACTIVE')`,
+    [evidenceIssuerId, ID.issuerPrincipal],
+  );
+  await client.query(
+    `INSERT INTO public.change_set_evidence_signing_keys (
+      issuer_id, key_id, algorithm, public_key_spki_base64,
+      public_key_fingerprint_sha256, opaque_signing_key_ref, state,
+      valid_from, sign_until, verify_until
+    ) VALUES (
+      $1, $2, 'Ed25519', $3, $4, 'test-memory://pg-gate-key-1', 'ACTIVE',
+      to_timestamp($5 / 1000.0), to_timestamp($6 / 1000.0), to_timestamp($7 / 1000.0)
+    )`,
+    [
+      evidenceIssuerId,
+      evidenceKeyId,
+      evidenceKeyPair.publicKey
+        .export({ type: "spki", format: "der" })
+        .toString("base64"),
+      fingerprintChangeSetEvidencePublicKey(evidenceKeyPair.publicKey),
+      registryNow - 60 * 60 * 1000,
+      registryNow + 60 * 60 * 1000,
+      registryNow + 2 * 60 * 60 * 1000,
+    ],
+  );
   await inTenantTransaction(client, ID.tenantA, async () => {
     await insertChangeSet(client, ID.changeSet);
     await insertChangeSet(client, ID.raceChangeSet, true);
+    await client.query(
+      `INSERT INTO public.change_set_evidence_issuer_tenant_grants (
+        id, tenant_id, issuer_id, kind, tool_id, tool_version,
+        state, valid_from, valid_until
+      ) VALUES (
+        $1, $2, $3, 'VALIDATION', $3, $4, 'ACTIVE',
+        now() - interval '1 hour', now() + interval '1 hour'
+      )`,
+      [ID.evidenceGrant, ID.tenantA, evidenceIssuerId, evidenceToolVersion],
+    );
     await client.query(
       `INSERT INTO public.change_set_command_receipts (
         id, tenant_id, idempotency_key_hash, request_hash, context_id,
@@ -290,28 +375,103 @@ async function seedControlPlane(client: pg.Client) {
         ID.raceChangeSet,
       ],
     );
-    for (const [evidenceId, changeSetId] of [
-      [ID.evidence, ID.changeSet],
-      [ID.racingEvidence, ID.raceChangeSet],
+    for (const [evidenceId, evidenceRequestId, changeSetId, challengeNonce] of [
+      [ID.evidence, ID.evidenceRequest, ID.changeSet, "abcdefghijklmnopqrstuv"],
+      [
+        ID.racingEvidence,
+        ID.racingEvidenceRequest,
+        ID.raceChangeSet,
+        "zyxwvutsrqponmlkjihgfe",
+      ],
     ] as const) {
+      const challengeNonceHash = crypto
+        .createHash("sha256")
+        .update(challengeNonce, "utf8")
+        .digest("hex");
+      await client.query(
+        `INSERT INTO public.change_set_evidence_requests (
+          id, tenant_id, change_set_id, target_state, kind,
+          challenge_nonce_hash, requested_by_principal_id,
+          requested_by_membership_id, subject_hash, policy_version_id,
+          tool_id, tool_version, state, expires_at
+        ) VALUES (
+          $1, $2, $3, 'VALIDATED', 'VALIDATION', $4, $5, $6, $7, $8,
+          $9, $10, 'OPEN', now() + interval '31 minutes'
+        )`,
+        [
+          evidenceRequestId,
+          ID.tenantA,
+          changeSetId,
+          challengeNonceHash,
+          ID.principalA,
+          ID.membershipA,
+          proposedHash,
+          ID.policyA,
+          evidenceIssuerId,
+          evidenceToolVersion,
+        ],
+      );
+      const issued = await issueChangeSetEvidenceEnvelope(
+        {
+          receiptId: evidenceId,
+          evidenceRequestId,
+          challengeNonce,
+          tenantId: ID.tenantA,
+          changeSetId,
+          targetState: "VALIDATED",
+          kind: "VALIDATION",
+          requestedByPrincipalId: ID.principalA,
+          requestedByMembershipId: ID.membershipA,
+          subjectHash: proposedHash,
+          policyVersionId: ID.policyA,
+          toolId: evidenceIssuerId,
+          toolVersion: evidenceToolVersion,
+          outcome: "PASSED",
+          artifactCount: null,
+          artifactManifestHash: null,
+          ttlMs: 30 * 60 * 1000,
+        },
+        evidenceSigner(Date.now()),
+      );
+      const signatureBase64Url = issued.token.split(".")[1];
+      const signedClaimsHash = crypto
+        .createHash("sha256")
+        .update(canonicalJson(issued.claims), "utf8")
+        .digest("hex");
       await client.query(
         `INSERT INTO public.change_set_evidence_receipts (
-          id, tenant_id, change_set_id, target_state, kind, issuer, tool_version,
+          id, tenant_id, change_set_id, target_state, kind, issuer,
+          issuer_principal_id, signing_key_id, algorithm, schema_version,
+          audience, environment_id, cell_id, evidence_request_id,
+          challenge_nonce_hash, tool_id, tool_version,
           requested_by_principal_id, requested_by_membership_id, subject_hash,
-          policy_version_id, outcome, artifact_count, outcome_hash, issued_at, expires_at
+          policy_version_id, outcome, artifact_count, artifact_manifest_hash,
+          outcome_hash, signed_claims_hash, signature_base64url, issued_at, expires_at
         ) VALUES (
-          $1, $2, $3, 'VALIDATED', 'VALIDATION', 'fas-evidence-service', 'test-v1',
-          $4, $5, $6, $7, 'PASSED', NULL, $8, now(), now() + interval '30 minutes'
+          $1, $2, $3, 'VALIDATED', 'VALIDATION', $4, $5, $6, 'Ed25519', 1,
+          'fas.change-set.transition', 'test-ci', 'cell-a', $7, $8, $4, $9,
+          $10, $11, $12, $13, 'PASSED', NULL, NULL, $14, $15, $16,
+          to_timestamp($17 / 1000.0), to_timestamp($18 / 1000.0)
         )`,
         [
           evidenceId,
           ID.tenantA,
           changeSetId,
+          evidenceIssuerId,
+          ID.issuerPrincipal,
+          evidenceKeyId,
+          evidenceRequestId,
+          challengeNonceHash,
+          evidenceToolVersion,
           ID.principalA,
           ID.membershipA,
           proposedHash,
           ID.policyA,
           validationOutcomeHash,
+          signedClaimsHash,
+          signatureBase64Url,
+          issued.claims.issuedAt,
+          issued.claims.expiresAt,
         ],
       );
     }
@@ -375,7 +535,11 @@ async function verifyRoles(admin: pg.Client) {
   );
   assert.equal(rls.rowCount, TENANT_OWNED_TABLES.length);
   for (const relation of rls.rows) {
-    assert.equal(relation.relrowsecurity, true, `${relation.relname} must enable RLS`);
+    assert.equal(
+      relation.relrowsecurity,
+      true,
+      `${relation.relname} must enable RLS`,
+    );
     assert.equal(
       relation.relforcerowsecurity,
       true,
@@ -387,7 +551,9 @@ async function verifyRoles(admin: pg.Client) {
 async function verifyAtomicDdlRollback(migrator: pg.Client) {
   await migrator.query("BEGIN");
   try {
-    await migrator.query("CREATE TABLE public.pg_gate_atomic_probe (id integer)");
+    await migrator.query(
+      "CREATE TABLE public.pg_gate_atomic_probe (id integer)",
+    );
     assert.equal(
       (
         await migrator.query(
@@ -396,7 +562,9 @@ async function verifyAtomicDdlRollback(migrator: pg.Client) {
       ).rows[0].exists,
       true,
     );
-    await migrator.query("SELECT missing_column FROM public.pg_gate_atomic_probe");
+    await migrator.query(
+      "SELECT missing_column FROM public.pg_gate_atomic_probe",
+    );
     assert.fail("injected migration failure should abort");
   } catch (error) {
     assert.equal(
@@ -416,7 +584,7 @@ async function verifyAtomicDdlRollback(migrator: pg.Client) {
         "SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations",
       )
     ).rows[0].count,
-    58,
+    59,
   );
 }
 
@@ -425,37 +593,46 @@ async function verifyOwnerNoContext(migrator: pg.Client) {
     const result = await migrator.query(
       `SELECT count(*)::int AS count FROM public.${table}`,
     );
-    assert.equal(result.rows[0].count, 0, `${table} must hide rows without context`);
+    assert.equal(
+      result.rows[0].count,
+      0,
+      `${table} must hide rows without context`,
+    );
   }
 }
 
 async function verifyRlsAndCleanup(app: pg.Client) {
   await inTenantTransaction(app, ID.tenantA, async () => {
-    const rows = await app.query("SELECT id FROM public.memberships ORDER BY id");
-    assert.deepEqual(rows.rows.map((row) => row.id), [ID.membershipA]);
+    const rows = await app.query(
+      "SELECT id FROM public.memberships ORDER BY id",
+    );
+    assert.deepEqual(
+      rows.rows.map((row) => row.id),
+      [ID.membershipA],
+    );
   });
   assert.equal(
-    (await app.query("SELECT count(*)::int AS count FROM public.memberships")).rows[0]
-      .count,
+    (await app.query("SELECT count(*)::int AS count FROM public.memberships"))
+      .rows[0].count,
     0,
   );
   assert.equal(
-    (await app.query("SELECT current_setting('app.tenant_id', true) AS tenant")).rows[0]
-      .tenant,
+    (await app.query("SELECT current_setting('app.tenant_id', true) AS tenant"))
+      .rows[0].tenant,
     "",
   );
 
   await app.query("BEGIN");
   await setTenant(app, ID.tenantA);
   assert.equal(
-    (await app.query("SELECT count(*)::int AS count FROM public.memberships")).rows[0]
-      .count,
+    (await app.query("SELECT count(*)::int AS count FROM public.memberships"))
+      .rows[0].count,
     1,
   );
   await app.query("ROLLBACK");
   assert.equal(
-    (await app.query("SELECT current_setting('app.tenant_id', true) AS tenant")).rows[0]
-      .tenant,
+    (await app.query("SELECT current_setting('app.tenant_id', true) AS tenant"))
+      .rows[0].tenant,
     "",
   );
 
@@ -467,11 +644,10 @@ async function verifyRlsAndCleanup(app: pg.Client) {
   );
   await app.query("ROLLBACK");
   assert.equal(
-    (await app.query("SELECT current_setting('app.tenant_id', true) AS tenant")).rows[0]
-      .tenant,
+    (await app.query("SELECT current_setting('app.tenant_id', true) AS tenant"))
+      .rows[0].tenant,
     "",
   );
-
 }
 
 async function verifyComposites(migrator: pg.Client) {
@@ -683,11 +859,167 @@ async function verifyProposalAndEvidence(migrator: pg.Client) {
   await migrator.query("ROLLBACK");
 }
 
+async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
+  await inTenantTransaction(migrator, ID.tenantA, async () => {
+    const requests = await migrator.query(
+      `SELECT id, state, issued_receipt_id
+       FROM public.change_set_evidence_requests
+       WHERE tenant_id = $1 ORDER BY id`,
+      [ID.tenantA],
+    );
+    assert.deepEqual(requests.rows, [
+      {
+        id: ID.evidenceRequest,
+        state: "ISSUED",
+        issued_receipt_id: ID.evidence,
+      },
+      {
+        id: ID.racingEvidenceRequest,
+        state: "ISSUED",
+        issued_receipt_id: ID.racingEvidence,
+      },
+    ]);
+  });
+
+  await migrator.query("BEGIN");
+  await setTenant(migrator, ID.tenantA);
+  await mustFail(
+    () =>
+      migrator.query(
+        `UPDATE public.change_set_evidence_receipts
+         SET signature_base64url = $1
+         WHERE tenant_id = $2 AND id = $3`,
+        ["A".repeat(86), ID.tenantA, ID.racingEvidence],
+      ),
+    /signed evidence envelope identity is immutable/,
+  );
+  await migrator.query("ROLLBACK");
+
+  await migrator.query("BEGIN");
+  await mustFail(
+    () =>
+      migrator.query(
+        `UPDATE public.change_set_evidence_signing_keys
+         SET public_key_fingerprint_sha256 = $1
+         WHERE issuer_id = $2 AND key_id = $3`,
+        ["f".repeat(64), evidenceIssuerId, evidenceKeyId],
+      ),
+    /evidence signing key material and lifecycle are immutable/,
+  );
+  await migrator.query("ROLLBACK");
+
+  await inTenantTransaction(migrator, ID.tenantA, async () => {
+    await migrator.query(
+      `INSERT INTO public.change_set_command_audit_events (
+        id, tenant_id, attempt_id, sequence, context_id,
+        actor_principal_id, actor_membership_id, change_set_id,
+        command_type, target_state, capability, policy_version_id,
+        phase, outcome, reason_code, idempotency_key_fingerprint,
+        request_fingerprint, fingerprint_key_id, previous_hash, event_hash
+      ) VALUES (
+        $1, $2, $3, 1, $4, $5, $6, NULL,
+        'CREATE', NULL, 'control_plane.change.create', $7,
+        'ATTEMPT_STARTED', 'STARTED', 'REQUEST_ACCEPTED', $8, $9,
+        'test-audit-key-1', NULL, $10
+      )`,
+      [
+        ID.auditEventOne,
+        ID.tenantA,
+        ID.auditAttempt,
+        ID.context,
+        ID.principalA,
+        ID.membershipA,
+        ID.policyA,
+        "1".repeat(64),
+        "2".repeat(64),
+        "3".repeat(64),
+      ],
+    );
+  });
+
+  await migrator.query("BEGIN");
+  await setTenant(migrator, ID.tenantA);
+  await mustFail(
+    () =>
+      migrator.query(
+        `INSERT INTO public.change_set_command_audit_events (
+          id, tenant_id, attempt_id, sequence, context_id,
+          actor_principal_id, actor_membership_id, command_type,
+          capability, phase, outcome, reason_code,
+          idempotency_key_fingerprint, request_fingerprint,
+          fingerprint_key_id, previous_hash, event_hash
+        ) VALUES (
+          $1, $2, $3, 2, $4, $5, $6, 'CREATE',
+          'control_plane.change.create', 'TERMINAL', 'SUCCESS', 'COMMAND_COMPLETED',
+          $7, $8, 'test-audit-key-1', $9, $10
+        )`,
+        [
+          ID.auditEventTwo,
+          ID.tenantA,
+          ID.auditAttempt,
+          ID.context,
+          ID.principalA,
+          ID.membershipA,
+          "1".repeat(64),
+          "2".repeat(64),
+          "4".repeat(64),
+          "5".repeat(64),
+        ],
+      ),
+    /audit event sequence or previous hash mismatch/,
+  );
+  await migrator.query("ROLLBACK");
+
+  await inTenantTransaction(migrator, ID.tenantA, async () => {
+    await migrator.query(
+      `INSERT INTO public.change_set_command_audit_events (
+        id, tenant_id, attempt_id, sequence, context_id,
+        actor_principal_id, actor_membership_id, command_type,
+        capability, phase, outcome, reason_code,
+        idempotency_key_fingerprint, request_fingerprint,
+        fingerprint_key_id, previous_hash, event_hash
+      ) VALUES (
+        $1, $2, $3, 2, $4, $5, $6, 'CREATE',
+        'control_plane.change.create', 'TERMINAL', 'SUCCESS', 'COMMAND_COMPLETED',
+        $7, $8, 'test-audit-key-1', $9, $10
+      )`,
+      [
+        ID.auditEventTwo,
+        ID.tenantA,
+        ID.auditAttempt,
+        ID.context,
+        ID.principalA,
+        ID.membershipA,
+        "1".repeat(64),
+        "2".repeat(64),
+        "3".repeat(64),
+        "5".repeat(64),
+      ],
+    );
+  });
+
+  await migrator.query("BEGIN");
+  await setTenant(migrator, ID.tenantA);
+  await mustFail(
+    () =>
+      migrator.query(
+        `UPDATE public.change_set_command_audit_events
+         SET reason_code = 'TAMPERED'
+         WHERE tenant_id = $1 AND id = $2`,
+        [ID.tenantA, ID.auditEventTwo],
+      ),
+    /authorization receipts are immutable/,
+  );
+  await migrator.query("ROLLBACK");
+}
+
 async function consumeEvidence(commandId: string) {
   const transitionReceiptId =
     commandId === ID.commandTwo ? ID.transitionTwo : ID.transitionThree;
-  const receiptHash = commandId === ID.commandTwo ? "8".repeat(64) : "9".repeat(64);
-  const resultHash = commandId === ID.commandTwo ? "6".repeat(64) : "7".repeat(64);
+  const receiptHash =
+    commandId === ID.commandTwo ? "8".repeat(64) : "9".repeat(64);
+  const resultHash =
+    commandId === ID.commandTwo ? "6".repeat(64) : "7".repeat(64);
   return withClient(migratorUrl, (client) =>
     inTenantTransaction(client, ID.tenantA, async () => {
       const result = await client.query(
@@ -815,8 +1147,14 @@ async function verifyRuntimeDenials(app: pg.Client) {
     () => app.query("CREATE TEMP TABLE runtime_temp_escape (id integer)"),
     /permission denied/,
   );
-  await mustFail(() => app.query("CREATE ROLE runtime_escalation"), /permission denied/);
-  await mustFail(() => app.query(`SET ROLE ${migratorRole}`), /permission denied/);
+  await mustFail(
+    () => app.query("CREATE ROLE runtime_escalation"),
+    /permission denied/,
+  );
+  await mustFail(
+    () => app.query(`SET ROLE ${migratorRole}`),
+    /permission denied/,
+  );
   await mustFail(
     () =>
       app.query(
@@ -853,9 +1191,10 @@ async function verifyRuntimeDenials(app: pg.Client) {
   await setTenant(app, ID.tenantA);
   await mustFail(
     () =>
-      app.query("DELETE FROM public.change_set_transition_receipts WHERE id = $1", [
-        ID.transition,
-      ]),
+      app.query(
+        "DELETE FROM public.change_set_transition_receipts WHERE id = $1",
+        [ID.transition],
+      ),
     /permission denied/,
   );
   await app.query("ROLLBACK");
@@ -865,7 +1204,9 @@ async function verifyConcurrentTenants() {
   const read = (tenantId: string) =>
     withClient(appUrl, (client) =>
       inTenantTransaction(client, tenantId, async () => {
-        const result = await client.query("SELECT tenant_id FROM public.memberships");
+        const result = await client.query(
+          "SELECT tenant_id FROM public.memberships",
+        );
         return result.rows.map((row) => row.tenant_id);
       }),
     );
@@ -880,12 +1221,15 @@ async function verify() {
     await grantRuntime(admin);
   });
   await withClient(migratorUrl, async (migrator) => {
-    const version = Number((await migrator.query("SHOW server_version_num")).rows[0].server_version_num);
+    const version = Number(
+      (await migrator.query("SHOW server_version_num")).rows[0]
+        .server_version_num,
+    );
     assert.ok(version >= 160_000 && version < 170_000);
     const migrationCount = await migrator.query(
       "SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations",
     );
-    assert.equal(migrationCount.rows[0].count, 58);
+    assert.equal(migrationCount.rows[0].count, 59);
     await verifyAtomicDdlRollback(migrator);
     await migrator.query(
       `INSERT INTO public.branches (id, name) VALUES
@@ -896,8 +1240,9 @@ async function verify() {
         (id, principal_type, issuer, subject, status)
        VALUES
         ($1, 'HUMAN', 'pg-gate', 'tenant-a-maker', 'ACTIVE'),
-        ($2, 'HUMAN', 'pg-gate', 'tenant-b-maker', 'ACTIVE')`,
-      [ID.principalA, ID.principalB],
+        ($2, 'HUMAN', 'pg-gate', 'tenant-b-maker', 'ACTIVE'),
+        ($3, 'SERVICE', 'pg-gate', 'evidence-issuer', 'ACTIVE')`,
+      [ID.principalA, ID.principalB, ID.issuerPrincipal],
     );
     await migrator.query(
       `INSERT INTO public.capability_definitions
@@ -925,10 +1270,14 @@ async function verify() {
     await seedControlPlane(migrator);
     await verifyComposites(migrator);
     await verifyProposalAndEvidence(migrator);
+    await verifySignedEvidenceAndAuditFoundation(migrator);
     await verifyOwnerNoContext(migrator);
     assert.equal(
-      (await migrator.query("SELECT count(*)::int AS count FROM public.memberships"))
-        .rows[0].count,
+      (
+        await migrator.query(
+          "SELECT count(*)::int AS count FROM public.memberships",
+        )
+      ).rows[0].count,
       0,
       "FORCE RLS must constrain the table owner without tenant context",
     );
@@ -947,4 +1296,5 @@ async function verify() {
 
 if (mode === "setup") await setup();
 else if (mode === "verify") await verify();
-else throw new Error("usage: test-postgres-control-plane-gate.ts <setup|verify>");
+else
+  throw new Error("usage: test-postgres-control-plane-gate.ts <setup|verify>");

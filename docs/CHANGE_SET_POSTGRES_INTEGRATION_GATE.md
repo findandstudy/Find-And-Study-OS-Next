@@ -1,13 +1,16 @@
 # ChangeSet PostgreSQL Integration Gate
 
-Status: **FOUNDATION CI GREEN / NO-GO for runtime wiring**.
+Status: **58-MIGRATION BASELINE CI GREEN; 0058 CANDIDATE PENDING / NO-GO for
+runtime wiring**.
 
-This gate is not a delivery estimate and is not proof that migrations `0055`,
-`0056`, or `0057` have run in a long-lived environment. The approved local PostgreSQL endpoint
+This gate is not a delivery estimate and is not proof that migrations `0055`
+through `0058` have run in a long-lived environment. The approved local PostgreSQL endpoint
 `127.0.0.1:5433/fasos_apply_local` was unavailable. GitHub run `32515325893`
 applied all 58 reviewed migrations twice to an isolated disposable PostgreSQL
-16 database and passed the candidate direct-SQL matrix. No long-lived,
-production, staging, or production-derived database was mutated.
+16 database and passed the candidate direct-SQL matrix through `0057`. The new
+`0058` evidence-identity/audit migration has static and pure-test evidence only
+until an updated 59-migration disposable run passes. No long-lived, production,
+staging, or production-derived database was mutated.
 
 ## Required database authority split
 
@@ -33,7 +36,7 @@ application role is forbidden.
 The test environment must use a disposable PostgreSQL instance matching the
 production major version and pinned by immutable image digest. It must create a
 random `fas_it_*` database, set statement, lock, and idle-transaction timeouts,
-and apply the real migration runner from `0000` through `0057` using only the
+and apply the real migration runner from `0000` through `0058` using only the
 migrator role.
 
 The harness is opt-in and must fail closed unless all of these are true:
@@ -71,9 +74,14 @@ The gate passes only when CI records all of the following:
 10. transition hash-chain, review-round uniqueness, maker/checker separation,
     and one-way command completion constraints;
 11. server-issued validation/simulation/test/rollback/canary receipt bindings to
-    tenant, ChangeSet, target state, requesting principal, proposed hash,
-    policy/tool version, issued/expiry window, and consumption state;
-12. hardened `search_path` and temporary-object behavior for both roles.
+    issuer principal, Ed25519 key/fingerprint, audience, environment/cell,
+    single-use request/challenge, exact tenant/kind/tool grant, tenant,
+    ChangeSet, target state, requesting principal/membership, proposed hash,
+    policy version, artifact manifest, issued/expiry window, and consumption
+    state;
+12. hardened `search_path` and temporary-object behavior for both roles;
+13. append-only, tenant-scoped audit sequence/hash-chain behavior and denial of
+    raw command/request/error/secret payload fields.
 
 ## Candidate CI harness
 
@@ -81,7 +89,9 @@ The gate passes only when CI records all of the following:
 `artifacts/api-server/scripts/test-postgres-control-plane-gate.ts` define the
 first disposable PostgreSQL 16 candidate gate. It uses an immutable official
 image digest, a per-run `fas_it_*` database, separate `fas_migrator` and
-`fas_app` logins, applies all 58 migrations twice, and directly exercises:
+`fas_app` logins. The updated candidate targets all 59 migrations twice; this is
+not a PASS claim until GitHub reports the candidate head green. It directly
+exercises:
 
 - authority attributes, forced RLS under owner and runtime roles, no-context and
   two-tenant isolation;
