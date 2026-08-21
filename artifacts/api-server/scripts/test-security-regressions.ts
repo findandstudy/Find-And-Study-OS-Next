@@ -56,6 +56,14 @@ const aiBotsRouteSource = readFileSync(
   new URL("../src/routes/aiBots.ts", import.meta.url),
   "utf8",
 );
+const usersRouteSource = readFileSync(
+  new URL("../src/routes/users.ts", import.meta.url),
+  "utf8",
+);
+const agentsRouteSource = readFileSync(
+  new URL("../src/routes/agents.ts", import.meta.url),
+  "utf8",
+);
 const dormBookingFollowupSource = readFileSync(
   new URL("../src/lib/inbox/dormBookingFollowupWorker.ts", import.meta.url),
   "utf8",
@@ -257,6 +265,15 @@ test("external AI delivery fails closed and activation requires Super Admin", ()
   assert.match(aiBotsRouteSource, /externalAutoReplyEnabled: false/);
   assert.match(dormBookingFollowupSource, /!config\.externalAutoReplyEnabled/);
   assert.match(dormBookingFollowupSource, /isExternalAutoReplyEmergencyStopped/);
+});
+
+test("legacy impersonation is branch-scoped and nested sessions are denied", () => {
+  assert.match(usersRouteSource, /evaluateLegacyUserImpersonation/);
+  assert.match(usersRouteSource, /getVisibleBranchIds/);
+  assert.match(usersRouteSource, /currentSession\.originalSid/);
+  assert.match(usersRouteSource, /auth\.impersonate\.denied/);
+  assert.match(agentsRouteSource, /currentSession\.originalSid/);
+  assert.match(agentsRouteSource, /Cannot impersonate an inactive account/);
 });
 
 test("email verification links are random, hashed, expiring, and one-time", () => {

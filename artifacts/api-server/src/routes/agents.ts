@@ -809,6 +809,23 @@ router.post("/agents/me/sub-agents/:id/impersonate", requireAuth, requireRole("a
 
   const currentSid = req.cookies[SESSION_COOKIE];
   if (!currentSid) { res.status(400).json({ error: "Session cookie required for impersonation" }); return; }
+  const currentSession = await getSession(currentSid);
+  if (!currentSession || currentSession.originalSid) {
+    logAudit(req.user!.id, "auth.impersonate.denied", "user", targetUser.id, {
+      reason: currentSession ? "nested_impersonation" : "invalid_session",
+      via: "agents/sub-agents",
+    }, req.ip);
+    res.status(403).json({ error: "Impersonation cannot be started from this session" });
+    return;
+  }
+  if (!targetUser.isActive || targetUser.deletedAt != null) {
+    logAudit(req.user!.id, "auth.impersonate.denied", "user", targetUser.id, {
+      reason: "inactive_target",
+      via: "agents/sub-agents",
+    }, req.ip);
+    res.status(403).json({ error: "Cannot impersonate an inactive account" });
+    return;
+  }
 
   const sessionData: SessionData = {
     user: {
@@ -1981,6 +1998,23 @@ router.post("/agents/:id/impersonate", requireAuth, async (req, res, next): Prom
 
   const currentSid = req.cookies[SESSION_COOKIE];
   if (!currentSid) { res.status(400).json({ error: "Session cookie required for impersonation" }); return; }
+  const currentSession = await getSession(currentSid);
+  if (!currentSession || currentSession.originalSid) {
+    logAudit(req.user!.id, "auth.impersonate.denied", "user", targetUser.id, {
+      reason: currentSession ? "nested_impersonation" : "invalid_session",
+      via: "agents",
+    }, req.ip);
+    res.status(403).json({ error: "Impersonation cannot be started from this session" });
+    return;
+  }
+  if (!targetUser.isActive || targetUser.deletedAt != null) {
+    logAudit(req.user!.id, "auth.impersonate.denied", "user", targetUser.id, {
+      reason: "inactive_target",
+      via: "agents",
+    }, req.ip);
+    res.status(403).json({ error: "Cannot impersonate an inactive account" });
+    return;
+  }
 
   const sessionData: SessionData = {
     user: {

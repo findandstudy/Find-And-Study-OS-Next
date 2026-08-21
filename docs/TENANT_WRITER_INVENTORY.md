@@ -98,3 +98,22 @@ change that introduces it. A registry edit without boundary tests does not
 permit external-tenant access. Raw SQL, schedulers, bots, webhooks, exports,
 cache keys, search projections, and provider sends are part of the denominator;
 route-only coverage is insufficient.
+
+## First quarantined-path remediation: impersonation
+
+The legacy impersonation paths received an interim fail-closed policy while
+the target grant/active-context engine is not yet available:
+
+- `admin` and `manager` may use the general user route only for an active,
+  non-deleted, non-agent, non-privileged target whose every linked branch is
+  inside the actor's server-resolved branch scope.
+- Agent and sub-agent targets must use the relationship-scoped agent routes.
+- A session already created by impersonation cannot start another
+  impersonation session.
+- Inactive/deleted targets are denied and denial reasons are audited.
+- Super Admin retains an explicit transitional platform-support exception.
+
+This narrows a real horizontal/privilege-escalation path but does not promote
+`users.ts` or `agents.ts` out of external-pilot quarantine. That requires JIT
+capability, active tenant context, MFA/step-up, purpose/expiry, access receipt,
+unsafe-action deny, and revocation tests.

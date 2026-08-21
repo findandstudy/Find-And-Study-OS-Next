@@ -8,8 +8,9 @@ import { ADMIN_ROLES, MANAGER_ROLES, STAFF_ROLES, AGENT_ROLES, requiresDirectBra
 import { getVisibleBranchIds } from "../lib/branchScope";
 import { toE164 } from "../lib/inbox/phone";
 import { dispatchAgentProfileChangedNotif } from "../lib/agentProfileNotif";
-import { createSession, deleteSessionsForUser, getSessionId, SESSION_TTL, SESSION_COOKIE, type SessionData } from "../lib/replitAuth";
+import { createSession, deleteSessionsForUser, getSession, getSessionId, SESSION_TTL, SESSION_COOKIE, type SessionData } from "../lib/replitAuth";
 import { getSessionCookieOptions } from "../lib/cookieOptions";
+import { evaluateLegacyUserImpersonation } from "../lib/impersonationPolicy";
 import { validatePassword } from "../lib/passwordPolicy";
 import { parsePaginationParams, buildPageMeta } from "@workspace/pagination";
 import { z } from "zod";
@@ -462,21 +463,57 @@ router.post("/users/me/change-password", requireAuth, async (req, res): Promise<
 
 router.post("/users/:id/impersonate", requireAuth, requireRole(...ADMIN_ROLES), async (req, res): Promise<void> => {
   const id = parseInt(String(req.params.id), 10);
-  if (req.user!.id === id) {
-    res.status(400).json({ error: "Cannot impersonate yourself" });
-    return;
-  }
   const [targetUser] = await db.select().from(usersTable).where(eq(usersTable.id, id));
   if (!targetUser) { res.status(404).json({ error: "User not found" }); return; }
 
-  // Prevent privilege escalation: only super_admin may impersonate super_admin
-  if (targetUser.role === "super_admin" && req.user!.role !== "super_admin") {
-    res.status(403).json({ error: "Cannot impersonate a super administrator" });
+  const currentSid = req.cookies[SESSION_COOKIE];
+  if (!currentSid) { res.status(400).json({ error: "Session cookie required for impersonation" }); return; }
+  const currentSession = await getSession(currentSid);
+  if (!currentSession || currentSession.originalSid) {
+    await logAudit(req.user!.id, "auth.impersonate.denied", "user", id, {
+      reason: currentSession ? "nested_impersonation" : "invalid_session",
+      targetRole: targetUser.role,
+    }, req.ip);
+    res.status(403).json({ error: "Impersonation cannot be started from this session" });
     return;
   }
 
-  const currentSid = req.cookies[SESSION_COOKIE];
-  if (!currentSid) { res.status(400).json({ error: "Session cookie required for impersonation" }); return; }
+  let targetBranchIds = targetUser.branchId == null ? [] : [targetUser.branchId];
+  if (targetBranchIds.length === 0 && targetUser.role === "student") {
+    const studentRows = await db
+      .select({ branchId: studentsTable.branchId })
+      .from(studentsTable)
+      .where(and(eq(studentsTable.userId, targetUser.id), isNull(studentsTable.deletedAt)));
+    targetBranchIds = Array.from(new Set(
+      studentRows
+        .map((student) => student.branchId)
+        .filter((branchId): branchId is number => branchId != null),
+    ));
+  }
+  const visibleBranchIds = await getVisibleBranchIds(
+    req.user!.id,
+    req.user!.role,
+    req.user!,
+  );
+  const decision = evaluateLegacyUserImpersonation(
+    { id: req.user!.id, role: req.user!.role, visibleBranchIds },
+    {
+      id: targetUser.id,
+      role: targetUser.role,
+      branchIds: targetBranchIds,
+      isActive: targetUser.isActive,
+      isDeleted: targetUser.deletedAt != null,
+    },
+  );
+  if (!decision.allowed) {
+    await logAudit(req.user!.id, "auth.impersonate.denied", "user", id, {
+      reason: decision.reason,
+      targetRole: targetUser.role,
+      targetBranchIds,
+    }, req.ip);
+    res.status(403).json({ error: "Impersonation is not permitted for this target" });
+    return;
+  }
 
   const sessionData: SessionData = {
     user: {
@@ -497,7 +534,11 @@ router.post("/users/:id/impersonate", requireAuth, requireRole(...ADMIN_ROLES), 
 
   const sid = await createSession(sessionData);
   res.cookie(SESSION_COOKIE, sid, getSessionCookieOptions(req, SESSION_TTL));
-  await logAudit(req.user!.id, "auth.impersonate.start", "user", id, { targetRole: targetUser.role }, req.ip);
+  await logAudit(req.user!.id, "auth.impersonate.start", "user", id, {
+    targetRole: targetUser.role,
+    targetBranchIds,
+    policyReason: decision.reason,
+  }, req.ip);
   let redirectTo = "/staff";
   if (ADMIN_ROLES.includes(targetUser.role as any)) redirectTo = "/admin";
   else if (targetUser.role === "student") redirectTo = "/student";
