@@ -80,6 +80,22 @@ const settingsRouteSource = readFileSync(
   new URL("../src/routes/settings.ts", import.meta.url),
   "utf8",
 );
+const authGuardSource = readFileSync(
+  new URL("../src/lib/auth.ts", import.meta.url),
+  "utf8",
+);
+const permissionsSource = readFileSync(
+  new URL("../src/lib/permissions.ts", import.meta.url),
+  "utf8",
+);
+const authMiddlewareSource = readFileSync(
+  new URL("../src/middlewares/authMiddleware.ts", import.meta.url),
+  "utf8",
+);
+const frontendAuthSource = readFileSync(
+  new URL("../../edcons/src/hooks/use-auth.ts", import.meta.url),
+  "utf8",
+);
 const dormBookingFollowupSource = readFileSync(
   new URL("../src/lib/inbox/dormBookingFollowupWorker.ts", import.meta.url),
   "utf8",
@@ -320,6 +336,15 @@ test("long-lived platform configuration writes require Super Admin and audit rec
   assert.match(branchesRouteSource, /platform_config\.branch\.update/);
   assert.match(branchesRouteSource, /platform_config\.branch\.archive/);
   assert.match(branchesRouteSource, /platform_config\.branch\.unarchive/);
+});
+
+test("permission-backed decisions use stored roles and only Super Admin bypasses them", () => {
+  assert.match(authGuardSource, /getEffectivePermissionSet\(req\.user\)/);
+  assert.doesNotMatch(authGuardSource, /new Set<string>\(\[\.\.\.fromDb, \.\.\.fromDefault\]\)/);
+  assert.match(permissionsSource, /ALL_PERMISSION_ROLES = new Set\(\["super_admin"\]\)/);
+  assert.match(authMiddlewareSource, /ADMINISH_ROLES = new Set\(\["super_admin"\]\)/);
+  assert.match(frontendAuthSource, /if \(role === "super_admin"\) return true/);
+  assert.doesNotMatch(frontendAuthSource, /role === "super_admin" \|\| role === "admin"/);
 });
 
 test("email verification links are random, hashed, expiring, and one-time", () => {

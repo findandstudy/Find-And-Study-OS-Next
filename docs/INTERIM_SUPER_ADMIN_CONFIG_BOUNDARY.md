@@ -28,6 +28,12 @@ authoritative; hiding the tab is only a usability measure.
   side effect. The first explicit Super Admin PATCH owns creation and receipt.
 - `smtpPassword`, `whatsappToken`, and secret-bearing `n8nWebhookUrl` are not
   returned by the settings API.
+- For permission-backed decisions, a stored role row is authoritative for
+  every non-super role, including `admin`; static defaults apply only when no
+  stored role exists. The canonical backend permission guard and frontend
+  visibility now share that rule. Only `super_admin` bypasses the configured
+  permission package. Legacy routes that still use fixed `requireRole(...)`
+  checks remain separately inventoried and quarantined.
 
 ## Bootstrap ownership
 

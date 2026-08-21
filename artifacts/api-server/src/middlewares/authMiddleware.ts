@@ -35,9 +35,9 @@ declare global {
   }
 }
 
-// admin / super_admin already have isAdmin=true on the frontend → canSee is
-// always true for them, so there is no need to populate agentStaffPermissions.
-const ADMINISH_ROLES = new Set(["admin", "super_admin"]);
+// Only Super Admin bypasses the versioned/configured role package. Admin must
+// receive the same effective permission projection as every other role.
+const ADMINISH_ROLES = new Set(["super_admin"]);
 
 async function resolveRolePerms(
   role: string,
@@ -66,7 +66,7 @@ async function resolveRolePerms(
  * visibility — without this, staff/consultant/accountant roles would always
  * see an empty set and therefore no gated menu items.
  *
- * Skipped for admin/super_admin (they pass the isAdmin short-circuit instead).
+ * Skipped only for super_admin (the sole all-permission short-circuit).
  * Never throws — on error the existing session value is preserved unchanged.
  */
 async function enrichWithEffectivePerms(

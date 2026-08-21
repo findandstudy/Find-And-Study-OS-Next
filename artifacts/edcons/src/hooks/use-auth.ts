@@ -87,12 +87,11 @@ export function useAuth(requireAuth = false, allowedRoles?: readonly string[]) {
   const role = user?.role;
   const permissions = (((user as any)?.permissions) as string[] | undefined) ?? [];
 
-  // Admin and super admin always have full visibility regardless of granular
-  // permission toggles. Every other role must be explicitly granted the
-  // permission key in their role definition.
+  // Only Super Admin bypasses configured permissions. Admin and every other
+  // role use the effective permission projection returned by /auth/me.
   const hasPermission = (key: string): boolean => {
     if (!role) return false;
-    if (role === "super_admin" || role === "admin") return true;
+    if (role === "super_admin") return true;
     return permissions.includes(key);
   };
 

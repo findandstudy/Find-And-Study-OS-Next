@@ -13,9 +13,10 @@ type PermUser = {
   effectivePermissions?: string[];
 };
 
-// Roles that implicitly hold every permission, mirroring the frontend
-// `hasPermission` short-circuit in use-auth.ts (super_admin + admin).
-const ALL_PERMISSION_ROLES = new Set(["super_admin", "admin"]);
+// Only the platform Super Admin bypasses the configured role package. Every
+// other role, including admin, must use the same stored/fallback permission
+// source as the UI and route guards.
+const ALL_PERMISSION_ROLES = new Set(["super_admin"]);
 
 export function applyPermissionOverrides(
   base: Iterable<string>,
@@ -33,7 +34,7 @@ export function applyPermissionOverrides(
  * Resolve the effective permission set for a user.
  *
  * Order of resolution:
- *   1. super_admin / admin → all permissions (matches frontend behaviour).
+ *   1. super_admin → all permissions.
  *   2. The stored role row (`roles.permissions`) is authoritative; falls back
  *      to the static DEFAULT_ROLE_PERMISSIONS only when no row exists.
  *   3. Per-user overrides (`users.permission_overrides`, a `{ key: boolean }`
