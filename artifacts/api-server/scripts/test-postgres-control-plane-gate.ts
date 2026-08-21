@@ -887,9 +887,10 @@ async function verifySignedEvidenceAndAuditFoundation(migrator: pg.Client) {
     () =>
       migrator.query(
         `UPDATE public.change_set_evidence_receipts
-         SET signature_base64url = $1
-         WHERE tenant_id = $2 AND id = $3`,
-        ["A".repeat(86), ID.tenantA, ID.racingEvidence],
+         SET consumed_at = now(), consumed_by_command_receipt_id = $1,
+             signature_base64url = $2
+         WHERE tenant_id = $3 AND id = $4`,
+        [ID.commandTwo, "A".repeat(86), ID.tenantA, ID.racingEvidence],
       ),
     /signed evidence envelope identity is immutable/,
   );
