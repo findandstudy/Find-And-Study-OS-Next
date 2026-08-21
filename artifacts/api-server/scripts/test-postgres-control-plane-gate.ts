@@ -587,7 +587,7 @@ async function verifyProposalAndEvidence(migrator: pg.Client) {
       actor_membership_id, from_state, to_state, reason_code, policy_version,
       policy_version_id, evidence, evidence_hash, previous_hash, receipt_hash
     ) VALUES (
-      $1, $2, $3, $4, 2, $5, $6, 'DRAFT', 'VALIDATED', 'missing_evidence', $7, $7,
+      $1, $2, $3, $4, 2, $5, $6, 'DRAFT', 'VALIDATED', 'missing_evidence', $7, $10,
       '{}'::jsonb, $8, NULL, $9
     )`,
     [
@@ -600,6 +600,7 @@ async function verifyProposalAndEvidence(migrator: pg.Client) {
       ID.policyA,
       "a".repeat(64),
       "b".repeat(64),
+      ID.policyA,
     ],
   );
   await migrator.query(
