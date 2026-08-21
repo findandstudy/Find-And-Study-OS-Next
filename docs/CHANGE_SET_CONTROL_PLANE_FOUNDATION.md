@@ -1,10 +1,11 @@
 # ChangeSet Control Plane Foundation
 
-Status: additive, default-unwired foundation. This document is a security and
-delivery contract, not evidence that the feature is enabled. Migrations `0055`
-through `0058` have not been applied to a long-lived database. There is no
-PostgreSQL command adapter, Super Admin route, publisher, worker, or UI wired to
-these tables yet.
+Status: additive, default-unwired foundation plus a tested PostgreSQL adapter
+candidate. This document is a security and delivery contract, not evidence that
+the feature is enabled. Migrations `0055` through `0059` have not been applied
+to a long-lived database. The command-store and evidence-issuer adapters exist,
+but no API route, Super Admin UI, publisher, worker, or materializer is wired to
+them.
 
 ## Outcome
 
@@ -36,9 +37,10 @@ receipt IDs from the command body. It also does not accept client-selected data
 classification or transition evidence. Those values are derived from a verified
 active-tenant context, current server-resolved authorization state, server-side
 session assurance, and a server UUIDv7 factory. Create commands also cannot
-provide the base configuration or version: the future adapter must lock and
-read the authoritative materialized configuration, then derive the next version
-on the server.
+provide the base configuration or version: the adapter must lock and
+read the authoritative configuration snapshot, then derive the next version on
+the server. The default-unwired PostgreSQL adapter now implements that contract
+for the bounded candidate path; it is not reachable from HTTP or a worker.
 
 The orchestrator always establishes transaction-local tenant context before
 state resolution or repository access. It authorizes the exact loaded scope,
@@ -71,6 +73,32 @@ receipt to the principal, context, action, audience, and expiry.
 A verified context is immutable, process-local branded, and rechecked against
 its issued/expiry window at every command and capability evaluation. A copied,
 mutated, not-yet-valid, or expired context fails before transaction access.
+
+## Default-unwired PostgreSQL adapter candidate
+
+Migration `0059_change_set_postgres_command_adapter.sql` adds the tenant-owned
+R1 configuration snapshot and two versioned, fixed-search-path RPC façades:
+`fas_cp_v1` for command transactions and `fas_evidence_v1` for signed evidence
+admission. The migration grants neither a shared application credential nor a
+new login role. Public execute and direct table access remain revoked.
+
+`postgresChangeSetCommandStore.ts` executes one command per transaction,
+establishes transaction-local tenant context, revalidates the active principal,
+membership, assignments and policy under locks, and exposes only the RPC
+operations required by the storage-agnostic orchestrator. It verifies persisted
+Ed25519 evidence again at consumption time and binds artifact count,
+artifact-manifest hash and outcome hash to the command decision.
+`postgresChangeSetEvidenceIssuer.ts` verifies the signed envelope against the
+trusted issuer/key/grant state before calling the issuer-only RPC. Neither
+adapter contains a private signing key.
+
+The disposable PostgreSQL 16 harness supplies separate `NOLOGIN` function
+owners and separate least-privilege command-executor and evidence-issuer login
+roles. Login roles receive RPC execute only and no Control Plane table DML. The
+harness proves create, signed validation evidence admission, DRAFT to VALIDATED,
+canonical replay, transaction rollback, pool reuse/context cleanup, role
+separation and direct-access denial. These roles and grants are test bootstrap
+evidence, not a production role rollout.
 
 ## Security boundary
 
@@ -144,8 +172,9 @@ current database state, its policy version must match the ChangeSet, and its
 `previous_hash` must equal the latest receipt hash. The first transition receipt
 has no previous hash.
 
-The command orchestrator requires its future PostgreSQL adapter to perform each
-flow in one database transaction. Both flows first establish transaction-local
+The command orchestrator requires every adapter to perform each flow in one
+database transaction. The default-unwired PostgreSQL candidate follows this
+order. Both flows first establish transaction-local
 tenant context and resolve current authorization. Create then claims the
 idempotency key, locks and reads the authoritative configuration identity,
 re-resolves authorization and time after the lock, records the correlated
@@ -187,7 +216,7 @@ materialize a flag; that requires a separately reviewed adapter and rollout
 gate.
 
 `VALIDATED`, `SIMULATED`, and `IN_REVIEW` do not trust command-body booleans or
-counts. The future store must load immutable server-issued evidence receipts
+counts. The store must load immutable server-issued evidence receipts
 under the same transaction. Each typed receipt binds its UUIDv7 ID, kind,
 issuer and issuer principal, signing key, audience, environment/cell, single-use
 request and challenge, exact issuer-tenant grant UUID, tool/version, tenant,
@@ -220,9 +249,10 @@ persists enough canonical claims to reconstruct and reverify the token, locks
 issuer/key/grant rows during issue and consumption, and fails closed on revoke
 races. PostgreSQL recomputes the stored canonical-claim hash and signed
 challenge nonce SHA-256; it does not perform Ed25519 verification or RFC 8785
-canonicalization itself. The future narrow adapter must verify the exact
+canonicalization itself. The narrow evidence adapter verifies the exact
 canonical envelope before its issuer-only insert procedure can persist a
-receipt.
+receipt; a production KMS/HSM issuer and production role bootstrap remain
+absent.
 
 The same migration adds `change_set_command_audit_events`, a tenant-scoped,
 append-only attempt chain containing fixed enums and keyed fingerprints rather
@@ -261,21 +291,22 @@ receipts. Failed, rejected, rolled-back, and revoked states are closed.
 This foundation does not yet deliver:
 
 - a Super Admin ChangeSet inbox or editor;
-- a PostgreSQL adapter or API route for the default-off command orchestrator;
+- an API route for the default-off command orchestrator;
 - a publisher/worker or actual configuration materialization;
 - verified step-up issuance;
-- authoritative materialized-configuration repository;
+- a production configuration materializer and reconciliation loop;
 - a production evidence issuer or outcome-hash signing service;
 - a KMS/HSM-backed production signer, key rotation ceremony, or issuer runtime
   credential;
-- the narrow command-executor/evidence-issuer database procedures and roles;
+- production command-executor/evidence-issuer role bootstrap and credentials;
 - durable audit transaction wiring around the command orchestrator;
 - runtime adoption/backfill of the tenant/organization/legacy-branch map;
 - persistent environment grants for separated migrator and runtime application
   database roles;
 - a notification preview sandbox;
-- a full and required database-backed runtime-adapter integration gate (the
-  narrower disposable PostgreSQL foundation check is green but not required);
+- a required database-backed runtime-adapter merge gate (the disposable
+  foundation and adapter checks are green but repository rules do not yet make
+  them required);
 - a production or local database migration;
 - R2/R3/R4 changes, multi-tenant changes, code, schema, infrastructure, or
   secret rotation;
@@ -286,13 +317,16 @@ writer quarantines remain authoritative.
 
 ## Next safe slice
 
-The 58-migration PostgreSQL 16 baseline workflow described in
-`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` is green. Migration `0058` and the
-pure signer/verifier are a new candidate slice and are not green PostgreSQL
-evidence until the updated disposable 59-migration harness passes. After that,
-the next slice is a narrow, default-unwired PostgreSQL command-store adapter and
-separate evidence-issuer procedure. The shared runtime role must not receive
-generic Control Plane DML. Cancellation/pool reuse, revoke/policy/key-rotation
-races, failure injection, replay, and durable denial audit must pass before any
-API route or Super Admin UI is connected. Publisher and configuration
+The 60-migration PostgreSQL 16 foundation and default-unwired adapter workflows
+described in `CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on implementation
+head `ddf07dbd1da3729b966f06323a70cb0a2f427f59` (runs `32535620767` and
+`32535620838`). G0 Linux and Windows also pass on run `32535620757`.
+
+The next safe slice is the durable outer-attempt audit transaction plus the
+remaining adapter race/failure matrix: cancellation, ambiguous commit replay,
+membership/policy/key revocation in both lock orders, injected failure at every
+write boundary and keyed audit-chain verification. The shared runtime role must
+not receive generic Control Plane DML. No API route or Super Admin UI may be
+connected before those controls, required checks, production role/bootstrap
+review and independent approval exist. Publisher and configuration
 materialization adapters remain separate and default-off.

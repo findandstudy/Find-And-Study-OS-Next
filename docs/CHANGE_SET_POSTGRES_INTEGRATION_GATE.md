@@ -1,20 +1,20 @@
 # ChangeSet PostgreSQL Integration Gate
 
-Status: **58-MIGRATION BASELINE CI GREEN; 0058 CANDIDATE PENDING / NO-GO for
-runtime wiring**.
+Status: **60-MIGRATION FOUNDATION AND DEFAULT-UNWIRED ADAPTER CI GREEN;
+NO-GO for runtime wiring**.
 
 This gate is not a delivery estimate and is not proof that migrations `0055`
-through `0058` have run in a long-lived environment. The approved local PostgreSQL endpoint
-`127.0.0.1:5433/fasos_apply_local` was unavailable. GitHub run `32515325893`
-applied all 58 reviewed migrations twice to an isolated disposable PostgreSQL
-16 database and passed the candidate direct-SQL matrix through `0057`. The new
-`0058` evidence-identity/audit migration has static and pure-test evidence only
-until an updated 59-migration disposable run passes. No long-lived, production,
-staging, or production-derived database was mutated.
+through `0059` have run in a long-lived environment. The approved local
+PostgreSQL endpoint `127.0.0.1:5433/fasos_apply_local` was unavailable. GitHub
+run `32535620767` applied all 60 reviewed migrations twice to an isolated
+disposable PostgreSQL 16 database and passed the direct-SQL foundation matrix.
+Run `32535620838` passed the real default-unwired command-store and
+evidence-issuer adapter candidate on the same implementation head. No
+long-lived, production, staging, or production-derived database was mutated.
 
 ## Required database authority split
 
-The harness must prove two distinct login roles and secrets:
+The foundation harness proves two distinct database authorities:
 
 - `fas_migrator` owns the application schema and tables and is the only role
   allowed to apply reviewed migrations;
@@ -22,21 +22,26 @@ The harness must prove two distinct login roles and secrets:
   `NOBYPASSRLS`, owns no tenant table, has no DDL privilege, and cannot
   `SET ROLE` to the migrator.
 
-The API, workers, schedulers, webhooks, exports, AI tools, and future ChangeSet
-adapter must use only the runtime application credential. A passing test under
+The API, workers, schedulers, webhooks, exports, and AI tools must use only the
+runtime application credential. A passing test under
 the table owner is not evidence that forced RLS protects the runtime path.
 The candidate grant contract gives the runtime role no direct control-plane
 table access; only tenant-scoped membership reads needed by the RLS probe are
-allowed. A future command adapter requires a separately reviewed, narrow writer
-role or procedure contract; granting generic ChangeSet DML to the shared
-application role is forbidden.
+allowed. A command adapter requires a separately reviewed, narrow writer role
+or procedure contract; granting generic ChangeSet DML to the shared
+application role is forbidden. The adapter harness additionally creates
+separate command-executor and evidence-issuer login roles plus separate
+`NOLOGIN` function owners. The login roles receive execute on their exact RPC
+façade only; they do not receive Control Plane table DML and cannot assume an
+owner or migrator role. This is disposable test bootstrap, not a production
+credential rollout.
 
 ## Disposable harness contract
 
 The test environment must use a disposable PostgreSQL instance matching the
 production major version and pinned by immutable image digest. It must create a
 random `fas_it_*` database, set statement, lock, and idle-transaction timeouts,
-and apply the real migration runner from `0000` through `0058` using only the
+and apply the real migration runner from `0000` through `0059` using only the
 migrator role.
 
 The harness is opt-in and must fail closed unless all of these are true:
@@ -100,14 +105,14 @@ The gate passes only when CI records all of the following:
     identity, one terminal event, adapter-computed keyed event hashes, and
     denial of raw command/request/error/secret payload fields.
 
-## Candidate CI harness
+## Foundation and adapter CI harnesses
 
 `.github/workflows/postgres-control-plane-gate.yml` and
 `artifacts/api-server/scripts/test-postgres-control-plane-gate.ts` define the
-first disposable PostgreSQL 16 candidate gate. It uses an immutable official
+foundation PostgreSQL 16 gate. It uses an immutable official
 image digest, a per-run `fas_it_*` database, separate `fas_migrator` and
-`fas_app` logins. The updated candidate targets all 59 migrations twice; this is
-not a PASS claim until GitHub reports the candidate head green. It directly
+`fas_app` logins. The current candidate targets all 60 migrations twice. It
+directly
 exercises:
 
 - authority attributes, forced RLS under owner and runtime roles, no-context and
@@ -124,19 +129,29 @@ exercises:
   trusted environment/cell binding, exact grant UUID, issuer/key/grant revoke
   serialization, and terminal audit-chain invariants.
 
-The 58-migration baseline workflow passed on GitHub run `32515325893`; the
-updated 59-migration candidate still requires a green head run. The check is
-not yet required and
-does not provide a runtime writer contract or cover cancellation/pool reuse,
-HTTP-to-DB context mismatch, revoke/policy rotation races through a real
-adapter, all idempotency/result replay races, failure injection between every
-write, durable rollback-safe denial audit, or decision/step-up paths. Those
-gaps keep the full matrix and runtime wiring at NO-GO.
+`.github/workflows/postgres-control-plane-adapter-gate.yml` and
+`test-postgres-change-set-adapter.ts` add the separate real-adapter candidate.
+It uses a pool of one, the exact signed-envelope verifier, separate RPC-only
+roles and fixed-search-path function owners. It proves authoritative snapshot
+create, signed evidence admission, DRAFT to VALIDATED, evidence consumption,
+canonical replay, rollback, same-client tenant-context cleanup and direct-role
+denials. The command validator independently binds artifact count and manifest
+hash into the signed outcome hash.
+
+Both checks passed on implementation head
+`ddf07dbd1da3729b966f06323a70cb0a2f427f59` in runs `32535620767` and
+`32535620838`; G0 Linux/Windows passed in `32535620757`. The checks are not yet
+required by a repository ruleset. The adapter candidate still does not cover
+HTTP-to-DB context wiring, every cancellation/ambiguous-commit path, both lock
+orders for membership/policy/key revocation, injected failure between every
+write, durable rollback-safe denial audit, or decision/step-up paths. Those gaps
+keep the full matrix and runtime wiring at NO-GO.
 
 ## Runtime-wiring gate
 
-An API route, Super Admin editor, PostgreSQL command adapter, approval action,
-publisher, worker, or configuration materializer remains forbidden until:
+Activation of an API route, Super Admin editor, PostgreSQL command adapter,
+approval action, publisher, worker, or configuration materializer remains
+forbidden until:
 
 - this full matrix passes in required CI;
 - the tenant/principal/organization/branch composite model is applied by a
@@ -147,5 +162,5 @@ publisher, worker, or configuration materializer remains forbidden until:
 - an independent reviewer approves the migration, grants, adapter, and failure
   evidence.
 
-Until then, the current code is a default-unwired policy and command foundation,
-not a production control plane.
+Until then, the current code is a default-unwired policy, command foundation and
+adapter candidate, not a production control plane.
