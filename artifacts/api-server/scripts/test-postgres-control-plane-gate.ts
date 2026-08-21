@@ -517,7 +517,8 @@ async function grantRuntime(admin: pg.Client) {
 
 async function verifyRoles(admin: pg.Client) {
   const result = await admin.query(
-    `SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, rolinherit, rolbypassrls
+    `SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, rolinherit,
+            rolreplication, rolbypassrls, rolcanlogin
      FROM pg_roles WHERE rolname IN ($1, $2) ORDER BY rolname`,
     [appRole, migratorRole],
   );
@@ -527,15 +528,16 @@ async function verifyRoles(admin: pg.Client) {
     assert.equal(role.rolcreatedb, false);
     assert.equal(role.rolcreaterole, false);
     assert.equal(role.rolinherit, false);
+    assert.equal(role.rolreplication, false);
     assert.equal(role.rolbypassrls, false);
+    assert.equal(role.rolcanlogin, true);
   }
   const membership = await admin.query(
     `SELECT count(*)::int AS count
      FROM pg_auth_members member
-     JOIN pg_roles granted ON granted.oid = member.roleid
      JOIN pg_roles recipient ON recipient.oid = member.member
-     WHERE granted.rolname = $1 AND recipient.rolname = $2`,
-    [migratorRole, appRole],
+     WHERE recipient.rolname = ANY($1::text[])`,
+    [[migratorRole, appRole]],
   );
   assert.equal(membership.rows[0].count, 0);
 
