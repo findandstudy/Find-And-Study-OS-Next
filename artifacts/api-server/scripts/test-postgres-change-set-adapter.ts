@@ -180,7 +180,8 @@ async function bootstrapAuthority() {
         public.policy_versions,
         public.change_set_command_receipts
       TO ${ROLE.evidenceOwner};
-      GRANT INSERT ON TABLE public.change_set_evidence_receipts TO ${ROLE.evidenceOwner};
+      GRANT SELECT, INSERT ON TABLE public.change_set_evidence_receipts
+      TO ${ROLE.evidenceOwner};
     `);
 
     const functions = await admin.query<{
