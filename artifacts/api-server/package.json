@@ -41,6 +41,7 @@
     "test:session-lifetime": "tsx --test ./scripts/test-session-lifetime.ts",
     "test:active-tenant-context": "tsx --test ./scripts/test-active-tenant-context.ts",
     "test:active-context-keyring": "tsx --test ./scripts/test-active-context-keyring.ts",
+    "test:authoritative-active-context-issuance": "tsx --test ./scripts/test-authoritative-active-context-issuance.ts",
     "test:change-set-request-context": "tsx --test ./scripts/test-change-set-request-context.ts",
     "test:change-set-policy": "tsx --test ./scripts/test-change-set-policy.ts",
     "test:change-set-command": "tsx --test ./scripts/test-change-set-command.ts",
