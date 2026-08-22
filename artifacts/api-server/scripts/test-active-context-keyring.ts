@@ -199,9 +199,10 @@ test("VERIFY_ONLY supports bounded rotation while revoked and compromised keys d
 test("tamper, unknown key, algorithm downgrade, extra claims, and legacy downgrade fail closed", async () => {
   const token = await issue();
   const [header, payload, signature] = token.split(".");
+  const tamperedSignature = `${signature[0] === "A" ? "B" : "A"}${signature.slice(1)}`;
   assert.deepEqual(
     verifyVersionedActiveTenantContext({
-      token: `${header}.${payload}.${signature.slice(0, -1)}A`,
+      token: `${header}.${payload}.${tamperedSignature}`,
       keyRing: [key()],
       expected: expected(),
       now: NOW,
