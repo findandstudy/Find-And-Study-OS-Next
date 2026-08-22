@@ -352,6 +352,10 @@ resurrection, identity mutation, receipt mutation, and deletion denial; raw
 session and idempotency-key absence; SQLSTATE `57014` rollback; and clean pool
 tenant GUC. The receipt tenant policy is SELECT-only for observers; lifecycle
 receipt insertion remains confined to the lifecycle owner path.
+The lifecycle owner receives a column-scoped `UPDATE(id)` privilege on the
+immutable receipt table solely because PostgreSQL requires an UPDATE privilege
+for `SELECT ... FOR SHARE`; the immutable trigger rejects every actual update
+or delete, and the EXECUTE-only login receives no receipt-table privilege.
 This candidate has no positive CI claim until an exact PostgreSQL 16 final-head
 run passes.
 

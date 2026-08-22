@@ -249,6 +249,11 @@ async function bootstrapAuthority() {
       GRANT SELECT, INSERT ON TABLE
         public.active_session_context_selection_command_receipts
       TO ${ROLE.lifecycleOwner};
+      -- PostgreSQL requires UPDATE privilege for SELECT ... FOR SHARE;
+      -- keep it column-scoped and rely on the immutable trigger to reject writes.
+      GRANT UPDATE (id) ON TABLE
+        public.active_session_context_selection_command_receipts
+      TO ${ROLE.lifecycleOwner};
 
       ALTER FUNCTION fas_session_v1.resolve_session_for_active_context(text, text, bigint)
         OWNER TO ${ROLE.sessionOwner};
@@ -312,6 +317,8 @@ async function bootstrapAuthority() {
     const lifecycleSecurity = await admin.query<{
       receiptSelect: boolean;
       receiptInsert: boolean;
+      receiptUpdateId: boolean;
+      receiptUpdateTenant: boolean;
       receiptSchemaUsage: boolean;
       functionOwner: string;
       securityDefiner: boolean;
@@ -319,6 +326,8 @@ async function bootstrapAuthority() {
       `SELECT
          has_table_privilege($1, 'public.active_session_context_selection_command_receipts', 'SELECT') AS "receiptSelect",
          has_table_privilege($1, 'public.active_session_context_selection_command_receipts', 'INSERT') AS "receiptInsert",
+         has_column_privilege($1, 'public.active_session_context_selection_command_receipts', 'id', 'UPDATE') AS "receiptUpdateId",
+         has_column_privilege($1, 'public.active_session_context_selection_command_receipts', 'tenant_id', 'UPDATE') AS "receiptUpdateTenant",
          has_schema_privilege($1, 'public', 'USAGE') AS "receiptSchemaUsage",
          pg_get_userbyid(procedure.proowner) AS "functionOwner",
          procedure.prosecdef AS "securityDefiner"
@@ -331,6 +340,8 @@ async function bootstrapAuthority() {
     assert.deepEqual(lifecycleSecurity.rows, [{
       receiptSelect: true,
       receiptInsert: true,
+      receiptUpdateId: true,
+      receiptUpdateTenant: false,
       receiptSchemaUsage: true,
       functionOwner: ROLE.lifecycleOwner,
       securityDefiner: true,
