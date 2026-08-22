@@ -1,7 +1,10 @@
 import {
   isVerifiedActiveTenantContext,
   verifyActiveTenantContext,
+  verifyVersionedActiveTenantContext,
   type ActiveContextVerificationFailure,
+  type ActiveContextVerificationKey,
+  type ActiveContextVersionedVerificationFailure,
   type VerifiedActiveTenantContext,
 } from "./activeTenantContext";
 import {
@@ -30,7 +33,12 @@ export type ServerResolvedChangeSetRequestIdentity = {
 export type ChangeSetRequestBindingFailure =
   | { reason: "request_identity_invalid" }
   | { reason: "clock_invalid" }
-  | { reason: "active_context_rejected"; detail: ActiveContextVerificationFailure }
+  | {
+      reason: "active_context_rejected";
+      detail:
+        | ActiveContextVerificationFailure
+        | ActiveContextVersionedVerificationFailure;
+    }
   | { reason: "authenticated_principal_mismatch" }
   | { reason: "branded_tenant_mismatch" }
   | { reason: "branded_organization_mismatch" }
@@ -39,6 +47,13 @@ export type ChangeSetRequestBindingFailure =
 export type ChangeSetRequestContextBinderOptions = {
   activeContextToken: string | undefined;
   activeContextSigningSecret: string | undefined;
+  versionedActiveContext?: {
+    audience: string;
+    environmentId: string;
+    cellId: string;
+    issuerId: string;
+    keyRing: readonly ActiveContextVerificationKey[];
+  };
   requestIdentity: unknown;
   createStore: (context: VerifiedActiveTenantContext) => ChangeSetCommandStore;
   createAuditWriter: (
@@ -97,6 +112,23 @@ function validStore(value: unknown): value is ChangeSetCommandStore {
 
 function validAuditWriter(value: unknown): value is ChangeSetCommandAuditWriter {
   return isRecord(value) && typeof value.startAttempt === "function";
+}
+
+function validVersionedVerificationConfig(
+  value: unknown,
+): value is NonNullable<
+  ChangeSetRequestContextBinderOptions["versionedActiveContext"]
+> {
+  if (!isRecord(value)) return false;
+  const keys = ["audience", "cellId", "environmentId", "issuerId", "keyRing"];
+  return (
+    Object.keys(value).sort().join("\0") === keys.sort().join("\0") &&
+    typeof value.audience === "string" &&
+    typeof value.environmentId === "string" &&
+    typeof value.cellId === "string" &&
+    typeof value.issuerId === "string" &&
+    Array.isArray(value.keyRing)
+  );
 }
 
 function sameAuditIdentity(
@@ -201,7 +233,11 @@ export function bindChangeSetRequestContext(
     typeof options.createStore !== "function" ||
     typeof options.createAuditWriter !== "function" ||
     typeof options.nextUuidV7 !== "function" ||
-    (options.now !== undefined && typeof options.now !== "function")
+    (options.now !== undefined && typeof options.now !== "function") ||
+    (options.versionedActiveContext !== undefined &&
+      !validVersionedVerificationConfig(options.versionedActiveContext)) ||
+    (options.versionedActiveContext !== undefined &&
+      options.activeContextSigningSecret !== undefined)
   ) {
     throw new Error("change_set_request_binding_configuration_invalid");
   }
@@ -212,11 +248,24 @@ export function bindChangeSetRequestContext(
   if (!Number.isSafeInteger(current) || current < 0) {
     return { ok: false, error: { reason: "clock_invalid" } };
   }
-  const verification = verifyActiveTenantContext(
-    options.activeContextToken,
-    options.activeContextSigningSecret,
-    current,
-  );
+  const verification = options.versionedActiveContext
+    ? verifyVersionedActiveTenantContext({
+        token: options.activeContextToken,
+        keyRing: options.versionedActiveContext.keyRing,
+        expected: {
+          audience: options.versionedActiveContext.audience,
+          environmentId: options.versionedActiveContext.environmentId,
+          cellId: options.versionedActiveContext.cellId,
+          issuerId: options.versionedActiveContext.issuerId,
+          tenantId: identity.tenantId,
+        },
+        now: current,
+      })
+    : verifyActiveTenantContext(
+        options.activeContextToken,
+        options.activeContextSigningSecret,
+        current,
+      );
   if (!verification.ok) {
     return {
       ok: false,

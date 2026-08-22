@@ -220,6 +220,14 @@ test("malformed resolved scope and time fields fail closed without coercion", ()
 });
 
 test("unsigned, tampered, weak-secret, future, and expired contexts fail closed", () => {
+  assert.throws(
+    () =>
+      signActiveTenantContext(
+        { ...claims(), injectedTenant: ID.tenantB } as never,
+        SECRET,
+      ),
+    /claims are invalid/,
+  );
   const token = signActiveTenantContext(claims(), SECRET);
   const [payload, signature] = token.split(".");
   assert.equal(verifyActiveTenantContext(payload, SECRET, NOW).ok, false);

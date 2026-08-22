@@ -3,12 +3,18 @@ import crypto from "node:crypto";
 export const ACTIVE_CONTEXT_TTL_MS = 15 * 60 * 1000;
 export const ACTIVE_CONTEXT_CLOCK_SKEW_MS = 30 * 1000;
 export const ACTIVE_CONTEXT_MAX_ASSIGNMENTS = 32;
+export const ACTIVE_CONTEXT_V2_TYPE = "FAS_ACTIVE_CONTEXT";
+export const ACTIVE_CONTEXT_V2_ALGORITHM = "Ed25519";
 
 const VERIFIED_CONTEXT = Symbol("verified-active-tenant-context");
 const VERIFIED_CONTEXTS = new WeakSet<object>();
 const UUID_V7_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CAPABILITY_RE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){1,2}$/;
+const KEY_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/;
+const DEPLOYMENT_ID_RE = /^[a-z][a-z0-9-]{1,62}$/;
+const AUDIENCE_RE = /^[a-z][a-z0-9.-]{2,127}$/;
+const OPAQUE_SIGNER_REF_RE = /^(kms|hsm|test-memory):\/\/[A-Za-z0-9][A-Za-z0-9._:/-]{5,255}$/;
 
 export type ActiveTenantContextClaims = {
   tokenVersion: 1;
@@ -41,6 +47,98 @@ export type ActiveContextVerificationFailure =
 export type ActiveContextVerificationResult =
   | { ok: true; context: VerifiedActiveTenantContext }
   | { ok: false; reason: ActiveContextVerificationFailure };
+
+export type ActiveContextKeyState =
+  | "ACTIVE"
+  | "VERIFY_ONLY"
+  | "REVOKED"
+  | "COMPROMISED";
+
+export type ActiveContextVerificationKey = {
+  keyId: string;
+  algorithm: typeof ACTIVE_CONTEXT_V2_ALGORITHM;
+  state: ActiveContextKeyState;
+  issuerId: string;
+  environmentId: string;
+  cellId: string;
+  publicKeyPem: string;
+  publicKeyFingerprint: string;
+  signFrom: number;
+  signUntil: number;
+  verifyUntil: number;
+};
+
+export type ActiveContextVersionedTokenExpected = {
+  audience: string;
+  environmentId: string;
+  cellId: string;
+  issuerId: string;
+  tenantId: string;
+};
+
+export type ActiveContextVersionedSubject = Omit<
+  ActiveTenantContextClaims,
+  "tokenVersion" | "issuedAt" | "expiresAt"
+>;
+
+export type ActiveContextExternalSigner = {
+  sign(input: {
+    keyReference: string;
+    algorithm: typeof ACTIVE_CONTEXT_V2_ALGORITHM;
+    signingInput: Buffer;
+  }): Promise<Buffer>;
+};
+
+export type ActiveContextVersionedIssuanceOptions = {
+  subject: ActiveContextVersionedSubject;
+  audience: string;
+  environmentId: string;
+  cellId: string;
+  issuerId: string;
+  keyId: string;
+  keyReference: string;
+  keyRing: readonly ActiveContextVerificationKey[];
+  signer: ActiveContextExternalSigner;
+  ttlMs?: number;
+  now?: number;
+};
+
+export type ActiveContextVersionedVerificationFailure =
+  | "missing_token"
+  | "clock_invalid"
+  | "expected_context_invalid"
+  | "key_ring_invalid"
+  | "malformed_token"
+  | "unknown_key"
+  | "algorithm_mismatch"
+  | "key_inactive"
+  | "key_window_invalid"
+  | "invalid_signature"
+  | "invalid_claims"
+  | "audience_mismatch"
+  | "environment_mismatch"
+  | "cell_mismatch"
+  | "issuer_mismatch"
+  | "tenant_mismatch"
+  | "not_yet_valid"
+  | "expired";
+
+export type ActiveContextVersionedVerificationResult =
+  | {
+      ok: true;
+      context: VerifiedActiveTenantContext;
+      envelope: {
+        envelopeVersion: 2;
+        algorithm: typeof ACTIVE_CONTEXT_V2_ALGORITHM;
+        keyId: string;
+        audience: string;
+        environmentId: string;
+        cellId: string;
+        issuerId: string;
+        notBefore: number;
+      };
+    }
+  | { ok: false; reason: ActiveContextVersionedVerificationFailure };
 
 export type PrincipalType = "HUMAN" | "SERVICE" | "INTEGRATION" | "AI";
 export type AssignmentScopeType = "TENANT" | "ORGANIZATION" | "LEGACY_BRANCH";
@@ -166,6 +264,16 @@ function isUuidV7(value: unknown): value is string {
   return typeof value === "string" && UUID_V7_RE.test(value);
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]) {
+  return (
+    Object.keys(value).sort().join("\0") === [...keys].sort().join("\0")
+  );
+}
+
 function hasStrongSecret(secret: unknown): secret is string {
   return typeof secret === "string" && Buffer.byteLength(secret, "utf8") >= 32;
 }
@@ -200,7 +308,25 @@ function normalizeClaims(
 }
 
 function parseClaims(value: unknown): ActiveTenantContextClaims | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (!isPlainRecord(value)) return null;
+  if (
+    !hasExactKeys(value, [
+      "assignmentIds",
+      "contextId",
+      "expiresAt",
+      "issuedAt",
+      "legacyBranchId",
+      "membershipId",
+      "organizationId",
+      "policyVersion",
+      "policyVersionId",
+      "principalId",
+      "tenantId",
+      "tokenVersion",
+    ])
+  ) {
+    return null;
+  }
   const claims = value as Partial<ActiveTenantContextClaims>;
   if (
     claims.tokenVersion !== 1 ||
@@ -231,6 +357,20 @@ function parseClaims(value: unknown): ActiveTenantContextClaims | null {
   if (normalized.expiresAt - normalized.issuedAt > ACTIVE_CONTEXT_TTL_MS)
     return null;
   return normalized;
+}
+
+function brandVerifiedContext(
+  claims: ActiveTenantContextClaims,
+): VerifiedActiveTenantContext {
+  const context: VerifiedActiveTenantContext = {
+    ...claims,
+    assignmentIds: [...claims.assignmentIds],
+    [VERIFIED_CONTEXT]: true,
+  };
+  Object.freeze(context.assignmentIds);
+  Object.freeze(context);
+  VERIFIED_CONTEXTS.add(context);
+  return context;
 }
 
 export function signActiveTenantContext(
@@ -287,15 +427,471 @@ export function verifyActiveTenantContext(
       return { ok: false, reason: "not_yet_valid" };
     }
     if (now >= claims.expiresAt) return { ok: false, reason: "expired" };
-    const context: VerifiedActiveTenantContext = {
-      ...claims,
-      assignmentIds: [...claims.assignmentIds],
-      [VERIFIED_CONTEXT]: true,
+    return { ok: true, context: brandVerifiedContext(claims) };
+  } catch {
+    return { ok: false, reason: "malformed_token" };
+  }
+}
+
+type ActiveContextVersionedHeader = {
+  type: typeof ACTIVE_CONTEXT_V2_TYPE;
+  envelopeVersion: 2;
+  algorithm: typeof ACTIVE_CONTEXT_V2_ALGORITHM;
+  keyId: string;
+};
+
+type ActiveContextVersionedPayload = ActiveTenantContextClaims & {
+  audience: string;
+  environmentId: string;
+  cellId: string;
+  issuerId: string;
+  keyId: string;
+  notBefore: number;
+};
+
+const ACTIVE_CONTEXT_V2_DOMAIN = "fas-active-context-v2";
+const ACTIVE_CONTEXT_KEY_FIELDS = [
+  "algorithm",
+  "cellId",
+  "environmentId",
+  "issuerId",
+  "keyId",
+  "publicKeyFingerprint",
+  "publicKeyPem",
+  "signFrom",
+  "signUntil",
+  "state",
+  "verifyUntil",
+] as const;
+const ACTIVE_CONTEXT_EXPECTED_FIELDS = [
+  "audience",
+  "cellId",
+  "environmentId",
+  "issuerId",
+  "tenantId",
+] as const;
+const ACTIVE_CONTEXT_SUBJECT_FIELDS = [
+  "assignmentIds",
+  "contextId",
+  "legacyBranchId",
+  "membershipId",
+  "organizationId",
+  "policyVersion",
+  "policyVersionId",
+  "principalId",
+  "tenantId",
+] as const;
+const ACTIVE_CONTEXT_V2_PAYLOAD_FIELDS = [
+  ...ACTIVE_CONTEXT_SUBJECT_FIELDS,
+  "audience",
+  "cellId",
+  "environmentId",
+  "expiresAt",
+  "issuedAt",
+  "issuerId",
+  "keyId",
+  "notBefore",
+  "tokenVersion",
+] as const;
+
+export function fingerprintActiveContextPublicKey(publicKeyPem: string): string {
+  if (
+    typeof publicKeyPem !== "string" ||
+    /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(publicKeyPem)
+  ) {
+    throw new Error("active_context_public_key_material_invalid");
+  }
+  const key = crypto.createPublicKey(publicKeyPem);
+  if (key.asymmetricKeyType !== "ed25519") {
+    throw new Error("active_context_public_key_algorithm_invalid");
+  }
+  const der = key.export({ type: "spki", format: "der" });
+  return crypto.createHash("sha256").update(der).digest("hex");
+}
+
+function parseVersionedKeyRing(
+  value: unknown,
+): ActiveContextVerificationKey[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 32) return null;
+  const parsed: ActiveContextVerificationKey[] = [];
+  const keyIds = new Set<string>();
+  for (const candidate of value) {
+    if (!isPlainRecord(candidate) || !hasExactKeys(candidate, ACTIVE_CONTEXT_KEY_FIELDS)) {
+      return null;
+    }
+    if (
+      typeof candidate.keyId !== "string" ||
+      !KEY_ID_RE.test(candidate.keyId) ||
+      candidate.algorithm !== ACTIVE_CONTEXT_V2_ALGORITHM ||
+      !["ACTIVE", "VERIFY_ONLY", "REVOKED", "COMPROMISED"].includes(
+        String(candidate.state),
+      ) ||
+      !isUuidV7(candidate.issuerId) ||
+      typeof candidate.environmentId !== "string" ||
+      !DEPLOYMENT_ID_RE.test(candidate.environmentId) ||
+      typeof candidate.cellId !== "string" ||
+      !DEPLOYMENT_ID_RE.test(candidate.cellId) ||
+      typeof candidate.publicKeyPem !== "string" ||
+      Buffer.byteLength(candidate.publicKeyPem, "utf8") > 8192 ||
+      typeof candidate.publicKeyFingerprint !== "string" ||
+      !/^[0-9a-f]{64}$/.test(candidate.publicKeyFingerprint) ||
+      !Number.isSafeInteger(candidate.signFrom) ||
+      !Number.isSafeInteger(candidate.signUntil) ||
+      !Number.isSafeInteger(candidate.verifyUntil) ||
+      Number(candidate.signFrom) < 0 ||
+      Number(candidate.signUntil) <= Number(candidate.signFrom) ||
+      Number(candidate.verifyUntil) < Number(candidate.signUntil)
+    ) {
+      return null;
+    }
+    let fingerprint: string;
+    try {
+      fingerprint = fingerprintActiveContextPublicKey(candidate.publicKeyPem);
+    } catch {
+      return null;
+    }
+    if (fingerprint !== candidate.publicKeyFingerprint || keyIds.has(candidate.keyId)) {
+      return null;
+    }
+    keyIds.add(candidate.keyId);
+    parsed.push({
+      keyId: candidate.keyId,
+      algorithm: ACTIVE_CONTEXT_V2_ALGORITHM,
+      state: candidate.state as ActiveContextKeyState,
+      issuerId: candidate.issuerId.toLowerCase(),
+      environmentId: candidate.environmentId,
+      cellId: candidate.cellId,
+      publicKeyPem: candidate.publicKeyPem,
+      publicKeyFingerprint: candidate.publicKeyFingerprint,
+      signFrom: Number(candidate.signFrom),
+      signUntil: Number(candidate.signUntil),
+      verifyUntil: Number(candidate.verifyUntil),
+    });
+  }
+  return parsed;
+}
+
+function parseVersionedExpected(
+  value: unknown,
+): ActiveContextVersionedTokenExpected | null {
+  if (!isPlainRecord(value) || !hasExactKeys(value, ACTIVE_CONTEXT_EXPECTED_FIELDS)) {
+    return null;
+  }
+  if (
+    typeof value.audience !== "string" ||
+    !AUDIENCE_RE.test(value.audience) ||
+    typeof value.environmentId !== "string" ||
+    !DEPLOYMENT_ID_RE.test(value.environmentId) ||
+    typeof value.cellId !== "string" ||
+    !DEPLOYMENT_ID_RE.test(value.cellId) ||
+    !isUuidV7(value.issuerId) ||
+    !isUuidV7(value.tenantId)
+  ) {
+    return null;
+  }
+  return {
+    audience: value.audience,
+    environmentId: value.environmentId,
+    cellId: value.cellId,
+    issuerId: value.issuerId.toLowerCase(),
+    tenantId: value.tenantId.toLowerCase(),
+  };
+}
+
+function parseVersionedHeader(value: unknown): ActiveContextVersionedHeader | null {
+  if (
+    !isPlainRecord(value) ||
+    !hasExactKeys(value, ["algorithm", "envelopeVersion", "keyId", "type"]) ||
+    value.type !== ACTIVE_CONTEXT_V2_TYPE ||
+    value.envelopeVersion !== 2 ||
+    typeof value.keyId !== "string" ||
+    !KEY_ID_RE.test(value.keyId)
+  ) {
+    return null;
+  }
+  if (value.algorithm !== ACTIVE_CONTEXT_V2_ALGORITHM) return null;
+  return {
+    type: ACTIVE_CONTEXT_V2_TYPE,
+    envelopeVersion: 2,
+    algorithm: ACTIVE_CONTEXT_V2_ALGORITHM,
+    keyId: value.keyId,
+  };
+}
+
+function parseVersionedPayload(value: unknown): ActiveContextVersionedPayload | null {
+  if (
+    !isPlainRecord(value) ||
+    !hasExactKeys(value, ACTIVE_CONTEXT_V2_PAYLOAD_FIELDS) ||
+    typeof value.audience !== "string" ||
+    !AUDIENCE_RE.test(value.audience) ||
+    typeof value.environmentId !== "string" ||
+    !DEPLOYMENT_ID_RE.test(value.environmentId) ||
+    typeof value.cellId !== "string" ||
+    !DEPLOYMENT_ID_RE.test(value.cellId) ||
+    !isUuidV7(value.issuerId) ||
+    typeof value.keyId !== "string" ||
+    !KEY_ID_RE.test(value.keyId) ||
+    !Number.isSafeInteger(value.notBefore)
+  ) {
+    return null;
+  }
+  const claims = parseClaims({
+    tokenVersion: value.tokenVersion,
+    contextId: value.contextId,
+    tenantId: value.tenantId,
+    organizationId: value.organizationId,
+    legacyBranchId: value.legacyBranchId,
+    principalId: value.principalId,
+    membershipId: value.membershipId,
+    assignmentIds: value.assignmentIds,
+    policyVersionId: value.policyVersionId,
+    policyVersion: value.policyVersion,
+    issuedAt: value.issuedAt,
+    expiresAt: value.expiresAt,
+  });
+  if (
+    !claims ||
+    Number(value.notBefore) < claims.issuedAt ||
+    Number(value.notBefore) >= claims.expiresAt
+  ) {
+    return null;
+  }
+  return {
+    ...claims,
+    audience: value.audience,
+    environmentId: value.environmentId,
+    cellId: value.cellId,
+    issuerId: value.issuerId.toLowerCase(),
+    keyId: value.keyId,
+    notBefore: Number(value.notBefore),
+  };
+}
+
+function decodeVersionedJson(segment: string): unknown {
+  const bytes = Buffer.from(segment, "base64url");
+  if (bytes.toString("base64url") !== segment) {
+    throw new Error("non_canonical_base64url");
+  }
+  return JSON.parse(bytes.toString("utf8"));
+}
+
+function versionedSigningInput(header: string, payload: string) {
+  return Buffer.from(`${ACTIVE_CONTEXT_V2_DOMAIN}\0${header}.${payload}`, "utf8");
+}
+
+export async function issueVersionedActiveTenantContext(
+  options: ActiveContextVersionedIssuanceOptions,
+): Promise<string> {
+  const now = options?.now ?? Date.now();
+  const ttlMs = options?.ttlMs ?? ACTIVE_CONTEXT_TTL_MS;
+  if (
+    !options ||
+    !isPlainRecord(options.subject) ||
+    !hasExactKeys(options.subject, ACTIVE_CONTEXT_SUBJECT_FIELDS) ||
+    !Number.isSafeInteger(now) ||
+    now < 0 ||
+    !Number.isSafeInteger(ttlMs) ||
+    ttlMs < 1 ||
+    ttlMs > ACTIVE_CONTEXT_TTL_MS ||
+    typeof options.keyReference !== "string" ||
+    !OPAQUE_SIGNER_REF_RE.test(options.keyReference) ||
+    (options.keyReference.startsWith("test-memory://") &&
+      (options.environmentId !== "test" || process.env.NODE_ENV === "production")) ||
+    !isPlainRecord(options.signer) ||
+    typeof options.signer.sign !== "function"
+  ) {
+    throw new Error("active_context_issuance_configuration_invalid");
+  }
+  const expected = parseVersionedExpected({
+    audience: options.audience,
+    environmentId: options.environmentId,
+    cellId: options.cellId,
+    issuerId: options.issuerId,
+    tenantId: options.subject.tenantId,
+  });
+  const keyRing = parseVersionedKeyRing(options.keyRing);
+  if (!expected || !keyRing) {
+    throw new Error("active_context_issuance_configuration_invalid");
+  }
+  const key = keyRing.find((candidate) => candidate.keyId === options.keyId);
+  if (!key) throw new Error("active_context_signing_key_unknown");
+  if (
+    key.state !== "ACTIVE" ||
+    key.algorithm !== ACTIVE_CONTEXT_V2_ALGORITHM ||
+    key.issuerId !== expected.issuerId ||
+    key.environmentId !== expected.environmentId ||
+    key.cellId !== expected.cellId ||
+    now < key.signFrom ||
+    now >= key.signUntil ||
+    now + ttlMs > key.verifyUntil
+  ) {
+    throw new Error("active_context_signing_key_unavailable");
+  }
+  const claims = parseClaims({
+    ...options.subject,
+    tokenVersion: 1,
+    issuedAt: now,
+    expiresAt: now + ttlMs,
+  });
+  if (!claims || claims.tenantId !== expected.tenantId) {
+    throw new Error("active_context_issuance_subject_invalid");
+  }
+  const header: ActiveContextVersionedHeader = {
+    type: ACTIVE_CONTEXT_V2_TYPE,
+    envelopeVersion: 2,
+    algorithm: ACTIVE_CONTEXT_V2_ALGORITHM,
+    keyId: key.keyId,
+  };
+  const payload: ActiveContextVersionedPayload = {
+    ...claims,
+    audience: expected.audience,
+    environmentId: expected.environmentId,
+    cellId: expected.cellId,
+    issuerId: expected.issuerId,
+    keyId: key.keyId,
+    notBefore: now,
+  };
+  const encodedHeader = Buffer.from(JSON.stringify(header), "utf8").toString(
+    "base64url",
+  );
+  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString(
+    "base64url",
+  );
+  const signingInput = versionedSigningInput(encodedHeader, encodedPayload);
+  const signature = await options.signer.sign({
+    keyReference: options.keyReference,
+    algorithm: ACTIVE_CONTEXT_V2_ALGORITHM,
+    signingInput: Buffer.from(signingInput),
+  });
+  if (
+    !Buffer.isBuffer(signature) ||
+    signature.length !== 64 ||
+    !crypto.verify(null, signingInput, key.publicKeyPem, signature)
+  ) {
+    throw new Error("active_context_signer_result_invalid");
+  }
+  return `${encodedHeader}.${encodedPayload}.${signature.toString("base64url")}`;
+}
+
+export function verifyVersionedActiveTenantContext(input: {
+  token: string | undefined;
+  keyRing: readonly ActiveContextVerificationKey[];
+  expected: ActiveContextVersionedTokenExpected;
+  now?: number;
+}): ActiveContextVersionedVerificationResult {
+  if (!input?.token) return { ok: false, reason: "missing_token" };
+  const now = input.now ?? Date.now();
+  if (!Number.isSafeInteger(now) || now < 0) {
+    return { ok: false, reason: "clock_invalid" };
+  }
+  const expected = parseVersionedExpected(input.expected);
+  if (!expected) return { ok: false, reason: "expected_context_invalid" };
+  const keyRing = parseVersionedKeyRing(input.keyRing);
+  if (!keyRing) return { ok: false, reason: "key_ring_invalid" };
+  if (
+    input.token.length > 16384 ||
+    !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(input.token)
+  ) {
+    return { ok: false, reason: "malformed_token" };
+  }
+  try {
+    const [encodedHeader, encodedPayload, encodedSignature] = input.token.split(".");
+    const rawHeader = decodeVersionedJson(encodedHeader);
+    if (
+      isPlainRecord(rawHeader) &&
+      rawHeader.algorithm !== ACTIVE_CONTEXT_V2_ALGORITHM
+    ) {
+      return { ok: false, reason: "algorithm_mismatch" };
+    }
+    const header = parseVersionedHeader(rawHeader);
+    if (!header) return { ok: false, reason: "malformed_token" };
+    const key = keyRing.find((candidate) => candidate.keyId === header.keyId);
+    if (!key) return { ok: false, reason: "unknown_key" };
+    if (key.algorithm !== header.algorithm) {
+      return { ok: false, reason: "algorithm_mismatch" };
+    }
+    if (key.state === "REVOKED" || key.state === "COMPROMISED") {
+      return { ok: false, reason: "key_inactive" };
+    }
+    if (now >= key.verifyUntil) {
+      return { ok: false, reason: "key_window_invalid" };
+    }
+    const signature = Buffer.from(encodedSignature, "base64url");
+    if (
+      signature.toString("base64url") !== encodedSignature ||
+      signature.length !== 64 ||
+      !crypto.verify(
+        null,
+        versionedSigningInput(encodedHeader, encodedPayload),
+        key.publicKeyPem,
+        signature,
+      )
+    ) {
+      return { ok: false, reason: "invalid_signature" };
+    }
+    const payload = parseVersionedPayload(decodeVersionedJson(encodedPayload));
+    if (!payload) return { ok: false, reason: "invalid_claims" };
+    if (payload.keyId !== key.keyId) {
+      return { ok: false, reason: "unknown_key" };
+    }
+    if (payload.audience !== expected.audience) {
+      return { ok: false, reason: "audience_mismatch" };
+    }
+    if (
+      payload.environmentId !== expected.environmentId ||
+      key.environmentId !== expected.environmentId
+    ) {
+      return { ok: false, reason: "environment_mismatch" };
+    }
+    if (payload.cellId !== expected.cellId || key.cellId !== expected.cellId) {
+      return { ok: false, reason: "cell_mismatch" };
+    }
+    if (payload.issuerId !== expected.issuerId || key.issuerId !== expected.issuerId) {
+      return { ok: false, reason: "issuer_mismatch" };
+    }
+    if (payload.tenantId !== expected.tenantId) {
+      return { ok: false, reason: "tenant_mismatch" };
+    }
+    if (
+      payload.issuedAt < key.signFrom ||
+      payload.issuedAt >= key.signUntil ||
+      payload.expiresAt > key.verifyUntil
+    ) {
+      return { ok: false, reason: "key_window_invalid" };
+    }
+    if (payload.notBefore > now + ACTIVE_CONTEXT_CLOCK_SKEW_MS) {
+      return { ok: false, reason: "not_yet_valid" };
+    }
+    if (now >= payload.expiresAt) return { ok: false, reason: "expired" };
+    const contextClaims = parseClaims({
+      tokenVersion: payload.tokenVersion,
+      contextId: payload.contextId,
+      tenantId: payload.tenantId,
+      organizationId: payload.organizationId,
+      legacyBranchId: payload.legacyBranchId,
+      principalId: payload.principalId,
+      membershipId: payload.membershipId,
+      assignmentIds: payload.assignmentIds,
+      policyVersionId: payload.policyVersionId,
+      policyVersion: payload.policyVersion,
+      issuedAt: payload.issuedAt,
+      expiresAt: payload.expiresAt,
+    });
+    if (!contextClaims) return { ok: false, reason: "invalid_claims" };
+    return {
+      ok: true,
+      context: brandVerifiedContext(contextClaims),
+      envelope: {
+        envelopeVersion: 2,
+        algorithm: ACTIVE_CONTEXT_V2_ALGORITHM,
+        keyId: key.keyId,
+        audience: payload.audience,
+        environmentId: payload.environmentId,
+        cellId: payload.cellId,
+        issuerId: payload.issuerId,
+        notBefore: payload.notBefore,
+      },
     };
-    Object.freeze(context.assignmentIds);
-    Object.freeze(context);
-    VERIFIED_CONTEXTS.add(context);
-    return { ok: true, context };
   } catch {
     return { ok: false, reason: "malformed_token" };
   }
