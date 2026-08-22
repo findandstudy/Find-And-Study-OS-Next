@@ -393,7 +393,7 @@ ledger. This is a contract/test slice only: the PostgreSQL attempt table,
 append-only receipt RPC, scheduled worker, and receipt-only reconciliation are
 still required before any runtime wiring.
 
-The next additive migration, `0068_active_context_selection_consumption_attempts`,
+The local additive migration, `0068_active_context_selection_consumption_attempts`,
 adds tenant-scoped attempt identity plus an immutable receipt stream. Its
 fixed-search-path RPCs permit only `STARTED -> PENDING -> TERMINAL` (or direct
 terminal) transitions, bind the attempt to the exact selection generation and
