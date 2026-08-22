@@ -1,6 +1,6 @@
 # ChangeSet PostgreSQL Integration Gate
 
-Status: **66-MIGRATION FOUNDATION CANDIDATE, DEFAULT-UNWIRED CONTEXT-BOUND
+Status: **67-MIGRATION FOUNDATION CANDIDATE, DEFAULT-UNWIRED CONTEXT-BOUND
 COMMAND/EVIDENCE, QUERY-CANCELLATION ROLLBACK, MEMBERSHIP/POLICY REVOCATION
 SERIALIZATION, EVIDENCE-KEY COMPROMISE SERIALIZATION, AMBIGUOUS-COMMIT
 AND SCHEDULED RECEIPT-ONLY RECONCILIATION, DURABLE-AUDIT ADAPTER CI GREEN,
@@ -8,7 +8,7 @@ AND DEFAULT-UNWIRED SESSION/RATE-LIMIT ADAPTER CI GREEN; SELECTION-LIFECYCLE
 CANDIDATE AWAITS POSTGRESQL CI; NO-GO for runtime wiring**.
 
 This gate is not a delivery estimate and is not proof that migrations `0055`
-through `0065` have run in a long-lived environment. The approved local
+through `0066` have run in a long-lived environment. The approved local
 PostgreSQL endpoint `127.0.0.1:5433/fasos_apply_local` was unavailable. GitHub
 run `32547890515` applied the prior 63 reviewed migrations twice to an isolated
 disposable PostgreSQL 16 database and passed the direct-SQL foundation matrix.
@@ -120,7 +120,7 @@ The gate passes only when CI records all of the following:
 `artifacts/api-server/scripts/test-postgres-control-plane-gate.ts` define the
 foundation PostgreSQL 16 gate. It uses an immutable official
 image digest, a per-run `fas_it_*` database, separate `fas_migrator` and
-`fas_app` logins. The current candidate targets all 66 migrations twice. It
+`fas_app` logins. The current candidate targets all 67 migrations twice. It
 directly
 exercises:
 
@@ -221,7 +221,7 @@ run `32551335113`, and G0 Linux/Windows run `32551335019`. The checks are not
 yet required by a repository ruleset. Two earlier scheduled-reconciliation
 candidate runs correctly failed because the foundation harness retained the
 prior 62-migration denominator in its main and atomic-rollback assertions; both
-guards now require the current 66/66 ledger denominator.
+guards now require the current 67/67 ledger denominator.
 
 The production-shaped request binder verifies the signed active context once,
 requires exact server-resolved principal, tenant, organization, and branch
@@ -342,6 +342,14 @@ FORCE-RLS posture and prove the migration aborts while FORCE RLS is restored.
 The test matrix must also inject one and two lost COMMIT
 acknowledgements, prove exactly one receipt, expose the unresolved case as a
 typed non-PII unknown outcome, and reconcile only by the same request.
+
+`0066` is additive and default-unwired. It exposes a second fixed-search-path
+session resolver facade that preserves the legacy resolver contract while
+adding the exact locked selection UUID to the returned state. The HTTP gateway
+requires that field and issues token version 2 with the selection UUID and
+monotonic generation. Selection-bound verification rejects version-1 tokens or
+any selection/generation mismatch; this does not replace current-selection
+revalidation inside each privileged business transaction.
 
 The PostgreSQL candidate matrix must prove: exact login/owner attributes and
 cross-RPC/table denial; SERIALIZABLE NULL command/environment/cell rejection;
