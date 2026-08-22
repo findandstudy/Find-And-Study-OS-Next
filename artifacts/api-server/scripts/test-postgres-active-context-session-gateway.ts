@@ -309,6 +309,32 @@ async function bootstrapAuthority() {
           role.rolname === ROLE.lifecycleExecutor,
       );
     }
+    const lifecycleSecurity = await admin.query<{
+      receiptSelect: boolean;
+      receiptInsert: boolean;
+      receiptSchemaUsage: boolean;
+      functionOwner: string;
+      securityDefiner: boolean;
+    }>(
+      `SELECT
+         has_table_privilege($1, 'public.active_session_context_selection_command_receipts', 'SELECT') AS "receiptSelect",
+         has_table_privilege($1, 'public.active_session_context_selection_command_receipts', 'INSERT') AS "receiptInsert",
+         has_schema_privilege($1, 'public', 'USAGE') AS "receiptSchemaUsage",
+         pg_get_userbyid(procedure.proowner) AS "functionOwner",
+         procedure.prosecdef AS "securityDefiner"
+       FROM pg_proc procedure
+       JOIN pg_namespace namespace ON namespace.oid = procedure.pronamespace
+       WHERE namespace.nspname = 'fas_session_lifecycle_v1'
+         AND procedure.proname = 'apply_self_selection_command'`,
+      [ROLE.lifecycleOwner],
+    );
+    assert.deepEqual(lifecycleSecurity.rows, [{
+      receiptSelect: true,
+      receiptInsert: true,
+      receiptSchemaUsage: true,
+      functionOwner: ROLE.lifecycleOwner,
+      securityDefiner: true,
+    }]);
   });
 }
 
