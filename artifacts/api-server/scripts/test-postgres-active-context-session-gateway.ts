@@ -18,6 +18,8 @@ import {
   ActiveContextSelectionCommitOutcomeUnknownError,
   PostgresActiveContextSelectionLifecycle,
 } from "../src/lib/postgresActiveContextSelectionLifecycle.js";
+import { withLockedSelectionBoundActiveContext } from "../src/lib/activeContextSelectionConsumption.js";
+import { PostgresActiveContextSelectionConsumptionRepository } from "../src/lib/postgresActiveContextSelectionConsumptionRepository.js";
 import { PostgresActiveContextSessionRepository } from "../src/lib/postgresActiveContextSessionRepository.js";
 import { PostgresAuthoritativeActiveContextRepository } from "../src/lib/postgresAuthoritativeActiveContextRepository.js";
 
@@ -260,6 +262,8 @@ async function bootstrapAuthority() {
         OWNER TO ${ROLE.sessionOwner};
       ALTER FUNCTION fas_session_v1.resolve_session_for_active_context_bound(text, text, bigint)
         OWNER TO ${ROLE.sessionOwner};
+      ALTER FUNCTION fas_session_v1.lock_selection_for_consumption(uuid, uuid, bigint)
+        OWNER TO ${ROLE.sessionOwner};
       ALTER FUNCTION fas_rate_limit_v1.consume_active_context_issuance(
         uuid, text, text, bigint, uuid, bigint, uuid
       ) OWNER TO ${ROLE.rateOwner};
@@ -278,6 +282,9 @@ async function bootstrapAuthority() {
       TO ${ROLE.sessionResolver};
       GRANT EXECUTE ON FUNCTION
         fas_session_v1.resolve_session_for_active_context_bound(text, text, bigint)
+      TO ${ROLE.sessionResolver};
+      GRANT EXECUTE ON FUNCTION
+        fas_session_v1.lock_selection_for_consumption(uuid, uuid, bigint)
       TO ${ROLE.sessionResolver};
       GRANT EXECUTE ON FUNCTION
         fas_rate_limit_v1.consume_active_context_issuance(
@@ -514,8 +521,11 @@ function request() {
 function cancellationPool(input: {
   pool: pg.Pool;
   ready: (pid: number) => void;
+  queryFragment?: string;
 }): pg.Pool {
   let armed = true;
+  const queryFragment =
+    input.queryFragment ?? "fas_session_v1.resolve_session_for_active_context";
   return {
     connect: async () => {
       const client = await input.pool.connect();
@@ -525,7 +535,7 @@ function cancellationPool(input: {
             return async (text: string, values?: unknown[]) => {
               if (
                 armed &&
-                text.includes("fas_session_v1.resolve_session_for_active_context")
+                text.includes(queryFragment)
               ) {
                 armed = false;
                 const backend = await target.query<{ pid: number }>(
@@ -655,6 +665,11 @@ async function main() {
       pool: sessionPool,
       expectedRole: ROLE.sessionResolver,
     });
+    const selectionConsumptionRepository =
+      new PostgresActiveContextSelectionConsumptionRepository({
+        pool: sessionPool,
+        expectedRole: ROLE.sessionResolver,
+      });
     const nextPermit = nextUuidV7Factory();
     const rateLimiter = new PostgresActiveContextIssuanceRateLimiter({
       pool: ratePool,
@@ -716,6 +731,87 @@ async function main() {
     });
     assert.equal(verified.ok, true, verified.ok ? undefined : verified.reason);
     if (!verified.ok) throw new Error(`gateway_token_denied_${verified.reason}`);
+
+    let consumptionOperationCalled = false;
+    const consumed = await withLockedSelectionBoundActiveContext({
+      context: verified.context,
+      repository: selectionConsumptionRepository,
+      now: () => NOW,
+      operation: async (context, state, transaction) => {
+        consumptionOperationCalled = true;
+        assert.equal(context.selectionId, ID.selection);
+        assert.equal(context.sessionGeneration, SESSION_GENERATION);
+        assert.equal(state.status, "ACTIVE");
+        assert.ok(transaction);
+        const tenant = await transaction.query<{ tenant_id: string }>(
+          "SELECT current_setting('app.tenant_id', true) AS tenant_id",
+        );
+        assert.equal(tenant.rows[0]?.tenant_id, ID.tenant);
+        return "selection-consumption-ok";
+      },
+    });
+    assert.equal(consumed, "selection-consumption-ok");
+    assert.equal(consumptionOperationCalled, true);
+
+    let selectionConsumptionPid: (pid: number) => void = () => undefined;
+    const selectionConsumptionPidReady = new Promise<number>((resolve) => {
+      selectionConsumptionPid = resolve;
+    });
+    const cancellableSelectionConsumptionRepository =
+      new PostgresActiveContextSelectionConsumptionRepository({
+        pool: cancellationPool({
+          pool: sessionPool,
+          ready: selectionConsumptionPid,
+          queryFragment: "fas_session_v1.lock_selection_for_consumption",
+        }),
+        expectedRole: ROLE.sessionResolver,
+      });
+    const cancelledSelectionConsumption =
+      withLockedSelectionBoundActiveContext({
+        context: verified.context,
+        repository: cancellableSelectionConsumptionRepository,
+        now: () => NOW,
+        operation: async () => "must-not-complete",
+      }).then(
+        (value) => ({ kind: "resolved" as const, value }),
+        (error: unknown) => ({ kind: "rejected" as const, error }),
+      );
+    const selectionConsumptionBackendPid = await within(
+      selectionConsumptionPidReady,
+      10_000,
+    );
+    await withClient(adminUrl, async (admin) => {
+      const cancelled = await admin.query<{ cancelled: boolean }>(
+        "SELECT pg_cancel_backend($1)::boolean AS cancelled",
+        [selectionConsumptionBackendPid],
+      );
+      assert.equal(cancelled.rows[0]?.cancelled, true);
+    });
+    const cancelledSelectionConsumptionResult =
+      await cancelledSelectionConsumption;
+    assert.equal(cancelledSelectionConsumptionResult.kind, "rejected");
+    if (cancelledSelectionConsumptionResult.kind === "rejected") {
+      assert.equal(
+        (cancelledSelectionConsumptionResult.error as Error & { code?: string })
+          .code,
+        "57014",
+      );
+    }
+    const reusedAfterSelectionConsumptionCancellation =
+      await sessionPool.connect();
+    try {
+      const clean = await reusedAfterSelectionConsumptionCancellation.query<{
+        pid: number;
+        tenant_setting: string | null;
+      }>(
+        `SELECT pg_backend_pid()::int AS pid,
+                nullif(current_setting('app.tenant_id', true), '') AS tenant_setting`,
+      );
+      assert.equal(clean.rows[0]?.pid, selectionConsumptionBackendPid);
+      assert.equal(clean.rows[0]?.tenant_setting, null);
+    } finally {
+      reusedAfterSelectionConsumptionCancellation.release();
+    }
 
     await withClient(sessionResolverUrl, async (resolver) => {
       await mustFail(
@@ -1387,6 +1483,16 @@ async function main() {
     assert.equal(rotated.outcome, "SELECTED");
     assert.equal(rotated.membershipId, ID.membershipTwo);
     assert.equal(rotated.sessionGeneration, 2);
+
+    await mustFail(
+      () => withLockedSelectionBoundActiveContext({
+        context: verified.context,
+        repository: selectionConsumptionRepository,
+        now: () => NOW,
+        operation: async () => "must-not-run",
+      }),
+      /active_context_selection_consumption_binding_stale/,
+    );
 
     await mustFail(
       () => lifecycle.execute({

@@ -28,6 +28,18 @@ export type ActiveContextSelectionState = {
   status: "ACTIVE" | "ROTATED" | "REVOKED" | "EXPIRED";
 };
 
+/**
+ * A deliberately narrow view of the transaction that holds the selection
+ * lock. It exposes parameterized queries only; commit, rollback and release
+ * remain owned by the repository implementation.
+ */
+export type ActiveContextSelectionTransaction = {
+  query<T extends Record<string, unknown> = Record<string, unknown>>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<{ rows: T[]; rowCount: number | null }>;
+};
+
 export interface ActiveContextSelectionLockRepository {
   /**
    * The callback must run before the repository releases its row/transaction
@@ -36,7 +48,10 @@ export interface ActiveContextSelectionLockRepository {
    */
   withLockedSelection<T>(
     input: ActiveContextSelectionLockInput,
-    operation: (state: ActiveContextSelectionState) => Promise<T>,
+    operation: (
+      state: ActiveContextSelectionState,
+      transaction?: ActiveContextSelectionTransaction,
+    ) => Promise<T>,
   ): Promise<T>;
 }
 
@@ -50,6 +65,7 @@ export type SelectionBoundActiveContextConsumptionOptions<T> = {
       sessionGeneration: number;
     },
     state: ActiveContextSelectionState,
+    transaction?: ActiveContextSelectionTransaction,
   ) => Promise<T>;
   now?: () => number;
 };
@@ -162,7 +178,7 @@ export async function withLockedSelectionBoundActiveContext<T>(
   }
   const context = options.context;
   const input = selectionInput(context, observedAt);
-  return options.repository.withLockedSelection(input, async (rawState) => {
+  return options.repository.withLockedSelection(input, async (rawState, transaction) => {
     const state = parseSelectionState(rawState);
     if (!state) {
       throw new Error("active_context_selection_consumption_state_invalid");
@@ -179,6 +195,6 @@ export async function withLockedSelectionBoundActiveContext<T>(
     ) {
       throw new Error("active_context_selection_consumption_binding_stale");
     }
-    return options.operation(context, state);
+    return options.operation(context, state, transaction);
   });
 }

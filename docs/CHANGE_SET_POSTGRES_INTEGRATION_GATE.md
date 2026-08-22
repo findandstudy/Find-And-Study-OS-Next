@@ -367,6 +367,22 @@ or delete, and the EXECUTE-only login receives no receipt-table privilege.
 This candidate has no positive CI claim until an exact PostgreSQL 16 final-head
 run passes.
 
+The next local candidate, `0067_active_context_selection_consumption`, adds a
+fixed-search-path `fas_session_v1.lock_selection_for_consumption` RPC. It locks
+the exact tenant/selection row with `FOR UPDATE` inside a `SERIALIZABLE`
+transaction and returns only the authoritative binding fields. The
+default-unwired TypeScript repository keeps that transaction open while the
+privileged callback runs, exposes only parameterized queries to the callback,
+and treats operation failure as rollback and commit acknowledgement loss as a
+typed unknown outcome. The pure consumption contract rejects any terminal,
+rotated, generation, tenant, principal, membership, organization, or branch
+mismatch before the callback runs. Its PostgreSQL harness now also cancels the
+locked RPC with `pg_cancel_backend`, requires SQLSTATE `57014`, and proves the
+same pool backend returns with a cleared tenant-local GUC. This local candidate
+is not a production or route-wiring claim until a fresh PostgreSQL 16 run proves
+the RPC grants, lock/cancel behavior, rollback, connection cleanup, and
+stale-binding case.
+
 Selection lifecycle CI does not authorize runtime wiring. Migration 0066 and
 the gateway candidate bind newly issued token version 2 to the exact
 `selectionId` plus `sessionGeneration`; legacy version-1 tokens remain
