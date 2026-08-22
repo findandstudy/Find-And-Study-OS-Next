@@ -296,6 +296,15 @@ storage decision, or production credential is present. The PostgreSQL gate must
 gain those repository/rotation/cancellation cases before runtime wiring can be
 considered.
 
+The exact gateway implementation tree
+`dcf62cb5d5fef588dc9b6c5e599fe1144f542dbb` passed foundation run
+`32555803426`, adapter/evidence run `32555803404`, durable-audit run
+`32555803435`, and G0 Linux/Windows run `32555803400` on GitHub head
+`d957791b0ef6307d55e997e691d981100f1e59ba`. Earlier G0 run `32555647367`
+failed only the new static registration audit because it assumed repository-root
+cwd; the corrected test passes under the actual filtered-package cwd and the
+local repository-root cwd. No failed run is treated as evidence.
+
 ## Runtime-wiring gate
 
 Activation of an API route, Super Admin editor, PostgreSQL command adapter,

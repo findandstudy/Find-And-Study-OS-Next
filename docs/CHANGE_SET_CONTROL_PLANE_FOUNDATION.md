@@ -412,6 +412,18 @@ does not implement the legacy-session-to-principal/tenant PostgreSQL adapter,
 network-backed rate limiter, response route, browser storage policy, or
 production credential.
 
+The implementation passed on GitHub head
+`d957791b0ef6307d55e997e691d981100f1e59ba` (local equivalent
+`52ffb90c0bd9c8475f97ffbd02f929239cd0dffb`, shared tree
+`dcf62cb5d5fef588dc9b6c5e599fe1144f542dbb`): foundation run
+`32555803426`, adapter/evidence run `32555803404`, durable-audit run
+`32555803435`, and G0 Linux/Windows run `32555803400` all succeeded. An
+earlier G0 run `32555647367` correctly failed because the route-registration
+static test assumed repository-root working directory; the follow-up makes the
+same negative pass from both repository and filtered-package working
+directories. These successful runs prove this implementation tree, not that a
+repository ruleset makes the checks required.
+
 ## Deliberately not delivered
 
 This foundation does not yet deliver:
@@ -494,8 +506,7 @@ The default-off HTTP session issuance gateway candidate now covers request
 extraction, server-only scope input, Origin/Referer, CSRF, rate-limit permit,
 absolute/idle session age, rotation/impersonation denial, session-bounded token
 TTL, and resolver/audience handoff without registering a route. Its final-head
-GitHub CI evidence must be recorded before this paragraph is treated as a
-passed gate.
+GitHub CI evidence is recorded above; runtime wiring remains NO-GO.
 
 The next safe slice after that evidence is an additive, default-unwired
 PostgreSQL session/context-selection repository and a dedicated rate-limit
