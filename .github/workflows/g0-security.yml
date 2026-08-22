@@ -64,6 +64,7 @@ jobs:
           pnpm --filter @workspace/api-server run test:active-tenant-context
           pnpm --filter @workspace/api-server run test:active-context-keyring
           pnpm --filter @workspace/api-server run test:active-context-selection-consumption
+          pnpm --filter @workspace/api-server run test:active-context-selection-attempt
           pnpm --filter @workspace/api-server run test:authoritative-active-context-issuance
           pnpm --filter @workspace/api-server run test:active-context-session-gateway
           pnpm --filter @workspace/api-server run test:security-regressions

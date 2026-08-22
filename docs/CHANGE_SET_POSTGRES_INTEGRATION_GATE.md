@@ -383,6 +383,16 @@ is not a production or route-wiring claim until a fresh PostgreSQL 16 run proves
 the RPC grants, lock/cancel behavior, rollback, connection cleanup, and
 stale-binding case.
 
+The following local candidate adds the pure outer-attempt coordinator
+`runSelectionConsumptionAttempt`. It requires a server-issued attempt identity,
+starts the ledger before the privileged callback, records only a fixed result
+hash on success, and converts commit ambiguity into a typed `PENDING` outcome
+with an opaque attempt ID. Ordinary failures use a bounded reason enum; raw
+errors, request bodies, session IDs, and idempotency keys are never sent to the
+ledger. This is a contract/test slice only: the PostgreSQL attempt table,
+append-only receipt RPC, scheduled worker, and receipt-only reconciliation are
+still required before any runtime wiring.
+
 Selection lifecycle CI does not authorize runtime wiring. Migration 0066 and
 the gateway candidate bind newly issued token version 2 to the exact
 `selectionId` plus `sessionGeneration`; legacy version-1 tokens remain
