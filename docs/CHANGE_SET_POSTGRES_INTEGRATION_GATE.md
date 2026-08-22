@@ -202,6 +202,16 @@ its transaction is blocked in a controlled PostgreSQL query. It proves that
 the business transaction has no partial row while the separately committed
 attempt advances exactly once to `TERMINAL/ERROR/INTERNAL_ERROR`.
 
+Migration `0062` adds a separate tenant-scoped repair queue and
+`fas_repair_v1` RPC facade. The repair credential has no table DML and cannot
+append audit events. It claims due work with `SKIP LOCKED`, reads a command
+receipt only through the facade, and never replays a business command. The
+audit writer atomically pairs `COMMIT_OUTCOME_UNKNOWN` with one repair job; a
+valid completed receipt resumes the existing HMAC chain as
+`COMMAND_RECONCILED`. Missing/claimed receipts back off and exhaust into a
+terminal error plus explicit operational escalation. Invalid identity or
+result hashes fail closed. The scheduler entrypoint remains unwired.
+
 All checks passed on CREATE-write-failure implementation head
 `61065835b6d81f33ee495d147936ed1197fa14b6`: foundation run `32546411632`,
 command/evidence adapter run `32546411637`, durable-audit run `32546411607`,
@@ -212,9 +222,8 @@ flags; the corrected test reuses the only registered non-production flag and
 runs before canonical CREATE. The adapter candidate still does not cover HTTP
 authentication-to-branded-context wiring, binding that context into the
 separate audit writer, direct command-credential compromise, scheduled repair
-after an unresolved ambiguous commit, production KMS/HSM audit-key custody,
-incomplete-attempt reconciliation, or decision/step-up paths. Those gaps keep
-the full matrix and runtime wiring at NO-GO.
+activation and alert delivery, production KMS/HSM audit-key custody, or
+decision/step-up paths. Those gaps keep runtime wiring at NO-GO.
 
 ## Runtime-wiring gate
 

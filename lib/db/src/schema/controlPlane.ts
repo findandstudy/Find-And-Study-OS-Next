@@ -1141,6 +1141,121 @@ export const changeSetCommandAttemptReceiptsTable = pgTable(
   ],
 ).enableRLS();
 
+export const changeSetReconciliationJobsTable = pgTable(
+  "change_set_reconciliation_jobs",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenantsTable.id, { onDelete: "restrict" }),
+    attemptId: uuid("attempt_id").notNull(),
+    contextId: uuid("context_id").notNull(),
+    actorPrincipalId: uuid("actor_principal_id").notNull(),
+    actorMembershipId: uuid("actor_membership_id").notNull(),
+    policyVersionId: uuid("policy_version_id").notNull(),
+    commandType: text("command_type").notNull(),
+    targetState: text("target_state"),
+    capability: text("capability").notNull(),
+    idempotencyKeyHash: text("idempotency_key_hash").notNull(),
+    requestHash: text("request_hash").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(6),
+    availableAt: timestamp("available_at", { withTimezone: true })
+      .notNull()
+      .default(sql`statement_timestamp() + interval '1 minute'`),
+    leaseTokenHash: text("lease_token_hash"),
+    leasedAt: timestamp("leased_at", { withTimezone: true }),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    resolution: text("resolution"),
+    resolvedChangeSetId: uuid("resolved_change_set_id"),
+    lastErrorCode: text("last_error_code"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`statement_timestamp()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .default(sql`statement_timestamp()`),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("change_set_reconciliation_jobs_tenant_attempt_uq").on(
+      table.tenantId,
+      table.attemptId,
+    ),
+    index("change_set_reconciliation_jobs_due_idx").on(
+      table.tenantId,
+      table.status,
+      table.availableAt,
+      table.createdAt,
+    ),
+    foreignKey({
+      columns: [
+        table.tenantId,
+        table.actorMembershipId,
+        table.actorPrincipalId,
+      ],
+      foreignColumns: [
+        membershipsTable.tenantId,
+        membershipsTable.id,
+        membershipsTable.principalId,
+      ],
+      name: "change_set_reconciliation_jobs_actor_membership_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.policyVersionId],
+      foreignColumns: [policyVersionsTable.tenantId, policyVersionsTable.id],
+      name: "change_set_reconciliation_jobs_policy_version_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.resolvedChangeSetId],
+      foreignColumns: [changeSetsTable.tenantId, changeSetsTable.id],
+      name: "change_set_reconciliation_jobs_resolved_change_set_fk",
+    }).onDelete("restrict"),
+    check("change_set_reconciliation_jobs_id_uuidv7_chk", uuidV7(table.id)),
+    check(
+      "change_set_reconciliation_jobs_attempt_uuidv7_chk",
+      uuidV7(table.attemptId),
+    ),
+    check(
+      "change_set_reconciliation_jobs_context_uuidv7_chk",
+      uuidV7(table.contextId),
+    ),
+    check(
+      "change_set_reconciliation_jobs_command_chk",
+      sql`(${table.commandType} = 'CREATE' AND ${table.targetState} IS NULL) OR (${table.commandType} = 'TRANSITION' AND ${table.targetState} IS NOT NULL AND ${table.targetState} IN ('VALIDATED', 'SIMULATED', 'IN_REVIEW'))`,
+    ),
+    check(
+      "change_set_reconciliation_jobs_capability_chk",
+      sql`${table.capability} ~ '^[a-z][a-z0-9._:-]{2,95}$'`,
+    ),
+    check(
+      "change_set_reconciliation_jobs_hashes_chk",
+      sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$' AND ${table.requestHash} ~ '^[0-9a-f]{64}$' AND (${table.leaseTokenHash} IS NULL OR ${table.leaseTokenHash} ~ '^[0-9a-f]{64}$')`,
+    ),
+    check(
+      "change_set_reconciliation_jobs_status_chk",
+      sql`${table.status} IN ('PENDING', 'LEASED', 'RESOLVED', 'ESCALATED')`,
+    ),
+    check(
+      "change_set_reconciliation_jobs_attempts_chk",
+      sql`${table.maxAttempts} BETWEEN 1 AND 12 AND ${table.attemptCount} BETWEEN 0 AND ${table.maxAttempts}`,
+    ),
+    check(
+      "change_set_reconciliation_jobs_lease_chk",
+      sql`(${table.status} = 'LEASED') = (${table.leaseTokenHash} IS NOT NULL AND ${table.leasedAt} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL) AND (${table.leaseExpiresAt} IS NULL OR ${table.leaseExpiresAt} > ${table.leasedAt})`,
+    ),
+    check(
+      "change_set_reconciliation_jobs_resolution_chk",
+      sql`(${table.status} IN ('PENDING', 'LEASED') AND ${table.resolution} IS NULL AND ${table.resolvedChangeSetId} IS NULL AND ${table.resolvedAt} IS NULL) OR (${table.status} = 'RESOLVED' AND ${table.resolution} = 'COMMITTED' AND ${table.resolvedChangeSetId} IS NOT NULL AND ${table.resolvedAt} IS NOT NULL) OR (${table.status} = 'ESCALATED' AND ${table.resolution} IN ('NO_COMMAND', 'INCOMPLETE_COMMAND', 'INVALID_COMMAND') AND ${table.resolvedChangeSetId} IS NULL AND ${table.resolvedAt} IS NOT NULL)`,
+    ),
+    check(
+      "change_set_reconciliation_jobs_error_chk",
+      sql`${table.lastErrorCode} IS NULL OR ${table.lastErrorCode} IN ('COMMAND_NOT_FOUND', 'COMMAND_IN_PROGRESS', 'COMMAND_INVALID', 'AUDIT_FINALIZATION_FAILED')`,
+    ),
+  ],
+).enableRLS();
+
 export const changeSetCommandAuditEventsTable = pgTable(
   "change_set_command_audit_events",
   {
@@ -1277,5 +1392,7 @@ export type ChangeSetEvidenceRequest =
   typeof changeSetEvidenceRequestsTable.$inferSelect;
 export type ChangeSetCommandAttemptReceipt =
   typeof changeSetCommandAttemptReceiptsTable.$inferSelect;
+export type ChangeSetReconciliationJob =
+  typeof changeSetReconciliationJobsTable.$inferSelect;
 export type ChangeSetCommandAuditEvent =
   typeof changeSetCommandAuditEventsTable.$inferSelect;

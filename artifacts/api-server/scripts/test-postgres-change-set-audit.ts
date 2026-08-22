@@ -8,11 +8,13 @@ import {
 } from "../src/lib/activeTenantContext.js";
 import {
   executeCreateR1ChangeSetCommand,
+  hashChangeSetCommandIdempotencyKey,
   type ChangeSetCommandAuditStart,
 } from "../src/lib/changeSetCommand.js";
 import { canonicalJson } from "../src/lib/jsonCanonical.js";
 import { PostgresChangeSetAuditWriter } from "../src/lib/postgresChangeSetAuditWriter.js";
 import { PostgresChangeSetCommandStore } from "../src/lib/postgresChangeSetCommandStore.js";
+import { PostgresChangeSetReconciliationWorker } from "../src/lib/postgresChangeSetReconciliationWorker.js";
 
 const { Client, Pool } = pg;
 
@@ -20,9 +22,16 @@ const adminUrl = requiredUrl("PG_GATE_ADMIN_URL");
 const migratorUrl = requiredUrl("PG_GATE_MIGRATOR_URL");
 const executorUrl = requiredUrl("PG_GATE_EXECUTOR_URL");
 const auditWriterUrl = requiredUrl("PG_GATE_AUDIT_WRITER_URL");
+const repairWorkerUrl = requiredUrl("PG_GATE_REPAIR_WORKER_URL");
 const databaseName = new URL(adminUrl).pathname.slice(1);
 
-for (const value of [adminUrl, migratorUrl, executorUrl, auditWriterUrl]) {
+for (const value of [
+  adminUrl,
+  migratorUrl,
+  executorUrl,
+  auditWriterUrl,
+  repairWorkerUrl,
+]) {
   const parsed = new URL(value);
   assert.equal(parsed.hostname, "127.0.0.1");
   assert.equal(parsed.port, "5432");
@@ -36,6 +45,8 @@ const ROLE = {
   auditOwner: "fas_audit_owner",
   auditWriter: "fas_audit_writer",
   executor: "fas_cp_executor",
+  repairOwner: "fas_repair_owner",
+  repairWorker: "fas_repair_worker",
 } as const;
 
 const ID = {
@@ -62,9 +73,15 @@ const ID = {
   reconcileStart: "018f6000-0000-7000-8000-00000000000e",
   reconcilePending: "018f6000-0000-7000-8000-00000000000f",
   reconcileTerminal: "018f6000-0000-7000-8000-000000000010",
+  reconcileJob: "018f6000-0000-7000-8000-000000000020",
   cancellationAttempt: "018f6000-0000-7000-8000-000000000011",
   cancellationStart: "018f6000-0000-7000-8000-000000000012",
   cancellationTerminal: "018f6000-0000-7000-8000-000000000013",
+  missingAttempt: "018f6000-0000-7000-8000-000000000021",
+  missingStart: "018f6000-0000-7000-8000-000000000022",
+  missingPending: "018f6000-0000-7000-8000-000000000023",
+  missingJob: "018f6000-0000-7000-8000-000000000024",
+  missingTerminal: "018f6000-0000-7000-8000-000000000025",
 } as const;
 
 const NOW = Date.now();
@@ -174,15 +191,33 @@ function expectedEventHash(row: Record<string, unknown>): string {
 async function bootstrapAuditAuthority() {
   await withClient(adminUrl, async (admin) => {
     await admin.query(`
-      GRANT CONNECT ON DATABASE ${databaseName} TO ${ROLE.auditWriter};
+      CREATE ROLE ${ROLE.repairOwner}
+        NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+      CREATE ROLE ${ROLE.repairWorker}
+        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS
+        PASSWORD 'fas_repair_worker_it_2026';
+      ALTER ROLE ${ROLE.repairWorker} SET statement_timeout = '15s';
+      ALTER ROLE ${ROLE.repairWorker} SET lock_timeout = '5s';
+      ALTER ROLE ${ROLE.repairWorker} SET idle_in_transaction_session_timeout = '15s';
+      GRANT CONNECT ON DATABASE ${databaseName} TO ${ROLE.auditWriter}, ${ROLE.repairWorker};
       GRANT USAGE ON SCHEMA public, fas_audit_v1 TO ${ROLE.auditOwner};
       GRANT USAGE ON SCHEMA fas_audit_v1 TO ${ROLE.auditWriter};
-      REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${ROLE.auditOwner}, ${ROLE.auditWriter};
-      REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM ${ROLE.auditOwner}, ${ROLE.auditWriter};
+      GRANT USAGE ON SCHEMA public, fas_repair_v1 TO ${ROLE.repairOwner};
+      GRANT USAGE ON SCHEMA fas_repair_v1 TO ${ROLE.repairWorker};
+      REVOKE ALL ON ALL TABLES IN SCHEMA public FROM
+        ${ROLE.auditOwner}, ${ROLE.auditWriter}, ${ROLE.repairOwner}, ${ROLE.repairWorker};
+      REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM
+        ${ROLE.auditOwner}, ${ROLE.auditWriter}, ${ROLE.repairOwner}, ${ROLE.repairWorker};
       GRANT SELECT, INSERT ON TABLE public.change_set_command_audit_events
         TO ${ROLE.auditOwner};
+      GRANT SELECT, INSERT ON TABLE public.change_set_reconciliation_jobs
+        TO ${ROLE.auditOwner};
+      GRANT SELECT, UPDATE ON TABLE public.change_set_reconciliation_jobs
+        TO ${ROLE.repairOwner};
+      GRANT SELECT ON TABLE public.change_set_command_receipts
+        TO ${ROLE.repairOwner};
     `);
-    const functions = await admin.query<{
+    const auditFunctions = await admin.query<{
       schema_name: string;
       function_name: string;
       identity_arguments: string;
@@ -195,18 +230,45 @@ async function bootstrapAuditAuthority() {
        WHERE namespace.nspname = 'fas_audit_v1'
        ORDER BY procedure.proname`,
     );
-    assert.equal(functions.rowCount, 3);
-    for (const fn of functions.rows) {
+    assert.equal(auditFunctions.rowCount, 4);
+    for (const fn of auditFunctions.rows) {
       await admin.query(
         `ALTER FUNCTION ${fn.schema_name}.${fn.function_name}(${fn.identity_arguments}) OWNER TO ${ROLE.auditOwner}`,
+      );
+    }
+    const repairFunctions = await admin.query<{
+      schema_name: string;
+      function_name: string;
+      identity_arguments: string;
+    }>(
+      `SELECT namespace.nspname AS schema_name,
+              procedure.proname AS function_name,
+              pg_get_function_identity_arguments(procedure.oid) AS identity_arguments
+       FROM pg_proc procedure
+       JOIN pg_namespace namespace ON namespace.oid = procedure.pronamespace
+       WHERE namespace.nspname = 'fas_repair_v1'
+       ORDER BY procedure.proname`,
+    );
+    assert.equal(repairFunctions.rowCount, 5);
+    for (const fn of repairFunctions.rows) {
+      await admin.query(
+        `ALTER FUNCTION ${fn.schema_name}.${fn.function_name}(${fn.identity_arguments}) OWNER TO ${ROLE.repairOwner}`,
       );
     }
     await admin.query(`
       REVOKE ALL ON ALL FUNCTIONS IN SCHEMA fas_audit_v1 FROM PUBLIC, ${ROLE.auditWriter};
       GRANT EXECUTE ON FUNCTION
         fas_audit_v1.load_attempt_tail(uuid, uuid),
-        fas_audit_v1.append_event(uuid, jsonb)
+        fas_audit_v1.append_event(uuid, jsonb),
+        fas_audit_v1.schedule_reconciliation_job(uuid, jsonb)
       TO ${ROLE.auditWriter};
+      REVOKE ALL ON ALL FUNCTIONS IN SCHEMA fas_repair_v1 FROM PUBLIC, ${ROLE.repairWorker};
+      GRANT EXECUTE ON FUNCTION
+        fas_repair_v1.claim_due_job(uuid, text, integer),
+        fas_repair_v1.load_command_outcome(uuid, uuid, text),
+        fas_repair_v1.reschedule_job(uuid, uuid, text, integer, text),
+        fas_repair_v1.complete_job(uuid, uuid, text, text, text, uuid, text)
+      TO ${ROLE.repairWorker};
     `);
   });
 }
@@ -269,6 +331,58 @@ async function loadAuditRows(attemptIds: readonly string[]) {
   });
 }
 
+async function makeReconciliationDue(
+  attemptId: string,
+  maxAttempts?: number,
+) {
+  await withClient(migratorUrl, async (migrator) => {
+    await migrator.query("BEGIN");
+    try {
+      await migrator.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+        ID.tenant,
+      ]);
+      const updated = await migrator.query(
+        `UPDATE public.change_set_reconciliation_jobs
+         SET available_at = statement_timestamp() - interval '1 second',
+             max_attempts = COALESCE($3, max_attempts),
+             updated_at = statement_timestamp()
+         WHERE tenant_id = $1 AND attempt_id = $2`,
+        [ID.tenant, attemptId, maxAttempts ?? null],
+      );
+      assert.equal(updated.rowCount, 1);
+      await migrator.query("COMMIT");
+    } catch (error) {
+      await migrator.query("ROLLBACK");
+      throw error;
+    }
+  });
+}
+
+async function loadReconciliationJobs() {
+  return withClient(migratorUrl, async (migrator) => {
+    await migrator.query("BEGIN");
+    try {
+      await migrator.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+        ID.tenant,
+      ]);
+      const rows = await migrator.query(
+        `SELECT attempt_id::text AS "attemptId", status, attempt_count AS "attemptCount",
+                resolution, resolved_change_set_id::text AS "resolvedChangeSetId",
+                last_error_code AS "lastErrorCode", lease_token_hash AS "leaseTokenHash"
+         FROM public.change_set_reconciliation_jobs
+         WHERE tenant_id = $1
+         ORDER BY attempt_id`,
+        [ID.tenant],
+      );
+      await migrator.query("COMMIT");
+      return rows.rows as Array<Record<string, unknown>>;
+    } catch (error) {
+      await migrator.query("ROLLBACK");
+      throw error;
+    }
+  });
+}
+
 async function main() {
   await bootstrapAuditAuthority();
   const executorPool = new Pool({
@@ -281,6 +395,14 @@ async function main() {
   });
   const auditPool = new Pool({
     connectionString: auditWriterUrl,
+    max: 2,
+    connectionTimeoutMillis: 10_000,
+    statement_timeout: 15_000,
+    lock_timeout: 5_000,
+    idle_in_transaction_session_timeout: 15_000,
+  });
+  const repairPool = new Pool({
+    connectionString: repairWorkerUrl,
     max: 2,
     connectionTimeoutMillis: 10_000,
     statement_timeout: 15_000,
@@ -306,11 +428,23 @@ async function main() {
         ID.reconcileAttempt,
         ID.reconcileStart,
         ID.reconcilePending,
+        ID.reconcileJob,
         ID.reconcileTerminal,
+        ID.missingAttempt,
+        ID.missingStart,
+        ID.missingPending,
+        ID.missingJob,
+        ID.missingTerminal,
         ID.cancellationAttempt,
         ID.cancellationStart,
         ID.cancellationTerminal,
       ]),
+    });
+    const reconciliationWorker = new PostgresChangeSetReconciliationWorker({
+      pool: repairPool,
+      expectedRole: ROLE.repairWorker,
+      auditWriter,
+      leaseSeconds: 60,
     });
     let cancellationArmed = false;
     let resolveCancellationBackendPid: (pid: number) => void = () => undefined;
@@ -425,14 +559,87 @@ async function main() {
     assert.equal(race.filter((result) => result.status === "fulfilled").length, 1);
     assert.equal(race.filter((result) => result.status === "rejected").length, 1);
 
+    const committedRequestHash = await withClient(
+      migratorUrl,
+      async (migrator) => {
+        await migrator.query("BEGIN");
+        try {
+          await migrator.query(
+            `SELECT set_config('app.tenant_id', $1, true)`,
+            [ID.tenant],
+          );
+          const command = await migrator.query<{ requestHash: string }>(
+            `SELECT request_hash AS "requestHash"
+             FROM public.change_set_command_receipts
+             WHERE tenant_id = $1 AND idempotency_key_hash = $2`,
+            [
+              ID.tenant,
+              hashChangeSetCommandIdempotencyKey("adapter-create-0001"),
+            ],
+          );
+          assert.equal(command.rowCount, 1);
+          await migrator.query("COMMIT");
+          return command.rows[0]!.requestHash;
+        } catch (error) {
+          await migrator.query("ROLLBACK");
+          throw error;
+        }
+      },
+    );
     const reconciliationAttempt = await auditWriter.startAttempt({
       ...start,
-      idempotencyKey: "audit-reconciliation-command-0001",
-      requestHash: "f".repeat(64),
+      commandType: "CREATE",
+      targetState: null,
+      capability: "control_plane.change.create.feature_flag",
+      idempotencyKey: "adapter-create-0001",
+      requestHash: committedRequestHash,
     });
     assert.equal(reconciliationAttempt.attemptId, ID.reconcileAttempt);
     await reconciliationAttempt.recordCommitOutcomeUnknown();
-    await reconciliationAttempt.recordReconciledResult(replay);
+    await makeReconciliationDue(ID.reconcileAttempt);
+    assert.deepEqual(await reconciliationWorker.runOnce(ID.tenant), {
+      kind: "RESOLVED",
+      attemptId: ID.reconcileAttempt,
+      changeSetId: ID.changeSet,
+    });
+
+    const missingAttempt = await auditWriter.startAttempt({
+      ...start,
+      commandType: "CREATE",
+      targetState: null,
+      capability: "control_plane.change.create.feature_flag",
+      idempotencyKey: "audit-reconciliation-missing-0001",
+      requestHash: "f".repeat(64),
+    });
+    assert.equal(missingAttempt.attemptId, ID.missingAttempt);
+    await missingAttempt.recordCommitOutcomeUnknown();
+    await makeReconciliationDue(ID.missingAttempt, 2);
+    assert.deepEqual(await reconciliationWorker.runOnce(ID.tenant), {
+      kind: "RETRY",
+      attemptId: ID.missingAttempt,
+      reason: "COMMAND_NOT_FOUND",
+    });
+    await makeReconciliationDue(ID.missingAttempt);
+    const missingRace = await Promise.all([
+      reconciliationWorker.runOnce(ID.tenant),
+      reconciliationWorker.runOnce(ID.tenant),
+    ]);
+    assert.equal(
+      missingRace.filter((result) => result.kind === "ESCALATED").length,
+      1,
+    );
+    assert.equal(
+      missingRace.filter((result) => result.kind === "EMPTY").length,
+      1,
+    );
+    assert.deepEqual(
+      missingRace.find((result) => result.kind === "ESCALATED"),
+      {
+        kind: "ESCALATED",
+        attemptId: ID.missingAttempt,
+        reason: "COMMAND_NOT_FOUND",
+      },
+    );
 
     cancellationArmed = true;
     const cancelledCommand = executeCreateR1ChangeSetCommand({
@@ -501,9 +708,10 @@ async function main() {
       ID.rejectAttempt,
       ID.raceAttempt,
       ID.reconcileAttempt,
+      ID.missingAttempt,
       ID.cancellationAttempt,
     ]);
-    assert.equal(rows.length, 11);
+    assert.equal(rows.length, 14);
     for (const row of rows) {
       assert.equal(row.eventHash, expectedEventHash(row));
       assert.match(String(row.idempotencyKeyFingerprint), /^[0-9a-f]{64}$/);
@@ -555,6 +763,29 @@ async function main() {
         ],
       ],
     );
+    const missingRows = rows.filter(
+      (row) => row.attemptId === ID.missingAttempt,
+    );
+    assert.deepEqual(
+      missingRows.map((row) => [
+        row.sequence,
+        row.phase,
+        row.outcome,
+        row.reasonCode,
+        row.changeSetId,
+      ]),
+      [
+        [1, "ATTEMPT_STARTED", "STARTED", "REQUEST_ACCEPTED", null],
+        [
+          2,
+          "RECONCILIATION",
+          "PENDING",
+          "COMMIT_OUTCOME_UNKNOWN",
+          null,
+        ],
+        [3, "TERMINAL", "ERROR", "INTERNAL_ERROR", null],
+      ],
+    );
     const cancellationRows = rows.filter(
       (row) => row.attemptId === ID.cancellationAttempt,
     );
@@ -571,6 +802,44 @@ async function main() {
         [2, "TERMINAL", "ERROR", "INTERNAL_ERROR", null],
       ],
     );
+
+    assert.deepEqual(await loadReconciliationJobs(), [
+      {
+        attemptId: ID.reconcileAttempt,
+        status: "RESOLVED",
+        attemptCount: 1,
+        resolution: "COMMITTED",
+        resolvedChangeSetId: ID.changeSet,
+        lastErrorCode: null,
+        leaseTokenHash: null,
+      },
+      {
+        attemptId: ID.missingAttempt,
+        status: "ESCALATED",
+        attemptCount: 2,
+        resolution: "NO_COMMAND",
+        resolvedChangeSetId: null,
+        lastErrorCode: "COMMAND_NOT_FOUND",
+        leaseTokenHash: null,
+      },
+    ]);
+    assert.deepEqual(
+      await reconciliationWorker.runOnce(
+        "018f3000-0000-7000-8000-000000000101",
+      ),
+      { kind: "EMPTY" },
+    );
+    const reusedRepairClient = await repairPool.connect();
+    try {
+      const clean = await reusedRepairClient.query<{
+        tenantSetting: string | null;
+      }>(
+        `SELECT nullif(current_setting('app.tenant_id', true), '') AS "tenantSetting"`,
+      );
+      assert.equal(clean.rows[0]?.tenantSetting, null);
+    } finally {
+      reusedRepairClient.release();
+    }
 
     await withClient(auditWriterUrl, async (writer) => {
       await mustFail(
@@ -599,6 +868,29 @@ async function main() {
       } finally {
         await writer.query("ROLLBACK");
       }
+    });
+
+    await withClient(repairWorkerUrl, async (worker) => {
+      await mustFail(
+        () => worker.query("SELECT * FROM public.change_set_reconciliation_jobs"),
+        /permission denied/,
+      );
+      await mustFail(
+        () =>
+          worker.query(
+            "SELECT fas_repair_v1.claim_due_job($1,$2,$3)",
+            [ID.tenant, "a".repeat(64), 60],
+          ),
+        /tenant context mismatch/,
+      );
+      await mustFail(
+        () =>
+          worker.query("SELECT fas_audit_v1.load_attempt_tail($1,$2)", [
+            ID.tenant,
+            ID.reconcileAttempt,
+          ]),
+        /permission denied/,
+      );
     });
 
     await withClient(migratorUrl, async (migrator) => {
@@ -658,10 +950,10 @@ async function main() {
       }
     });
   } finally {
-    await Promise.all([executorPool.end(), auditPool.end()]);
+    await Promise.all([executorPool.end(), auditPool.end(), repairPool.end()]);
   }
   console.log(
-    "[postgres-audit-gate] PASS: durable start/terminal chains, commit reconciliation, SQLSTATE 57014 cancellation audit, rollback survival, HMAC verification, tenant denial, role split, and concurrency",
+    "[postgres-audit-gate] PASS: durable start/terminal chains, scheduled receipt-only reconciliation, exhausted no-command escalation, SQLSTATE 57014 cancellation audit, rollback survival, HMAC verification, tenant denial, role split, and concurrency",
   );
 }
 

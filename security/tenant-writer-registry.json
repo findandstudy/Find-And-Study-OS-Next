@@ -485,6 +485,14 @@
       "externalPilot": "quarantine"
     },
     {
+      "path": "artifacts/api-server/src/lib/postgresChangeSetReconciliationWorker.ts",
+      "ownership": "privileged_config",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Platform Security",
+      "externalPilot": "quarantine"
+    },
+    {
       "path": "artifacts/api-server/src/lib/portalAddressAutoExtract.ts",
       "ownership": "external_integration",
       "enforcement": "quarantine_required",

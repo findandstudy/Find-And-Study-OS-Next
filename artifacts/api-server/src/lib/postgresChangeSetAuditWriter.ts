@@ -64,6 +64,20 @@ export type PostgresChangeSetAuditWriterOptions = {
   nextUuidV7: () => string;
 };
 
+export type ChangeSetPendingReconciliationIdentity = {
+  tenantId: string;
+  attemptId: string;
+  contextId: string;
+  actorPrincipalId: string;
+  actorMembershipId: string;
+  policyVersionId: string;
+  commandType: "CREATE" | "TRANSITION";
+  targetState: string | null;
+  capability: string;
+  idempotencyKeyHash: string;
+  requestHash: string;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -277,7 +291,10 @@ export class PostgresChangeSetAuditWriter implements ChangeSetCommandAuditWriter
 
   private async rpc<T>(
     client: PoolClient,
-    name: "load_attempt_tail" | "append_event",
+    name:
+      | "load_attempt_tail"
+      | "append_event"
+      | "schedule_reconciliation_job",
     values: readonly unknown[],
   ): Promise<T> {
     const placeholders = values.map((_, index) => `$${index + 1}`).join(", ");
@@ -356,6 +373,9 @@ export class PostgresChangeSetAuditWriter implements ChangeSetCommandAuditWriter
       throw new Error("change_set_audit_start_invalid");
     }
     const attemptId = this.freshUuidV7();
+    const idempotencyKeyHash = hashChangeSetCommandIdempotencyKey(
+      input.idempotencyKey,
+    );
     const event = this.buildEvent({
       id: this.freshUuidV7(),
       tenantId: input.tenantId.toLowerCase(),
@@ -375,7 +395,7 @@ export class PostgresChangeSetAuditWriter implements ChangeSetCommandAuditWriter
       idempotencyKeyFingerprint: hmac(
         this.fingerprintKey,
         "fas.change-set.command-audit.idempotency.v1",
-        hashChangeSetCommandIdempotencyKey(input.idempotencyKey),
+        idempotencyKeyHash,
       ),
       requestFingerprint: hmac(
         this.fingerprintKey,
@@ -471,6 +491,23 @@ export class PostgresChangeSetAuditWriter implements ChangeSetCommandAuditWriter
           event.tenantId,
           JSON.stringify(pendingEvent),
         ]);
+        await this.rpc<void>(client, "schedule_reconciliation_job", [
+          event.tenantId,
+          JSON.stringify({
+            jobId: this.freshUuidV7(),
+            tenantId: event.tenantId,
+            attemptId: event.attemptId,
+            contextId: event.contextId,
+            actorPrincipalId: event.actorPrincipalId,
+            actorMembershipId: event.actorMembershipId,
+            policyVersionId: event.policyVersionId,
+            commandType: event.commandType,
+            targetState: event.targetState,
+            capability: event.capability,
+            idempotencyKeyHash,
+            requestHash: input.requestHash,
+          }),
+        ]);
       });
     };
 
@@ -490,6 +527,115 @@ export class PostgresChangeSetAuditWriter implements ChangeSetCommandAuditWriter
           reasonCode: "INTERNAL_ERROR",
         });
       },
+    });
+  }
+
+  async finalizePendingReconciliation(
+    input: ChangeSetPendingReconciliationIdentity,
+    result: ChangeSetCommandResult | null,
+  ): Promise<void> {
+    if (
+      !isRecord(input) ||
+      UUID_RE.test(input.tenantId) === false ||
+      UUID_V7_RE.test(input.attemptId) === false ||
+      UUID_V7_RE.test(input.contextId) === false ||
+      UUID_RE.test(input.actorPrincipalId) === false ||
+      UUID_RE.test(input.actorMembershipId) === false ||
+      UUID_RE.test(input.policyVersionId) === false ||
+      !["CREATE", "TRANSITION"].includes(input.commandType) ||
+      !(
+        (input.commandType === "CREATE" && input.targetState === null) ||
+        (input.commandType === "TRANSITION" &&
+          ["VALIDATED", "SIMULATED", "IN_REVIEW"].includes(
+            input.targetState ?? "",
+          ))
+      ) ||
+      !IDENTIFIER_RE.test(input.capability) ||
+      !SHA256_RE.test(input.idempotencyKeyHash) ||
+      !SHA256_RE.test(input.requestHash)
+    ) {
+      throw new Error("change_set_reconciliation_identity_invalid");
+    }
+    const terminal = result
+      ? reconciledTerminalForResult(result)
+      : {
+          changeSetId: null,
+          outcome: "ERROR" as const,
+          reasonCode: "INTERNAL_ERROR" as const,
+        };
+    await this.transaction(input.tenantId.toLowerCase(), async (client) => {
+      const tailValue = await this.rpc<unknown>(client, "load_attempt_tail", [
+        input.tenantId,
+        input.attemptId,
+      ]);
+      const tail = parseTail(tailValue);
+      if (!tail) throw new Error("change_set_audit_tail_invalid");
+      const { eventHash: storedHash, ...tailWithoutHash } = tail;
+      const identityMatches =
+        tail.tenantId === input.tenantId.toLowerCase() &&
+        tail.attemptId === input.attemptId.toLowerCase() &&
+        tail.contextId === input.contextId.toLowerCase() &&
+        tail.actorPrincipalId === input.actorPrincipalId.toLowerCase() &&
+        tail.actorMembershipId === input.actorMembershipId.toLowerCase() &&
+        tail.policyVersionId === input.policyVersionId.toLowerCase() &&
+        tail.commandType === input.commandType &&
+        tail.targetState === input.targetState &&
+        tail.capability === input.capability &&
+        tail.fingerprintKeyId === this.fingerprintKeyId &&
+        secureHashEqual(
+          tail.idempotencyKeyFingerprint,
+          hmac(
+            this.fingerprintKey,
+            "fas.change-set.command-audit.idempotency.v1",
+            input.idempotencyKeyHash,
+          ),
+        ) &&
+        secureHashEqual(
+          tail.requestFingerprint,
+          hmac(
+            this.fingerprintKey,
+            "fas.change-set.command-audit.request.v1",
+            input.requestHash,
+          ),
+        ) &&
+        secureHashEqual(
+          storedHash,
+          eventHash(this.fingerprintKey, tailWithoutHash),
+        );
+      if (!identityMatches) {
+        throw new Error("change_set_reconciliation_audit_identity_invalid");
+      }
+      if (tail.phase === "TERMINAL") {
+        if (
+          tail.outcome !== terminal.outcome ||
+          tail.reasonCode !== terminal.reasonCode ||
+          tail.changeSetId !== terminal.changeSetId
+        ) {
+          throw new Error("change_set_reconciliation_terminal_conflict");
+        }
+        return;
+      }
+      if (
+        tail.phase !== "RECONCILIATION" ||
+        tail.outcome !== "PENDING" ||
+        tail.reasonCode !== "COMMIT_OUTCOME_UNKNOWN"
+      ) {
+        throw new Error("change_set_reconciliation_audit_not_pending");
+      }
+      const terminalEvent = this.buildEvent({
+        ...tailWithoutHash,
+        id: this.freshUuidV7(),
+        sequence: tail.sequence + 1,
+        changeSetId: terminal.changeSetId,
+        phase: "TERMINAL",
+        outcome: terminal.outcome,
+        reasonCode: terminal.reasonCode,
+        previousHash: storedHash,
+      });
+      await this.rpc<void>(client, "append_event", [
+        input.tenantId,
+        JSON.stringify(terminalEvent),
+      ]);
     });
   }
 }

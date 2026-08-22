@@ -293,11 +293,22 @@ error. The command is retried exactly once with the same tenant, actor, request
 hash and hashed idempotency identity. A successful canonical replay is closed
 as `COMMAND_RECONCILED`; an unresolved retry is left non-terminal as
 `RECONCILIATION/PENDING/COMMIT_OUTCOME_UNKNOWN` and exposes its audit attempt
-UUID for a future repair worker. The audit fingerprint is an HMAC of the same
-domain-separated SHA-256 identity stored by the command receipt, so a narrow
-future reconciler can correlate them without storing the raw key. This does
-not yet deliver scheduled incomplete-attempt repair or permission to wire the
-adapter into a route.
+UUID for repair. The audit fingerprint is an HMAC of the same domain-separated
+SHA-256 identity stored by the command receipt, so reconciliation can correlate
+them without storing the raw key.
+
+Migration `0062_change_set_scheduled_reconciliation.sql` and
+`postgresChangeSetReconciliationWorker.ts` add the default-unwired scheduled
+repair candidate. A pending attempt creates one tenant-bound operational job.
+An EXECUTE-only repair login leases due jobs with `SKIP LOCKED`, reads only the
+authoritative command receipt, and never re-executes the original mutation or
+uses an expired human context. A valid `COMPLETED` receipt advances the same
+HMAC audit chain to `COMMAND_RECONCILED`; missing or still-claimed receipts use
+bounded backoff and become terminal error plus human escalation only after the
+attempt budget is exhausted. Invalid result/hash/actor/context identity fails
+closed. Crash recovery reclaims expired leases without spending another
+business-observation attempt. This candidate is not started by any route,
+cron, worker bootstrap, or production scheduler.
 
 The disposable PostgreSQL adapter gate also proves real SQLSTATE `57014`
 query-cancellation handling. Cancellation before the claim rolls the bounded
@@ -374,9 +385,9 @@ This foundation does not yet deliver:
 - a KMS/HSM-backed production signer, key rotation ceremony, or issuer runtime
   credential;
 - production command-executor/evidence-issuer role bootstrap and credentials;
-- production audit-key custody/rotation, scheduled incomplete-attempt repair,
-  HTTP-to-branded-context wiring, and signed active-context-to-audit-tenant
-  binding;
+- production audit-key custody/rotation, scheduled repair activation,
+  tenant-dispatch ownership/alerting, HTTP-to-branded-context wiring, and
+  signed active-context-to-audit-tenant binding;
 - runtime adoption/backfill of the tenant/organization/legacy-branch map;
 - persistent environment grants for separated migrator and runtime application
   database roles;
@@ -404,10 +415,11 @@ described in
 adapter run `32546411637`, audit run `32546411607`, and G0 Linux/Windows run
 `32546411633`).
 
-The next safe slice is the remaining adapter failure/recovery matrix: scheduled
-repair of unresolved commit outcomes and incomplete-attempt repair. The shared
-runtime role must not
-receive generic Control Plane DML. No API route or Super Admin UI may be
-connected before those controls, required checks, production role/bootstrap
-review and independent approval exist. Publisher and configuration
-materialization adapters remain separate and default-off.
+The current candidate adds scheduled receipt-only reconciliation without
+runtime activation. Before any scheduler is wired, the disposable PostgreSQL
+gate must prove lease concurrency, committed-receipt resolution, exhausted
+no-command escalation, direct-table denial, and tenant-context cleanup. The
+shared runtime role must not receive generic Control Plane DML. No API route or
+Super Admin UI may be connected before required checks, production
+role/bootstrap review and independent approval exist. Publisher and
+configuration materialization adapters remain separate and default-off.

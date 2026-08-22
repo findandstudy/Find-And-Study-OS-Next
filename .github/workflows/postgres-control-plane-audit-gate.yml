@@ -105,4 +105,5 @@ jobs:
           PG_GATE_AUDIT_WRITER_URL: postgresql://fas_audit_writer:fas_audit_writer_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
           PG_GATE_EXECUTOR_URL: postgresql://fas_cp_executor:fas_cp_executor_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
           PG_GATE_MIGRATOR_URL: postgresql://fas_migrator:fas_migrator_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+          PG_GATE_REPAIR_WORKER_URL: postgresql://fas_repair_worker:fas_repair_worker_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
         run: pnpm --filter @workspace/api-server run test:postgres-change-set-audit

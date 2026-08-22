@@ -609,6 +609,20 @@ function parseReplayResult(value: unknown): ChangeSetCommandSuccess | null {
   return result as ChangeSetCommandSuccess;
 }
 
+export function verifyStoredChangeSetCommandSuccess(input: {
+  result: unknown;
+  resultHash: unknown;
+}): ChangeSetCommandSuccess | null {
+  if (
+    !isRecord(input) ||
+    !isValidChangeSetCommandHash(input.resultHash) ||
+    hashValue(input.result) !== input.resultHash
+  ) {
+    return null;
+  }
+  return parseReplayResult(input.result);
+}
+
 function replayOrFailure(
   claim: ChangeSetCommandClaimResult,
   requestHash: string,
@@ -630,13 +644,10 @@ function replayOrFailure(
     claim.actorMembershipId !== actorMembershipId
   )
     return { ok: false, reason: "idempotency_key_reused" };
-  if (
-    !isValidChangeSetCommandHash(claim.resultHash) ||
-    hashValue(claim.result) !== claim.resultHash
-  ) {
-    return { ok: false, reason: "replay_result_invalid" };
-  }
-  const result = parseReplayResult(claim.result);
+  const result = verifyStoredChangeSetCommandSuccess({
+    result: claim.result,
+    resultHash: claim.resultHash,
+  });
   return result
     ? { ok: true, replayed: true, result }
     : { ok: false, reason: "replay_result_invalid" };
