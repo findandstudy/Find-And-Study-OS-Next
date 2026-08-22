@@ -13,6 +13,7 @@ import {
   type ActiveContextVersionedSubject,
 } from "../src/lib/activeTenantContext.js";
 import { bindChangeSetRequestContext } from "../src/lib/changeSetRequestContext.js";
+import { withLockedSelectionBoundActiveContext } from "../src/lib/activeContextSelectionConsumption.js";
 
 const NOW = 2_000_000_000_000;
 const ID = {
@@ -208,6 +209,105 @@ test("selection-bound versioned context requires the exact selection and generat
       now: NOW,
     }),
     { ok: false, reason: "selection_binding_missing" },
+  );
+});
+
+test("selection-bound consumption locks and revalidates the current selection", async () => {
+  const token = await issue({
+    subject: {
+      ...subject(),
+      selectionId: ID.selection,
+      sessionGeneration: 4,
+    },
+  });
+  const verified = verifyVersionedActiveTenantContext({
+    token,
+    keyRing: [key()],
+    expected: expected(),
+    expectedSelectionBinding: {
+      selectionId: ID.selection,
+      sessionGeneration: 4,
+    },
+    now: NOW,
+  });
+  assert.equal(verified.ok, true);
+  if (!verified.ok) return;
+
+  const calls: unknown[] = [];
+  const state = {
+    selectionId: ID.selection,
+    tenantId: ID.tenant,
+    sessionGeneration: 4,
+    principalId: ID.principal,
+    membershipId: ID.membership,
+    organizationId: ID.organization,
+    legacyBranchId: 41,
+    status: "ACTIVE" as const,
+  };
+  const result = await withLockedSelectionBoundActiveContext({
+    context: verified.context,
+    now: () => NOW,
+    repository: {
+      withLockedSelection: async (input, operation) => {
+        calls.push(input);
+        return operation(state);
+      },
+    },
+    operation: async (context, locked) => ({
+      tokenVersion: context.tokenVersion,
+      selectionId: locked.selectionId,
+      generation: locked.sessionGeneration,
+    }),
+  });
+  assert.deepEqual(result, {
+    tokenVersion: 2,
+    selectionId: ID.selection,
+    generation: 4,
+  });
+  assert.deepEqual(calls, [
+    {
+      tenantId: ID.tenant,
+      selectionId: ID.selection,
+      sessionGeneration: 4,
+      principalId: ID.principal,
+      membershipId: ID.membership,
+      organizationId: ID.organization,
+      legacyBranchId: 41,
+      observedAt: NOW,
+    },
+  ]);
+
+  let operationCalls = 0;
+  await assert.rejects(
+    () =>
+      withLockedSelectionBoundActiveContext({
+        context: verified.context,
+        now: () => NOW,
+        repository: {
+          withLockedSelection: async (_input, operation) =>
+            operation({ ...state, status: "ROTATED" }),
+        },
+        operation: async () => {
+          operationCalls += 1;
+          return undefined;
+        },
+      }),
+    /active_context_selection_consumption_binding_stale/,
+  );
+  assert.equal(operationCalls, 0);
+
+  const copied = { ...verified.context } as typeof verified.context;
+  await assert.rejects(
+    () =>
+      withLockedSelectionBoundActiveContext({
+        context: copied,
+        repository: {
+          withLockedSelection: async (_input, operation) => operation(state),
+        },
+        operation: async () => undefined,
+        now: () => NOW,
+      }),
+    /active_context_selection_consumption_context_invalid/,
   );
 });
 
