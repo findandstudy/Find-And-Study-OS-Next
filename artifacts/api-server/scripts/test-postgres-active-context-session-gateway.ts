@@ -1685,6 +1685,13 @@ async function main() {
           active_count: number;
           receipt_count: number;
           generations: number[];
+          attempt_status: string | null;
+          attempt_outcome: string | null;
+          attempt_reason: string | null;
+          attempt_result_hash: string | null;
+          attempt_receipt_sequences: number[] | null;
+          attempt_receipt_phases: string[] | null;
+          attempt_persisted: string;
           states: Array<{
             generation: number;
             previousSelectionId: string | null;
@@ -1702,6 +1709,30 @@ async function main() {
              (SELECT array_agg(session_generation::int ORDER BY session_generation)
               FROM public.active_session_context_selections
               WHERE session_fingerprint = $1) AS generations,
+             (SELECT status
+              FROM public.active_context_selection_consumption_attempts
+              WHERE id = $2 AND tenant_id = $3) AS attempt_status,
+             (SELECT outcome
+              FROM public.active_context_selection_consumption_attempts
+              WHERE id = $2 AND tenant_id = $3) AS attempt_outcome,
+             (SELECT reason_code
+              FROM public.active_context_selection_consumption_attempts
+              WHERE id = $2 AND tenant_id = $3) AS attempt_reason,
+             (SELECT result_hash
+              FROM public.active_context_selection_consumption_attempts
+              WHERE id = $2 AND tenant_id = $3) AS attempt_result_hash,
+             (SELECT array_agg(sequence ORDER BY sequence)
+              FROM public.active_context_selection_consumption_attempt_receipts
+              WHERE attempt_id = $2 AND tenant_id = $3) AS attempt_receipt_sequences,
+             (SELECT array_agg(phase ORDER BY sequence)
+              FROM public.active_context_selection_consumption_attempt_receipts
+              WHERE attempt_id = $2 AND tenant_id = $3) AS attempt_receipt_phases,
+             (SELECT coalesce(string_agg(row_to_json(attempt)::text, ''), '')
+              FROM public.active_context_selection_consumption_attempts attempt
+              WHERE attempt.id = $2 AND attempt.tenant_id = $3)
+             || (SELECT coalesce(string_agg(row_to_json(receipt)::text, ''), '')
+                 FROM public.active_context_selection_consumption_attempt_receipts receipt
+                 WHERE receipt.attempt_id = $2 AND receipt.tenant_id = $3) AS attempt_persisted,
              (SELECT jsonb_agg(jsonb_build_object(
                 'generation', session_generation::int,
                 'previousSelectionId', previous_selection_id,
@@ -1714,7 +1745,7 @@ async function main() {
              (SELECT coalesce(string_agg(row_to_json(receipt)::text, ''), '')
               FROM public.active_session_context_selection_command_receipts receipt
               WHERE session_fingerprint = $1) AS persisted`,
-          [fingerprint(SID)],
+          [fingerprint(SID), ID.consumptionAttempt, ID.tenant],
         );
         await migrator.query("ROLLBACK");
         return evidence.rows[0]!;
@@ -1725,6 +1756,21 @@ async function main() {
     });
     assert.equal(lifecycleEvidence.active_count, 0);
     assert.equal(lifecycleEvidence.receipt_count, 7);
+    assert.equal(lifecycleEvidence.attempt_status, "TERMINAL");
+    assert.equal(lifecycleEvidence.attempt_outcome, "COMPLETED");
+    assert.equal(lifecycleEvidence.attempt_reason, "COMMAND_RECONCILED");
+    assert.equal(lifecycleEvidence.attempt_result_hash, "c".repeat(64));
+    assert.deepEqual(lifecycleEvidence.attempt_receipt_sequences, [1, 2, 3]);
+    assert.deepEqual(lifecycleEvidence.attempt_receipt_phases, [
+      "ATTEMPT_STARTED",
+      "RECONCILIATION",
+      "TERMINAL",
+    ]);
+    assert.equal(lifecycleEvidence.attempt_persisted.includes(SID), false);
+    assert.equal(lifecycleEvidence.attempt_persisted.includes("lifecycle-consumption"), false);
+    assert.equal(lifecycleEvidence.attempt_persisted.includes("a".repeat(64)), true);
+    assert.equal(lifecycleEvidence.attempt_persisted.includes("b".repeat(64)), true);
+    assert.equal(lifecycleEvidence.attempt_persisted.includes("c".repeat(64)), true);
     assert.deepEqual(lifecycleEvidence.generations, [1, 2, 3]);
     assert.deepEqual(lifecycleEvidence.states, [
       {
