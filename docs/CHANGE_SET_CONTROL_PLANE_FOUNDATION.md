@@ -314,6 +314,13 @@ commits, the next identical command is denied before it can create a new
 command claim. Synthetic fixture restoration occurs only after the deny is
 observed and never weakens the runtime contract.
 
+Evidence-key compromise is likewise serialized through the real transition
+adapter. A key update waits while a policy-valid SIMULATION receipt is locked
+and consumed; after the successful SIMULATED commit, the compromise can commit.
+A subsequent IN_REVIEW command using evidence signed by that compromised key is
+rejected, creates no business receipt residue, and consumes none of its three
+required evidence items.
+
 Notification template variables must be declared whether referenced in the
 subject or body. Template variables that suggest passwords, secrets, tokens,
 passports, national IDs, or SSNs are not admitted. Plain-text fields reject
@@ -372,14 +379,14 @@ writer quarantines remain authoritative.
 
 The 62-migration PostgreSQL 16 foundation and default-unwired command, evidence,
 durable-audit, context-bound transaction, ambiguous-commit, query-cancellation,
-and membership/policy revocation workflows described in
+membership/policy revocation, and evidence-key compromise workflows described in
 `CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on implementation head
-`360de74d305ff07a810628701c722eb19b1f3e16` (foundation run `32543303215`,
-adapter run `32543303199`, audit run `32543303200`, and G0 Linux/Windows run
-`32543303201`).
+`79df3039febad8c1884651aee19111c9b6e3b165` (foundation run `32544126664`,
+adapter run `32544126642`, audit run `32544126655`, and G0 Linux/Windows run
+`32544126761`).
 
 The next safe slice is the remaining adapter race/failure matrix: scheduled
-repair of unresolved commit outcomes, evidence issuer/key/grant revocation in
+repair of unresolved commit outcomes, evidence issuer/tenant-grant revocation in
 both lock orders, injected failure at every write boundary, and incomplete-
 attempt repair. The shared runtime role must not
 receive generic Control Plane DML. No API route or Super Admin UI may be

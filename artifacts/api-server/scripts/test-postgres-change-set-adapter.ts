@@ -11,6 +11,8 @@ import {
 import {
   executeCreateR1ChangeSetCommand,
   executeTransitionR1ChangeSetCommand,
+  type ChangeSetCommandStore,
+  type ChangeSetCommandTransaction,
   type ChangeSetCommandResult,
 } from "../src/lib/changeSetCommand.js";
 import {
@@ -83,6 +85,24 @@ const ID = {
   policyRaceCommand: "018f5000-0000-7000-8000-000000000023",
   policyRaceAccess: "018f5000-0000-7000-8000-000000000024",
   policyDeniedAccess: "018f5000-0000-7000-8000-000000000025",
+  simulationGrant: "018f5000-0000-7000-8000-000000000030",
+  testArtifactGrant: "018f5000-0000-7000-8000-000000000031",
+  rollbackPlanGrant: "018f5000-0000-7000-8000-000000000032",
+  canaryPlanGrant: "018f5000-0000-7000-8000-000000000033",
+  simulationRequest: "018f5000-0000-7000-8000-000000000034",
+  testArtifactRequest: "018f5000-0000-7000-8000-000000000035",
+  rollbackPlanRequest: "018f5000-0000-7000-8000-000000000036",
+  canaryPlanRequest: "018f5000-0000-7000-8000-000000000037",
+  simulationEvidence: "018f5000-0000-7000-8000-000000000038",
+  testArtifactEvidence: "018f5000-0000-7000-8000-000000000039",
+  rollbackPlanEvidence: "018f5000-0000-7000-8000-00000000003a",
+  canaryPlanEvidence: "018f5000-0000-7000-8000-00000000003b",
+  simulationCommand: "018f5000-0000-7000-8000-00000000003c",
+  simulationAccess: "018f5000-0000-7000-8000-00000000003d",
+  simulationTransition: "018f5000-0000-7000-8000-00000000003e",
+  submitCommand: "018f5000-0000-7000-8000-00000000003f",
+  submitAccess: "018f5000-0000-7000-8000-000000000040",
+  submitTransition: "018f5000-0000-7000-8000-000000000041",
 } as const;
 
 const NOW = Date.now();
@@ -90,6 +110,7 @@ const activeContextSecret = crypto.randomBytes(48).toString("base64url");
 const evidenceKeys = crypto.generateKeyPairSync("ed25519");
 const evidenceIssuerId = "fas-evidence-service";
 const evidenceKeyId = "adapter-test-key-1";
+const evidenceRaceKeyId = "adapter-test-key-race-1";
 const evidenceToolId = "fas-evidence-service";
 const evidenceToolVersion = "test-v1";
 const baselineConfig = {
@@ -218,6 +239,43 @@ async function executeCanonicalCreateReplay(input: {
       nextUuidV7: uuidFactory(input.ids),
     },
   });
+}
+
+function pauseAfterEvidenceLoad(input: {
+  store: ChangeSetCommandStore;
+  ready: () => void;
+  release: Promise<void>;
+}): ChangeSetCommandStore {
+  let armed = true;
+  return {
+    transaction: (context, operation) =>
+      input.store.transaction(context, (transaction) => {
+        const wrapped = new Proxy(transaction, {
+          get(target, property, receiver) {
+            if (property === "loadVerifiedTransitionEvidenceForUpdate") {
+              return async (
+                evidenceInput: Parameters<
+                  ChangeSetCommandTransaction["loadVerifiedTransitionEvidenceForUpdate"]
+                >[0],
+              ) => {
+                const evidence = await target.loadVerifiedTransitionEvidenceForUpdate(
+                  evidenceInput,
+                );
+                if (armed) {
+                  armed = false;
+                  input.ready();
+                  await input.release;
+                }
+                return evidence;
+              };
+            }
+            const value = Reflect.get(target, property, receiver) as unknown;
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+        return operation(wrapped);
+      }),
+  };
 }
 
 async function bootstrapAuthority() {
@@ -467,7 +525,9 @@ async function seedFoundation() {
           (key, description, risk_class, step_up_required, approval_required, status)
          VALUES
           ('control_plane.flag.create', 'Create registered R1 flag proposal', 'HIGH', false, false, 'ACTIVE'),
-          ('control_plane.change.validate', 'Validate R1 proposal', 'HIGH', false, false, 'ACTIVE')
+          ('control_plane.change.validate', 'Validate R1 proposal', 'HIGH', false, false, 'ACTIVE'),
+          ('control_plane.change.simulate', 'Simulate R1 proposal', 'HIGH', false, false, 'ACTIVE'),
+          ('control_plane.change.submit_review', 'Submit R1 proposal for review', 'HIGH', false, false, 'ACTIVE')
          ON CONFLICT (key) DO NOTHING`,
       );
       await migrator.query(
@@ -489,7 +549,9 @@ async function seedFoundation() {
           (role_package_version_id, capability_key, effect)
          VALUES
           ($1, 'control_plane.flag.create', 'ALLOW'),
-          ($1, 'control_plane.change.validate', 'ALLOW')`,
+          ($1, 'control_plane.change.validate', 'ALLOW'),
+          ($1, 'control_plane.change.simulate', 'ALLOW'),
+          ($1, 'control_plane.change.submit_review', 'ALLOW')`,
         [ID.rolePackage],
       );
       await migrator.query(
@@ -597,11 +659,11 @@ function loseFirstCommitAcknowledgement(pool: pg.Pool): pg.Pool {
   } as unknown as pg.Pool;
 }
 
-function evidenceSigner(): ChangeSetEvidenceSigner {
+function evidenceSigner(keyId = evidenceKeyId): ChangeSetEvidenceSigner {
   return {
     issuerId: evidenceIssuerId,
     issuerPrincipalId: ID.evidencePrincipal,
-    keyId: evidenceKeyId,
+    keyId,
     algorithm: "Ed25519",
     environmentId: "test-ci",
     cellId: "cell-a",
@@ -1182,6 +1244,325 @@ async function main() {
     assert.equal(replayed.ok, true);
     if (replayed.ok) assert.equal(replayed.replayed, true);
 
+    const raceEvidence = [
+      {
+        grantId: ID.simulationGrant,
+        requestId: ID.simulationRequest,
+        receiptId: ID.simulationEvidence,
+        targetState: "SIMULATED" as const,
+        kind: "SIMULATION" as const,
+        challengeNonce: crypto.randomBytes(32).toString("base64url"),
+        artifactCount: null,
+        artifactManifestHash: null,
+      },
+      {
+        grantId: ID.testArtifactGrant,
+        requestId: ID.testArtifactRequest,
+        receiptId: ID.testArtifactEvidence,
+        targetState: "IN_REVIEW" as const,
+        kind: "TEST_ARTIFACT" as const,
+        challengeNonce: crypto.randomBytes(32).toString("base64url"),
+        artifactCount: 1,
+        artifactManifestHash: sha256("adapter-key-race-artifact"),
+      },
+      {
+        grantId: ID.rollbackPlanGrant,
+        requestId: ID.rollbackPlanRequest,
+        receiptId: ID.rollbackPlanEvidence,
+        targetState: "IN_REVIEW" as const,
+        kind: "ROLLBACK_PLAN" as const,
+        challengeNonce: crypto.randomBytes(32).toString("base64url"),
+        artifactCount: null,
+        artifactManifestHash: null,
+      },
+      {
+        grantId: ID.canaryPlanGrant,
+        requestId: ID.canaryPlanRequest,
+        receiptId: ID.canaryPlanEvidence,
+        targetState: "IN_REVIEW" as const,
+        kind: "CANARY_PLAN" as const,
+        challengeNonce: crypto.randomBytes(32).toString("base64url"),
+        artifactCount: null,
+        artifactManifestHash: null,
+      },
+    ];
+    await withClient(migratorUrl, async (migrator) => {
+      const publicKeySpki = evidenceKeys.publicKey.export({
+        format: "der",
+        type: "spki",
+      });
+      const fingerprint = fingerprintChangeSetEvidencePublicKey(
+        evidenceKeys.publicKey,
+      );
+      assert.ok(fingerprint);
+      await migrator.query("BEGIN");
+      try {
+        await migrator.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+          ID.tenant,
+        ]);
+        await migrator.query(
+          `INSERT INTO public.change_set_evidence_signing_keys (
+            issuer_id, key_id, algorithm, public_key_spki_base64,
+            public_key_fingerprint_sha256, state, valid_from, sign_until,
+            verify_until
+          ) VALUES ($1, $2, 'Ed25519', $3, $4, 'ACTIVE',
+            to_timestamp($5 / 1000.0), to_timestamp($6 / 1000.0),
+            to_timestamp($7 / 1000.0))`,
+          [
+            evidenceIssuerId,
+            evidenceRaceKeyId,
+            publicKeySpki.toString("base64"),
+            fingerprint,
+            NOW - 60_000,
+            NOW + 60 * 60_000,
+            NOW + 2 * 60 * 60_000,
+          ],
+        );
+        for (const evidence of raceEvidence) {
+          await migrator.query(
+            `INSERT INTO public.change_set_evidence_issuer_tenant_grants (
+              id, tenant_id, issuer_id, kind, tool_id, tool_version, state,
+              valid_from, valid_until
+            ) VALUES ($1, $2, $3, $4, $5, $6, 'ACTIVE',
+              to_timestamp($7 / 1000.0), to_timestamp($8 / 1000.0))`,
+            [
+              evidence.grantId,
+              ID.tenant,
+              evidenceIssuerId,
+              evidence.kind,
+              evidenceToolId,
+              evidenceToolVersion,
+              NOW - 60_000,
+              NOW + 60 * 60_000,
+            ],
+          );
+          await migrator.query(
+            `INSERT INTO public.change_set_evidence_requests (
+              id, tenant_id, change_set_id, target_state, kind,
+              requested_by_principal_id, requested_by_membership_id,
+              subject_hash, policy_version_id, tool_id, tool_version,
+              challenge_nonce_hash, state, expires_at, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+              'OPEN', to_timestamp($13 / 1000.0),
+              to_timestamp($14 / 1000.0))`,
+            [
+              evidence.requestId,
+              ID.tenant,
+              ID.changeSet,
+              evidence.targetState,
+              evidence.kind,
+              ID.humanPrincipal,
+              ID.humanMembership,
+              sha256(proposedConfig),
+              ID.policy,
+              evidenceToolId,
+              evidenceToolVersion,
+              sha256(evidence.challengeNonce),
+              NOW + 10 * 60_000,
+              NOW - 1_000,
+            ],
+          );
+        }
+        await migrator.query("COMMIT");
+      } catch (error) {
+        await migrator.query("ROLLBACK");
+        throw error;
+      }
+    });
+    for (const evidence of raceEvidence) {
+      const signed = await issueChangeSetEvidenceEnvelope(
+        {
+          receiptId: evidence.receiptId,
+          evidenceRequestId: evidence.requestId,
+          challengeNonce: evidence.challengeNonce,
+          issuerTenantGrantId: evidence.grantId,
+          tenantId: ID.tenant,
+          changeSetId: ID.changeSet,
+          targetState: evidence.targetState,
+          kind: evidence.kind,
+          requestedByPrincipalId: ID.humanPrincipal,
+          requestedByMembershipId: ID.humanMembership,
+          subjectHash: sha256(proposedConfig),
+          policyVersionId: ID.policy,
+          toolId: evidenceToolId,
+          toolVersion: evidenceToolVersion,
+          outcome: "PASSED",
+          artifactCount: evidence.artifactCount,
+          artifactManifestHash: evidence.artifactManifestHash,
+          ttlMs: 5 * 60_000,
+        },
+        evidenceSigner(evidenceRaceKeyId),
+        NOW,
+      );
+      assert.deepEqual(
+        await issuer.persistVerifiedEnvelope({
+          expectedTenantId: ID.tenant,
+          token: signed.token,
+        }),
+        { receiptId: evidence.receiptId },
+      );
+    }
+
+    const evidenceReady = deferred<void>();
+    const releaseEvidence = deferred<void>();
+    const evidenceRaceStore = pauseAfterEvidenceLoad({
+      store,
+      ready: () => evidenceReady.resolve(),
+      release: releaseEvidence.promise,
+    });
+    const simulationPromise = executeTransitionR1ChangeSetCommand({
+      context,
+      command: {
+        idempotencyKey: "adapter-key-race-simulation-0001",
+        changeSetId: ID.changeSet,
+        expectedVersion: 2,
+        toState: "SIMULATED",
+        reasonCode: "adapter_key_race_simulated",
+      },
+      dependencies: {
+        store: evidenceRaceStore,
+        now: () => NOW,
+        nextUuidV7: uuidFactory([
+          ID.simulationCommand,
+          ID.simulationAccess,
+          ID.simulationTransition,
+        ]),
+      },
+    });
+    const simulationOutcome = simulationPromise.then(
+      (value) => ({ kind: "resolved" as const, value }),
+      (error: unknown) => ({ kind: "rejected" as const, error }),
+    );
+    await within(
+      Promise.race([
+        evidenceReady.promise,
+        simulationOutcome.then((outcome): never => {
+          if (outcome.kind === "rejected") throw outcome.error;
+          throw new Error("simulation_finished_before_evidence_lock_gate");
+        }),
+      ]),
+      10_000,
+    );
+
+    const keyRevoker = new Client({
+      connectionString: migratorUrl,
+      connectionTimeoutMillis: 10_000,
+      statement_timeout: 15_000,
+      lock_timeout: 5_000,
+      idle_in_transaction_session_timeout: 15_000,
+    });
+    await keyRevoker.connect();
+    let keyRevokerTransactionOpen = false;
+    try {
+      await keyRevoker.query("BEGIN");
+      keyRevokerTransactionOpen = true;
+      await keyRevoker.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+        ID.tenant,
+      ]);
+      const backend = await keyRevoker.query<{ pid: number }>(
+        "SELECT pg_backend_pid()::int AS pid",
+      );
+      const keyRevokerPid = Number(backend.rows[0]?.pid);
+      assert.ok(Number.isSafeInteger(keyRevokerPid) && keyRevokerPid > 0);
+      const keyRevokeQuery = keyRevoker.query(
+        `UPDATE public.change_set_evidence_signing_keys
+         SET state = 'COMPROMISED', revoked_at = statement_timestamp()
+         WHERE issuer_id = $1 AND key_id = $2`,
+        [evidenceIssuerId, evidenceRaceKeyId],
+      );
+      const keyRevokeOutcome = keyRevokeQuery.then(
+        (value) => ({ kind: "resolved" as const, value }),
+        (error: unknown) => ({ kind: "rejected" as const, error }),
+      );
+      await within(
+        Promise.race([
+          waitForBackendLock(keyRevokerPid),
+          keyRevokeOutcome.then((outcome): never => {
+            if (outcome.kind === "rejected") throw outcome.error;
+            throw new Error("key_revocation_did_not_wait_for_evidence_lock");
+          }),
+        ]),
+        10_000,
+      );
+
+      releaseEvidence.resolve();
+      const simulation = await simulationOutcome;
+      assert.equal(simulation.kind, "resolved");
+      if (simulation.kind === "resolved") {
+        assert.deepEqual(simulation.value, {
+          ok: true,
+          replayed: false,
+          result: {
+            changeSetId: ID.changeSet,
+            status: "SIMULATED",
+            version: 3,
+            transitionReceiptId: ID.simulationTransition,
+            approvalReceiptId: null,
+          },
+        });
+      }
+      const keyRevoked = await keyRevokeOutcome;
+      assert.equal(keyRevoked.kind, "resolved");
+      if (keyRevoked.kind === "resolved") {
+        assert.equal(keyRevoked.value.rowCount, 1);
+      }
+      await keyRevoker.query("COMMIT");
+      keyRevokerTransactionOpen = false;
+    } finally {
+      releaseEvidence.resolve();
+      if (keyRevokerTransactionOpen) await keyRevoker.query("ROLLBACK");
+      await keyRevoker.end();
+    }
+
+    const submitAfterKeyRevocation = await executeTransitionR1ChangeSetCommand({
+      context,
+      command: {
+        idempotencyKey: "adapter-key-revoked-submit-0001",
+        changeSetId: ID.changeSet,
+        expectedVersion: 3,
+        toState: "IN_REVIEW",
+        reasonCode: "adapter_key_revoked_submit",
+      },
+      dependencies: {
+        store,
+        now: () => NOW,
+        nextUuidV7: uuidFactory([
+          ID.submitCommand,
+          ID.submitAccess,
+          ID.submitTransition,
+        ]),
+      },
+    });
+    assert.deepEqual(submitAfterKeyRevocation, {
+      ok: false,
+      reason: "transition_rejected",
+      detail: "verified_evidence_unavailable",
+    });
+    await withClient(migratorUrl, async (migrator) => {
+      await migrator.query("BEGIN");
+      try {
+        await migrator.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+          ID.tenant,
+        ]);
+        const partial = await migrator.query<{ count: number }>(
+          `SELECT (
+             (SELECT count(*) FROM public.change_set_command_receipts
+              WHERE tenant_id = $1 AND id = $2)
+             + (SELECT count(*) FROM public.access_decision_receipts
+                WHERE tenant_id = $1 AND id = $3)
+             + (SELECT count(*) FROM public.change_set_transition_receipts
+                WHERE tenant_id = $1 AND id = $4)
+           )::int AS count`,
+          [ID.tenant, ID.submitCommand, ID.submitAccess, ID.submitTransition],
+        );
+        assert.equal(partial.rows[0]?.count, 0);
+        await migrator.query("ROLLBACK");
+      } catch (error) {
+        await migrator.query("ROLLBACK");
+        throw error;
+      }
+    });
+
     await store.transaction(context, async () => {
       throw new Error("adapter_rollback_probe");
     }).then(
@@ -1257,20 +1638,55 @@ async function main() {
       try {
         await migrator.query(`SELECT set_config('app.tenant_id', $1, true)`, [ID.tenant]);
         const evidence = await migrator.query(
-          `SELECT consumed_by_command_receipt_id, consumed_at IS NOT NULL AS consumed
+          `SELECT id, consumed_by_command_receipt_id,
+                  consumed_at IS NOT NULL AS consumed
            FROM public.change_set_evidence_receipts
-           WHERE tenant_id = $1 AND id = $2`,
-          [ID.tenant, ID.evidenceReceipt],
+           WHERE tenant_id = $1 AND id = ANY($2::uuid[])
+           ORDER BY id`,
+          [
+            ID.tenant,
+            [
+              ID.evidenceReceipt,
+              ID.simulationEvidence,
+              ID.testArtifactEvidence,
+              ID.rollbackPlanEvidence,
+              ID.canaryPlanEvidence,
+            ],
+          ],
         );
         assert.deepEqual(evidence.rows, [
-          { consumed_by_command_receipt_id: ID.transitionCommand, consumed: true },
+          {
+            id: ID.evidenceReceipt,
+            consumed_by_command_receipt_id: ID.transitionCommand,
+            consumed: true,
+          },
+          {
+            id: ID.simulationEvidence,
+            consumed_by_command_receipt_id: ID.simulationCommand,
+            consumed: true,
+          },
+          {
+            id: ID.testArtifactEvidence,
+            consumed_by_command_receipt_id: null,
+            consumed: false,
+          },
+          {
+            id: ID.rollbackPlanEvidence,
+            consumed_by_command_receipt_id: null,
+            consumed: false,
+          },
+          {
+            id: ID.canaryPlanEvidence,
+            consumed_by_command_receipt_id: null,
+            consumed: false,
+          },
         ]);
         const state = await migrator.query(
           `SELECT status, version::int FROM public.change_sets
            WHERE tenant_id = $1 AND id = $2`,
           [ID.tenant, ID.changeSet],
         );
-        assert.deepEqual(state.rows, [{ status: "VALIDATED", version: 2 }]);
+        assert.deepEqual(state.rows, [{ status: "SIMULATED", version: 3 }]);
         await migrator.query("ROLLBACK");
       } catch (error) {
         await migrator.query("ROLLBACK");
@@ -1281,7 +1697,7 @@ async function main() {
     await Promise.all([executorPool.end(), issuerPool.end()]);
   }
   console.log(
-    "[postgres-adapter-gate] PASS: EXECUTE-only roles, real command store, ambiguous-commit replay, SQLSTATE 57014 cancellation rollback, signed evidence, and pool cleanup",
+    "[postgres-adapter-gate] PASS: EXECUTE-only roles, real command store, ambiguous-commit replay, SQLSTATE 57014 cancellation rollback, membership/policy/key revoke serialization, signed evidence, and pool cleanup",
   );
 }
 

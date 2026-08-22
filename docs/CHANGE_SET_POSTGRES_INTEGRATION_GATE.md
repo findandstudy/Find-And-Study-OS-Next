@@ -2,8 +2,8 @@
 
 Status: **62-MIGRATION FOUNDATION, DEFAULT-UNWIRED CONTEXT-BOUND
 COMMAND/EVIDENCE, QUERY-CANCELLATION ROLLBACK, MEMBERSHIP/POLICY REVOCATION
-SERIALIZATION, AMBIGUOUS-COMMIT RECONCILIATION, AND DURABLE-AUDIT ADAPTER CI
-GREEN; NO-GO for runtime wiring**.
+SERIALIZATION, EVIDENCE-KEY COMPROMISE SERIALIZATION, AMBIGUOUS-COMMIT
+RECONCILIATION, AND DURABLE-AUDIT ADAPTER CI GREEN; NO-GO for runtime wiring**.
 
 This gate is not a delivery estimate and is not proof that migrations `0055`
 through `0061` have run in a long-lived environment. The approved local
@@ -158,6 +158,13 @@ command validator
 independently binds artifact count and manifest hash into the signed outcome
 hash.
 
+A separate real-transition race persists policy-valid `SIMULATION` and
+`IN_REVIEW` evidence under an ephemeral Ed25519 test key. The SIMULATED command
+pauses after the evidence RPC has taken issuer/key/grant/request locks; a
+concurrent key compromise must wait until that transition commits. Once the
+compromise commits, IN_REVIEW fails closed, its command/access/transition rows
+roll back, and its three evidence receipts remain unconsumed.
+
 `.github/workflows/postgres-control-plane-audit-gate.yml` and
 `test-postgres-change-set-audit.ts` add the durable outer-attempt candidate.
 They prove a separately committed start event, terminal success and rejection
@@ -175,15 +182,15 @@ its transaction is blocked in a controlled PostgreSQL query. It proves that
 the business transaction has no partial row while the separately committed
 attempt advances exactly once to `TERMINAL/ERROR/INTERNAL_ERROR`.
 
-All checks passed on authorization-revocation implementation head
-`360de74d305ff07a810628701c722eb19b1f3e16`: foundation run `32543303215`,
-command/evidence adapter run `32543303199`, durable-audit run `32543303200`,
-and G0 Linux/Windows run `32543303201`. The checks are not yet required by a
+All checks passed on evidence-key-revocation implementation head
+`79df3039febad8c1884651aee19111c9b6e3b165`: foundation run `32544126664`,
+command/evidence adapter run `32544126642`, durable-audit run `32544126655`,
+and G0 Linux/Windows run `32544126761`. The checks are not yet required by a
 repository ruleset. The adapter candidate still does not cover HTTP
 authentication-to-branded-context wiring, binding that context into the
 separate audit writer, direct command-credential compromise, scheduled repair
-after an unresolved ambiguous commit, both lock orders for evidence issuer/key/
-grant revocation, injected failure between every write,
+after an unresolved ambiguous commit, both lock orders for evidence issuer/
+tenant-grant revocation, injected failure between every write,
 production KMS/HSM audit-key custody, incomplete-attempt reconciliation, or
 decision/step-up paths. Those gaps keep the full matrix and runtime wiring at
 NO-GO.
