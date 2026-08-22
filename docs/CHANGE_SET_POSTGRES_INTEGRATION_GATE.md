@@ -189,15 +189,15 @@ its transaction is blocked in a controlled PostgreSQL query. It proves that
 the business transaction has no partial row while the separately committed
 attempt advances exactly once to `TERMINAL/ERROR/INTERNAL_ERROR`.
 
-All checks passed on evidence-key-revocation implementation head
-`79df3039febad8c1884651aee19111c9b6e3b165`: foundation run `32544126664`,
-command/evidence adapter run `32544126642`, durable-audit run `32544126655`,
-and G0 Linux/Windows run `32544126761`. The checks are not yet required by a
+All checks passed on evidence-tenant-grant-revocation implementation head
+`3539a3c543cdf1e4bc28f4efa7c17f1ddaaa36f4`: foundation run `32544900632`,
+command/evidence adapter run `32544900679`, durable-audit run `32544900649`,
+and G0 Linux/Windows run `32544900634`. The checks are not yet required by a
 repository ruleset. The adapter candidate still does not cover HTTP
 authentication-to-branded-context wiring, binding that context into the
 separate audit writer, direct command-credential compromise, scheduled repair
-after an unresolved ambiguous commit, both lock orders for evidence issuer/
-tenant-grant revocation, injected failure between every write,
+after an unresolved ambiguous commit, both lock orders for global evidence
+issuer revocation, injected failure between every write,
 production KMS/HSM audit-key custody, incomplete-attempt reconciliation, or
 decision/step-up paths. Those gaps keep the full matrix and runtime wiring at
 NO-GO.
