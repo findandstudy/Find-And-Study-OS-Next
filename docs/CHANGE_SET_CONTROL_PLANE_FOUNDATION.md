@@ -344,17 +344,17 @@ writer quarantines remain authoritative.
 ## Next safe slice
 
 The 61-migration PostgreSQL 16 foundation and default-unwired command, evidence,
-and durable-audit adapter workflows described in
-`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on audit implementation head
-`8579a54f44e5c75537dcd31dba0e661f8223b367` (foundation run `32537777722`,
-adapter run `32537777669`, audit run `32537777763`, and G0 Linux/Windows run
-`32537777745`).
+durable-audit, and context-bound transaction workflows described in
+`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on context-binding
+implementation head `e855f0283f7cc9449da9dc0c19a20d23991cd223`
+(foundation run `32539460998`, adapter run `32539460946`, audit run
+`32539461023`, and G0 Linux/Windows run `32539460995`).
 
-The next safe slice is signed active-context-to-DB invocation binding plus the
-remaining adapter race/failure matrix: cancellation, ambiguous commit replay,
+The next safe slice is the remaining adapter race/failure matrix: cancellation,
+ambiguous commit replay plus durable audit reconciliation,
 membership/policy/key revocation in both lock orders, injected failure at every
-write boundary, and incomplete-attempt reconciliation. The shared runtime role
-must not receive generic Control Plane DML. No API route or Super Admin UI may
-be connected before those controls, required checks, production role/bootstrap
+write boundary, and incomplete-attempt repair. The shared runtime role must not
+receive generic Control Plane DML. No API route or Super Admin UI may be
+connected before those controls, required checks, production role/bootstrap
 review and independent approval exist. Publisher and configuration
 materialization adapters remain separate and default-off.

@@ -1,7 +1,7 @@
 # ChangeSet PostgreSQL Integration Gate
 
-Status: **61-MIGRATION FOUNDATION, DEFAULT-UNWIRED COMMAND/EVIDENCE ADAPTER,
-AND DURABLE-AUDIT ADAPTER CI GREEN; NO-GO for runtime wiring**.
+Status: **61-MIGRATION FOUNDATION, DEFAULT-UNWIRED CONTEXT-BOUND
+COMMAND/EVIDENCE AND DURABLE-AUDIT ADAPTER CI GREEN; NO-GO for runtime wiring**.
 
 This gate is not a delivery estimate and is not proof that migrations `0055`
 through `0060` have run in a long-lived environment. The approved local
@@ -151,10 +151,10 @@ domain-separated HMAC chain verification, cross-tenant and no-context denial,
 direct-table denial for the audit login, transaction-local context cleanup, and
 one terminal winner under a same-attempt race.
 
-All checks passed on audit implementation head
-`8579a54f44e5c75537dcd31dba0e661f8223b367`: foundation run `32537777722`,
-command/evidence adapter run `32537777669`, durable-audit run `32537777763`,
-and G0 Linux/Windows run `32537777745`. The checks are not yet required by a
+All checks passed on context-binding implementation head
+`e855f0283f7cc9449da9dc0c19a20d23991cd223`: foundation run `32539460998`,
+command/evidence adapter run `32539460946`, durable-audit run `32539461023`,
+and G0 Linux/Windows run `32539460995`. The checks are not yet required by a
 repository ruleset. The adapter candidate still does not cover HTTP
 authentication-to-branded-context wiring, binding that context into the
 separate audit writer, direct command-credential compromise, every
