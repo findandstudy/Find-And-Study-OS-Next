@@ -178,6 +178,13 @@ wait until receipt/request commit. After global revoke commits, another validly
 signed envelope from that issuer is rejected as inactive before persistence;
 the denied request stays open and no partial receipt is left behind.
 
+The CREATE adapter path injects a deterministic failure immediately after each
+business write boundary: command claim, ALLOW access receipt, ChangeSet insert,
+and command completion. Every case must roll back command, access, and ChangeSet
+rows together. Reusing the exact completion-case idempotency key and UUIDs after
+rollback must then create one canonical DRAFT, proving that the failed attempt
+left no hidden claim.
+
 `.github/workflows/postgres-control-plane-audit-gate.yml` and
 `test-postgres-change-set-audit.ts` add the durable outer-attempt candidate.
 They prove a separately committed start event, terminal success and rejection

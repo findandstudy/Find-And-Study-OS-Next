@@ -111,6 +111,22 @@ const ID = {
   issuerRaceIssuedEvidence: "018f5000-0000-7000-8000-000000000047",
   issuerRaceDeniedRequest: "018f5000-0000-7000-8000-000000000048",
   issuerRaceDeniedEvidence: "018f5000-0000-7000-8000-000000000049",
+  failClaimConfig: "018f5000-0000-7000-8000-00000000004a",
+  failAccessConfig: "018f5000-0000-7000-8000-00000000004b",
+  failInsertConfig: "018f5000-0000-7000-8000-00000000004c",
+  failCompleteConfig: "018f5000-0000-7000-8000-00000000004d",
+  failClaimCommand: "018f5000-0000-7000-8000-00000000004e",
+  failClaimAccess: "018f5000-0000-7000-8000-00000000004f",
+  failClaimChangeSet: "018f5000-0000-7000-8000-000000000050",
+  failAccessCommand: "018f5000-0000-7000-8000-000000000051",
+  failAccessAccess: "018f5000-0000-7000-8000-000000000052",
+  failAccessChangeSet: "018f5000-0000-7000-8000-000000000053",
+  failInsertCommand: "018f5000-0000-7000-8000-000000000054",
+  failInsertAccess: "018f5000-0000-7000-8000-000000000055",
+  failInsertChangeSet: "018f5000-0000-7000-8000-000000000056",
+  failCompleteCommand: "018f5000-0000-7000-8000-000000000057",
+  failCompleteAccess: "018f5000-0000-7000-8000-000000000058",
+  failCompleteChangeSet: "018f5000-0000-7000-8000-000000000059",
 } as const;
 
 const NOW = Date.now();
@@ -145,6 +161,62 @@ const createCommand = {
   },
   proposedConfig,
 };
+const createWriteFailureScenarios = [
+  {
+    name: "claim",
+    method: "claimCommand" as const,
+    configurationId: ID.failClaimConfig,
+    flagKey: "adapter.failpoint.claim",
+    ids: [ID.failClaimCommand, ID.failClaimAccess, ID.failClaimChangeSet],
+  },
+  {
+    name: "access",
+    method: "insertAccessDecisionReceipt" as const,
+    configurationId: ID.failAccessConfig,
+    flagKey: "adapter.failpoint.access",
+    ids: [ID.failAccessCommand, ID.failAccessAccess, ID.failAccessChangeSet],
+  },
+  {
+    name: "insert",
+    method: "insertChangeSet" as const,
+    configurationId: ID.failInsertConfig,
+    flagKey: "adapter.failpoint.insert",
+    ids: [ID.failInsertCommand, ID.failInsertAccess, ID.failInsertChangeSet],
+  },
+  {
+    name: "complete",
+    method: "completeCommand" as const,
+    configurationId: ID.failCompleteConfig,
+    flagKey: "adapter.failpoint.complete",
+    ids: [
+      ID.failCompleteCommand,
+      ID.failCompleteAccess,
+      ID.failCompleteChangeSet,
+    ],
+  },
+] as const;
+
+function createWriteFailureCommand(
+  scenario: (typeof createWriteFailureScenarios)[number],
+) {
+  return {
+    idempotencyKey: `adapter-create-failure-${scenario.name}-0001`,
+    changeType: "FEATURE_FLAG" as const,
+    title: `Create ${scenario.name} failure rollback verification`,
+    purpose: `Prove rollback after the ${scenario.method} write boundary.`,
+    targetScope: {
+      type: "TENANT" as const,
+      organizationId: null,
+      legacyBranchId: null,
+    },
+    proposedConfig: {
+      flagKey: scenario.flagKey,
+      enabled: true,
+      cohortPercent: 1,
+      reason: `Injected failure after ${scenario.method}.`,
+    },
+  };
+}
 
 function requiredUrl(name: string): string {
   const value = process.env[name];
@@ -317,6 +389,40 @@ function pauseAfterEvidenceVerificationContextLoad(input: {
       });
     },
   } as unknown as pg.Pool;
+}
+
+function failAfterTransactionMethod(input: {
+  store: ChangeSetCommandStore;
+  method:
+    | "claimCommand"
+    | "insertAccessDecisionReceipt"
+    | "insertChangeSet"
+    | "completeCommand";
+}): ChangeSetCommandStore {
+  let armed = true;
+  return {
+    transaction: (context, operation) =>
+      input.store.transaction(context, (transaction) => {
+        const wrapped = new Proxy(transaction, {
+          get(target, property, receiver) {
+            const value = Reflect.get(target, property, receiver) as unknown;
+            if (
+              armed &&
+              property === input.method &&
+              typeof value === "function"
+            ) {
+              return async (...args: unknown[]) => {
+                await Reflect.apply(value, target, args);
+                armed = false;
+                throw new Error(`injected_failure_after_${input.method}`);
+              };
+            }
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+        return operation(wrapped);
+      }),
+  };
 }
 
 async function bootstrapAuthority() {
@@ -638,6 +744,27 @@ async function seedFoundation() {
         ) VALUES ($1, $2, 'FEATURE_FLAG', 'journey.beta', 'TENANT', 1, $3::jsonb, $4)`,
         [ID.configuration, ID.tenant, JSON.stringify(baselineConfig), sha256(baselineConfig)],
       );
+      for (const scenario of createWriteFailureScenarios) {
+        const config = {
+          flagKey: scenario.flagKey,
+          enabled: false,
+          cohortPercent: 0,
+          reason: "Write-boundary rollback baseline.",
+        };
+        await migrator.query(
+          `INSERT INTO public.r1_configuration_snapshots (
+            id, tenant_id, change_type, configuration_key, target_scope_type,
+            version, config, config_hash
+          ) VALUES ($1, $2, 'FEATURE_FLAG', $3, 'TENANT', 1, $4::jsonb, $5)`,
+          [
+            scenario.configurationId,
+            ID.tenant,
+            scenario.flagKey,
+            JSON.stringify(config),
+            sha256(config),
+          ],
+        );
+      }
       await migrator.query("COMMIT");
     } catch (error) {
       await migrator.query("ROLLBACK");
@@ -1009,6 +1136,75 @@ async function main() {
       authority: "POLICY",
       raceIds: [ID.policyRaceCommand, ID.policyRaceAccess],
       deniedIds: [ID.policyDeniedAccess],
+    });
+
+    for (const scenario of createWriteFailureScenarios) {
+      await assert.rejects(
+        () =>
+          executeCreateR1ChangeSetCommand({
+            context,
+            command: createWriteFailureCommand(scenario),
+            dependencies: {
+              store: failAfterTransactionMethod({
+                store,
+                method: scenario.method,
+              }),
+              now: () => NOW,
+              nextUuidV7: uuidFactory(scenario.ids),
+            },
+          }),
+        new RegExp(`injected_failure_after_${scenario.method}`),
+      );
+      await withClient(migratorUrl, async (migrator) => {
+        await migrator.query("BEGIN");
+        try {
+          await migrator.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+            ID.tenant,
+          ]);
+          const partial = await migrator.query<{ count: number }>(
+            `SELECT (
+               (SELECT count(*) FROM public.change_set_command_receipts
+                WHERE tenant_id = $1 AND id = $2)
+               + (SELECT count(*) FROM public.access_decision_receipts
+                  WHERE tenant_id = $1 AND id = $3)
+               + (SELECT count(*) FROM public.change_sets
+                  WHERE tenant_id = $1 AND id = $4)
+             )::int AS count`,
+            [ID.tenant, scenario.ids[0], scenario.ids[1], scenario.ids[2]],
+          );
+          assert.equal(
+            partial.rows[0]?.count,
+            0,
+            `${scenario.method} left partial business rows`,
+          );
+          await migrator.query("ROLLBACK");
+        } catch (error) {
+          await migrator.query("ROLLBACK");
+          throw error;
+        }
+      });
+    }
+
+    const completeFailureScenario = createWriteFailureScenarios[3];
+    const retriedAfterCompleteRollback = await executeCreateR1ChangeSetCommand({
+      context,
+      command: createWriteFailureCommand(completeFailureScenario),
+      dependencies: {
+        store,
+        now: () => NOW,
+        nextUuidV7: uuidFactory(completeFailureScenario.ids),
+      },
+    });
+    assert.deepEqual(retriedAfterCompleteRollback, {
+      ok: true,
+      replayed: false,
+      result: {
+        changeSetId: ID.failCompleteChangeSet,
+        status: "DRAFT",
+        version: 1,
+        transitionReceiptId: null,
+        approvalReceiptId: null,
+      },
     });
 
     cancellationArmed = true;
