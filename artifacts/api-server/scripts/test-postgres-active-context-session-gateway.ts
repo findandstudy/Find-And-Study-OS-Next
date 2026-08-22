@@ -316,12 +316,12 @@ async function seed() {
          VALUES (
            $1,
            jsonb_build_object(
-             'user', jsonb_build_object('id', $2, 'role', 'staff'),
+             'user', jsonb_build_object('id', $2::integer, 'role', 'staff'),
              'access_token', 'synthetic-test-only',
              'issued_at', $3::bigint
            ),
            to_timestamp($4::bigint / 1000.0) AT TIME ZONE 'UTC',
-           $2
+           $2::integer
          )`,
         [SID, USER_ID, SESSION_ISSUED_AT, SESSION_IDLE_EXPIRES_AT],
       );
