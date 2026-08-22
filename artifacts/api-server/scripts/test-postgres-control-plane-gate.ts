@@ -54,6 +54,8 @@ const evidenceOwnerRole = "fas_evidence_owner";
 const evidenceIssuerRole = "fas_evidence_issuer";
 const auditOwnerRole = "fas_audit_owner";
 const auditWriterRole = "fas_audit_writer";
+const contextOwnerRole = "fas_auth_context_owner";
+const contextResolverRole = "fas_auth_context_resolver";
 
 async function withClient<T>(
   url: string,
@@ -92,26 +94,25 @@ async function setup() {
   await withClient(adminUrl, async (client) => {
     await client.query(`
       CREATE ROLE ${migratorRole}
-        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS
-        PASSWORD 'fas_migrator_it_2026';
+        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
       CREATE ROLE ${appRole}
-        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS
-        PASSWORD 'fas_app_it_2026';
+        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
       CREATE ROLE ${commandOwnerRole}
         NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
       CREATE ROLE ${commandExecutorRole}
-        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS
-        PASSWORD 'fas_cp_executor_it_2026';
+        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
       CREATE ROLE ${evidenceOwnerRole}
         NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
       CREATE ROLE ${evidenceIssuerRole}
-        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS
-        PASSWORD 'fas_evidence_issuer_it_2026';
+        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
       CREATE ROLE ${auditOwnerRole}
         NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
       CREATE ROLE ${auditWriterRole}
-        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS
-        PASSWORD 'fas_audit_writer_it_2026';
+        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+      CREATE ROLE ${contextOwnerRole}
+        NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+      CREATE ROLE ${contextResolverRole}
+        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
       ALTER DATABASE ${databaseName} OWNER TO ${migratorRole};
       REVOKE TEMPORARY ON DATABASE ${databaseName} FROM PUBLIC;
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
@@ -129,6 +130,9 @@ async function setup() {
       ALTER ROLE ${auditWriterRole} SET statement_timeout = '15s';
       ALTER ROLE ${auditWriterRole} SET lock_timeout = '5s';
       ALTER ROLE ${auditWriterRole} SET idle_in_transaction_session_timeout = '15s';
+      ALTER ROLE ${contextResolverRole} SET statement_timeout = '15s';
+      ALTER ROLE ${contextResolverRole} SET lock_timeout = '5s';
+      ALTER ROLE ${contextResolverRole} SET idle_in_transaction_session_timeout = '15s';
     `);
   });
   console.log("[postgres-gate] disposable authority split prepared");
@@ -642,7 +646,7 @@ async function verifyAtomicDdlRollback(migrator: pg.Client) {
         "SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations",
       )
     ).rows[0].count,
-    63,
+    64,
   );
 }
 
@@ -1593,7 +1597,7 @@ async function verify() {
     const migrationCount = await migrator.query(
       "SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations",
     );
-    assert.equal(migrationCount.rows[0].count, 63);
+    assert.equal(migrationCount.rows[0].count, 64);
     await verifyAtomicDdlRollback(migrator);
     await migrator.query(
       `INSERT INTO public.branches (id, name) VALUES

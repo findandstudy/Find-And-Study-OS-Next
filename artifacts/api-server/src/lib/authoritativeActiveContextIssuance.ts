@@ -235,7 +235,6 @@ function parseState(value: unknown): AuthoritativeActiveContextState | null {
     !isNullableTimestamp(value.policy.effectiveAt) ||
     !isNullableTimestamp(value.policy.revokedAt) ||
     !Array.isArray(value.assignments) ||
-    value.assignments.length < 1 ||
     value.assignments.length > ACTIVE_CONTEXT_MAX_ASSIGNMENTS
   ) {
     return null;
@@ -365,6 +364,9 @@ function requireCurrentState(
   }
   if (state.policy.version !== state.tenant.policyVersion) {
     throw new IssuanceDenied("policy_mismatch");
+  }
+  if (state.assignments.length < 1) {
+    throw new IssuanceDenied("assignment_set_invalid");
   }
   const ids = state.assignments.map((assignment) => assignment.id).sort();
   if (new Set(ids).size !== ids.length) {

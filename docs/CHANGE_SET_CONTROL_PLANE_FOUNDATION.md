@@ -410,7 +410,7 @@ writer quarantines remain authoritative.
 
 ## Next safe slice
 
-The 63-migration PostgreSQL 16 foundation and default-unwired command, evidence,
+The 64-migration PostgreSQL 16 foundation candidate and default-unwired command, evidence,
 durable-audit, request-context-bound transaction, ambiguous-commit,
 query-cancellation, membership/policy revocation, evidence-key compromise,
 exact tenant-grant, global issuer revocation, CREATE write-boundary rollback,
@@ -434,15 +434,31 @@ UUID source, and clock. Client field injection, inactive state, repository
 contract drift, resolver/signing timeout, and revoke-first execution fail before
 a token can escape.
 
-The next safe slice is a default-unwired PostgreSQL implementation of that
-authoritative resolver. It must use a dedicated read/lock-only credential and a
-fixed-search-path facade or exact parameterized queries; set tenant context
-transaction-locally; lock tenant, principal, membership, current policy, and
-the exact assignment set in a documented order; and keep the lock until signer
-completion. Issuance-first and revoke/policy-rotation-first races, pool reuse,
-query cancellation, timeout, cross-tenant/branch lookup, duplicate membership,
-and connection loss must be proven on disposable PostgreSQL. No generic table
-DML, scheduler, HTTP route, Super Admin UI, or production credential may be
-connected before required checks, production role/bootstrap review, and
-independent approval exist. Publisher and configuration materialization
-adapters remain separate and default-off.
+Migration `0063` and `PostgresAuthoritativeActiveContextRepository` implement a
+default-unwired candidate for that boundary. `fas_auth_v1` is fixed-search-path;
+the resolver login has no table privileges and receives only exact RPC execute,
+while a separate NOLOGIN owner holds the row-lock privileges. The adapter pins
+the expected database role, starts a `SERIALIZABLE` transaction, sets tenant and
+timeouts transaction-locally, and holds tenant, principal, exact membership,
+current policy, applicable assignment, package, role-definition, and capability
+locks through signer completion. Global principal state is not projected unless
+one exact tenant-local membership exists. The disposable PostgreSQL matrix
+includes issuance-first membership revoke, membership/policy revoke-first,
+cross-tenant RPC, direct-table deny, SQLSTATE `57014` cancellation, rollback,
+pool-context cleanup, and organization-scope propagation into an exact branch
+context. This implementation passed on GitHub head
+`cde1ef1bedf07eefb96bcf2ccdc933b79d632adb` (local equivalent
+`26f5dc1d12bf8a21b7557c5e829e47d6aa7a43ce`, shared tree
+`f502f2bb812210e2ac1e088f206621558cbc9ff7`): foundation run `32554158137`,
+adapter/evidence run `32554158158`, durable-audit run `32554158114`, and G0
+Linux/Windows run `32554158141` all succeeded. Repository-required checks and
+independent approval remain separate governance gates.
+
+The next safe slice after that gate is default-off HTTP authentication/session
+extraction into the already branded request binder, with no public route
+activation. Session principal, server-selected tenant/organization/branch,
+CSRF/origin, rate limit, absolute session age, and resolver/token audience must
+be exact and negative-tested. No generic table DML, scheduler, Super Admin UI,
+publisher, production credential, or production migration may be connected
+before required checks, production role/bootstrap review, and independent
+approval exist.

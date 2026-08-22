@@ -21,7 +21,7 @@ jobs:
         image: postgres:16.15@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5
         env:
           POSTGRES_DB: fas_it_${{ github.run_id }}_${{ github.run_attempt }}
-          POSTGRES_PASSWORD: postgres_it_2026
+          POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_USER: postgres
         ports:
           - 5432:5432
@@ -63,16 +63,16 @@ jobs:
 
       - name: Prepare disposable migrator and runtime roles
         env:
-          PG_GATE_ADMIN_URL: postgresql://postgres:postgres_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
-          PG_GATE_APP_URL: postgresql://fas_app:fas_app_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
-          PG_GATE_MIGRATOR_URL: postgresql://fas_migrator:fas_migrator_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+          PG_GATE_ADMIN_URL: postgresql://postgres@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+          PG_GATE_APP_URL: postgresql://fas_app@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+          PG_GATE_MIGRATOR_URL: postgresql://fas_migrator@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
         run: pnpm --filter @workspace/api-server run test:postgres-control-plane-gate -- setup
 
       - name: Apply all reviewed migrations as the migrator role
         working-directory: lib/db
         env:
           ALLOW_REVIEWED_MIGRATIONS: "true"
-          DATABASE_URL: postgresql://fas_migrator:fas_migrator_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+          DATABASE_URL: postgresql://fas_migrator@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
           MIGRATION_TARGET_ENV: test
         run: node ./run-migrations.mjs
 
@@ -80,20 +80,20 @@ jobs:
         working-directory: lib/db
         env:
           ALLOW_REVIEWED_MIGRATIONS: "true"
-          DATABASE_URL: postgresql://fas_migrator:fas_migrator_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+          DATABASE_URL: postgresql://fas_migrator@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
           MIGRATION_TARGET_ENV: test
         run: node ./run-migrations.mjs
 
       - name: Run direct PostgreSQL negative and concurrency checks
         env:
-          PG_GATE_ADMIN_URL: postgresql://postgres:postgres_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
-          PG_GATE_APP_URL: postgresql://fas_app:fas_app_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
-          PG_GATE_MIGRATOR_URL: postgresql://fas_migrator:fas_migrator_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+          PG_GATE_ADMIN_URL: postgresql://postgres@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+          PG_GATE_APP_URL: postgresql://fas_app@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+          PG_GATE_MIGRATOR_URL: postgresql://fas_migrator@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
         run: pnpm --filter @workspace/api-server run test:postgres-control-plane-gate -- verify
 
       - name: Run signed-contract object authorization integration test
         env:
           ALLOW_LIVE_INTEGRATIONS: "false"
-          DATABASE_URL: postgresql://postgres:postgres_it_2026@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+          DATABASE_URL: postgresql://postgres@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
           OBJECT_AUTHZ_TEST_ALLOW_DATABASE_MUTATION: "1"
         run: pnpm --filter @workspace/api-server run test:object-authz-signed-contract

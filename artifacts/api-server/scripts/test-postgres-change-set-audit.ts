@@ -194,8 +194,7 @@ async function bootstrapAuditAuthority() {
       CREATE ROLE ${ROLE.repairOwner}
         NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
       CREATE ROLE ${ROLE.repairWorker}
-        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS
-        PASSWORD 'fas_repair_worker_it_2026';
+        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
       ALTER ROLE ${ROLE.repairWorker} SET statement_timeout = '15s';
       ALTER ROLE ${ROLE.repairWorker} SET lock_timeout = '5s';
       ALTER ROLE ${ROLE.repairWorker} SET idle_in_transaction_session_timeout = '15s';

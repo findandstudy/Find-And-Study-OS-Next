@@ -442,6 +442,13 @@
       "when": 1787317200000,
       "tag": "0062_change_set_scheduled_reconciliation",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1787320800000,
+      "tag": "0063_active_context_authoritative_resolver",
+      "breakpoints": true
     }
   ]
 }

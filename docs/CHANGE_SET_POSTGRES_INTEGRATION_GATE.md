@@ -1,15 +1,15 @@
 # ChangeSet PostgreSQL Integration Gate
 
-Status: **63-MIGRATION FOUNDATION, DEFAULT-UNWIRED CONTEXT-BOUND
+Status: **64-MIGRATION FOUNDATION CANDIDATE, DEFAULT-UNWIRED CONTEXT-BOUND
 COMMAND/EVIDENCE, QUERY-CANCELLATION ROLLBACK, MEMBERSHIP/POLICY REVOCATION
 SERIALIZATION, EVIDENCE-KEY COMPROMISE SERIALIZATION, AMBIGUOUS-COMMIT
 AND SCHEDULED RECEIPT-ONLY RECONCILIATION, AND DURABLE-AUDIT ADAPTER CI GREEN;
 NO-GO for runtime wiring**.
 
 This gate is not a delivery estimate and is not proof that migrations `0055`
-through `0062` have run in a long-lived environment. The approved local
+through `0063` have run in a long-lived environment. The approved local
 PostgreSQL endpoint `127.0.0.1:5433/fasos_apply_local` was unavailable. GitHub
-run `32547890515` applied all 63 reviewed migrations twice to an isolated
+run `32547890515` applied the prior 63 reviewed migrations twice to an isolated
 disposable PostgreSQL 16 database and passed the direct-SQL foundation matrix.
 Run `32547890517` passed the real default-unwired command-store,
 evidence-issuer, query-cancellation rollback and ambiguous-commit replay
@@ -119,7 +119,7 @@ The gate passes only when CI records all of the following:
 `artifacts/api-server/scripts/test-postgres-control-plane-gate.ts` define the
 foundation PostgreSQL 16 gate. It uses an immutable official
 image digest, a per-run `fas_it_*` database, separate `fas_migrator` and
-`fas_app` logins. The current candidate targets all 63 migrations twice. It
+`fas_app` logins. The current candidate targets all 64 migrations twice. It
 directly
 exercises:
 
@@ -220,7 +220,7 @@ run `32551335113`, and G0 Linux/Windows run `32551335019`. The checks are not
 yet required by a repository ruleset. Two earlier scheduled-reconciliation
 candidate runs correctly failed because the foundation harness retained the
 prior 62-migration denominator in its main and atomic-rollback assertions; both
-guards now require 63/63.
+guards now require 64/64.
 
 The production-shaped request binder verifies the signed active context once,
 requires exact server-resolved principal, tenant, organization, and branch
@@ -249,11 +249,35 @@ callback exactly-once, returned-token identity, resolver/signing budget,
 client-field injection, inactive/revoked state, and issuance-first/revoke-first
 ordering are covered without an HTTP route.
 
-The adapter candidate still does not cover a real PostgreSQL implementation of
-that locked resolver, HTTP authentication/session extraction, direct
-command-credential compromise, scheduled repair activation and alert delivery,
-production KMS/HSM key custody/rotation, or decision/step-up paths. Those gaps
-keep runtime wiring at NO-GO.
+Migration `0063` and `PostgresAuthoritativeActiveContextRepository` add the
+default-unwired PostgreSQL resolver candidate. A dedicated login receives only
+schema usage and exact function execution; its separate NOLOGIN owner holds the
+minimum table privileges required for `FOR SHARE`, and neither role is inherited
+by the other. The adapter requires a clean connection, a transaction-local
+tenant GUC, and `SERIALIZABLE` isolation. The fixed-search-path function locks
+tenant, principal, exact membership, current policy, applicable assignment,
+package, role-definition, and capability rows in a documented order while the
+external signer runs. It never projects a global principal without one exact
+tenant membership. Direct table reads, missing tenant context, cross-tenant
+calls, query cancellation, pool reuse, issuance-first membership revoke, and
+revoke-first membership/policy paths are disposable-PostgreSQL gate cases. The
+scope matrix also proves that an organization assignment remains applicable in
+an exact branch context while its membership, organization, branch, assignment,
+and policy identities remain bound in the signed token.
+
+The `0063` implementation passed on GitHub head
+`cde1ef1bedf07eefb96bcf2ccdc933b79d632adb` (local equivalent
+`26f5dc1d12bf8a21b7557c5e829e47d6aa7a43ce`, shared tree
+`f502f2bb812210e2ac1e088f206621558cbc9ff7`): foundation run `32554158137`,
+adapter/evidence run `32554158158`, durable-audit run `32554158114`, and G0
+Linux/Windows run `32554158141` all succeeded. These successful runs are
+evidence for the exact implementation tree, not proof that repository rules
+make the checks required.
+
+The adapter candidate still does not cover HTTP authentication/session
+extraction, direct resolver-credential compromise detection, scheduled repair
+activation and alert delivery, production KMS/HSM key custody/rotation, or
+decision/step-up paths. Those gaps keep runtime wiring at NO-GO.
 
 ## Runtime-wiring gate
 

@@ -3,11 +3,16 @@ import crypto from "node:crypto";
 import pg from "pg";
 
 import {
+  fingerprintActiveContextPublicKey,
   signActiveTenantContext,
   verifyActiveTenantContext,
+  verifyVersionedActiveTenantContext,
+  type ActiveContextExternalSigner,
+  type ActiveContextVerificationKey,
   type ActiveTenantContextClaims,
   type VerifiedActiveTenantContext,
 } from "../src/lib/activeTenantContext.js";
+import { issueAuthoritativeActiveTenantContext } from "../src/lib/authoritativeActiveContextIssuance.js";
 import {
   executeCreateR1ChangeSetCommand,
   executeTransitionR1ChangeSetCommand,
@@ -28,6 +33,7 @@ import {
   type PostgresChangeSetCommandStoreOptions,
 } from "../src/lib/postgresChangeSetCommandStore.js";
 import { PostgresChangeSetEvidenceIssuer } from "../src/lib/postgresChangeSetEvidenceIssuer.js";
+import { PostgresAuthoritativeActiveContextRepository } from "../src/lib/postgresAuthoritativeActiveContextRepository.js";
 
 const { Client, Pool } = pg;
 
@@ -35,10 +41,17 @@ const adminUrl = requiredUrl("PG_GATE_ADMIN_URL");
 const migratorUrl = requiredUrl("PG_GATE_MIGRATOR_URL");
 const executorUrl = requiredUrl("PG_GATE_EXECUTOR_URL");
 const evidenceIssuerUrl = requiredUrl("PG_GATE_EVIDENCE_ISSUER_URL");
+const contextResolverUrl = requiredUrl("PG_GATE_CONTEXT_RESOLVER_URL");
 const databaseName = new URL(adminUrl).pathname.slice(1);
 
 assert.match(databaseName, /^fas_it_[a-z0-9_]+$/);
-for (const value of [adminUrl, migratorUrl, executorUrl, evidenceIssuerUrl]) {
+for (const value of [
+  adminUrl,
+  migratorUrl,
+  executorUrl,
+  evidenceIssuerUrl,
+  contextResolverUrl,
+]) {
   const parsed = new URL(value);
   assert.equal(parsed.hostname, "127.0.0.1");
   assert.equal(parsed.port, "5432");
@@ -52,6 +65,8 @@ const ROLE = {
   commandExecutor: "fas_cp_executor",
   evidenceOwner: "fas_evidence_owner",
   evidenceIssuer: "fas_evidence_issuer",
+  contextOwner: "fas_auth_context_owner",
+  contextResolver: "fas_auth_context_resolver",
 } as const;
 
 const ID = {
@@ -125,11 +140,24 @@ const ID = {
   failCompleteCommand: "018f5000-0000-7000-8000-000000000057",
   failCompleteAccess: "018f5000-0000-7000-8000-000000000058",
   failCompleteChangeSet: "018f5000-0000-7000-8000-000000000059",
+  unboundPrincipal: "018f5000-0000-7000-8000-00000000005e",
+  activeContextIssuer: "018f5000-0000-7000-8000-00000000005f",
+  organization: "018f5000-0000-7000-8000-000000000060",
+  branchMembership: "018f5000-0000-7000-8000-000000000061",
+  organizationGrantReceipt: "018f5000-0000-7000-8000-000000000062",
+  organizationAssignment: "018f5000-0000-7000-8000-000000000063",
+  organizationBranchContext: "018f5000-0000-7000-8000-000000000064",
+  issuedContext: "018f5000-0000-7000-8000-00000000005a",
+  issuanceRaceContext: "018f5000-0000-7000-8000-00000000005b",
+  membershipDeniedContext: "018f5000-0000-7000-8000-00000000005c",
+  policyDeniedContext: "018f5000-0000-7000-8000-00000000005d",
 } as const;
+const LEGACY_BRANCH_ID = 620_001;
 
 const NOW = Date.now();
 const activeContextSecret = crypto.randomBytes(48).toString("base64url");
 const evidenceKeys = crypto.generateKeyPairSync("ed25519");
+const activeContextKeys = crypto.generateKeyPairSync("ed25519");
 const evidenceIssuerId = "fas-evidence-service";
 const evidenceKeyId = "adapter-test-key-1";
 const evidenceRaceKeyId = "adapter-test-key-race-1";
@@ -433,16 +461,21 @@ function failAfterTransactionMethod(input: {
 async function bootstrapAuthority() {
   await withClient(adminUrl, async (admin) => {
     await admin.query(`
-      GRANT CONNECT ON DATABASE ${databaseName} TO ${ROLE.commandExecutor}, ${ROLE.evidenceIssuer};
+      GRANT CONNECT ON DATABASE ${databaseName} TO
+        ${ROLE.commandExecutor}, ${ROLE.evidenceIssuer}, ${ROLE.contextResolver};
       GRANT USAGE ON SCHEMA public, fas_cp_v1 TO ${ROLE.commandOwner};
       GRANT USAGE ON SCHEMA public, fas_evidence_v1 TO ${ROLE.evidenceOwner};
+      GRANT USAGE ON SCHEMA public, fas_auth_v1 TO ${ROLE.contextOwner};
       GRANT USAGE ON SCHEMA fas_cp_v1 TO ${ROLE.commandExecutor};
       GRANT USAGE ON SCHEMA fas_evidence_v1 TO ${ROLE.evidenceIssuer};
+      GRANT USAGE ON SCHEMA fas_auth_v1 TO ${ROLE.contextResolver};
 
       REVOKE ALL ON ALL TABLES IN SCHEMA public FROM
-        ${ROLE.commandOwner}, ${ROLE.commandExecutor}, ${ROLE.evidenceOwner}, ${ROLE.evidenceIssuer};
+        ${ROLE.commandOwner}, ${ROLE.commandExecutor}, ${ROLE.evidenceOwner},
+        ${ROLE.evidenceIssuer}, ${ROLE.contextOwner}, ${ROLE.contextResolver};
       REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM
-        ${ROLE.commandOwner}, ${ROLE.commandExecutor}, ${ROLE.evidenceOwner}, ${ROLE.evidenceIssuer};
+        ${ROLE.commandOwner}, ${ROLE.commandExecutor}, ${ROLE.evidenceOwner},
+        ${ROLE.evidenceIssuer}, ${ROLE.contextOwner}, ${ROLE.contextResolver};
 
       GRANT SELECT, UPDATE ON TABLE
         public.tenants,
@@ -486,6 +519,18 @@ async function bootstrapAuthority() {
       TO ${ROLE.evidenceOwner};
       GRANT SELECT, INSERT ON TABLE public.change_set_evidence_receipts
       TO ${ROLE.evidenceOwner};
+
+      GRANT SELECT, UPDATE ON TABLE
+        public.tenants,
+        public.principals,
+        public.memberships,
+        public.policy_versions,
+        public.access_assignments,
+        public.role_package_versions,
+        public.role_definitions,
+        public.role_package_capabilities,
+        public.capability_definitions
+      TO ${ROLE.contextOwner};
     `);
 
     const functions = await admin.query<{
@@ -498,14 +543,18 @@ async function bootstrapAuthority() {
               pg_get_function_identity_arguments(procedure.oid) AS identity_arguments
        FROM pg_proc procedure
        JOIN pg_namespace namespace ON namespace.oid = procedure.pronamespace
-       WHERE namespace.nspname IN ('fas_cp_v1', 'fas_evidence_v1')
+       WHERE namespace.nspname IN ('fas_auth_v1', 'fas_cp_v1', 'fas_evidence_v1')
        ORDER BY namespace.nspname, procedure.proname`,
     );
     assert.ok(functions.rowCount && functions.rowCount >= 16);
     for (const fn of functions.rows) {
       assert.match(fn.function_name, /^[a-z][a-z0-9_]+$/);
       const owner =
-        fn.schema_name === "fas_cp_v1" ? ROLE.commandOwner : ROLE.evidenceOwner;
+        fn.schema_name === "fas_cp_v1"
+          ? ROLE.commandOwner
+          : fn.schema_name === "fas_evidence_v1"
+            ? ROLE.evidenceOwner
+            : ROLE.contextOwner;
       await admin.query(
         `ALTER FUNCTION ${fn.schema_name}.${fn.function_name}(${fn.identity_arguments}) OWNER TO ${owner}`,
       );
@@ -538,6 +587,7 @@ async function bootstrapAuthority() {
     await admin.query(`
       REVOKE ALL ON ALL FUNCTIONS IN SCHEMA fas_cp_v1 FROM PUBLIC, ${ROLE.commandExecutor};
       REVOKE ALL ON ALL FUNCTIONS IN SCHEMA fas_evidence_v1 FROM PUBLIC, ${ROLE.evidenceIssuer};
+      REVOKE ALL ON ALL FUNCTIONS IN SCHEMA fas_auth_v1 FROM PUBLIC, ${ROLE.contextResolver};
       GRANT EXECUTE ON FUNCTION
         fas_cp_v1.load_authoritative_configuration(uuid, text, text, jsonb),
         fas_cp_v1.resolve_active_context(uuid, uuid, uuid, uuid, uuid[]),
@@ -558,6 +608,9 @@ async function bootstrapAuthority() {
         fas_evidence_v1.load_verification_context(uuid, text, text, uuid),
         fas_evidence_v1.persist_receipt(uuid, jsonb)
       TO ${ROLE.evidenceIssuer};
+      GRANT EXECUTE ON FUNCTION
+        fas_auth_v1.resolve_active_context_for_issuance(uuid, uuid, uuid, integer, bigint)
+      TO ${ROLE.contextResolver};
     `);
   });
 }
@@ -568,9 +621,16 @@ async function verifyAuthoritySplit() {
       `SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, rolinherit,
               rolreplication, rolbypassrls, rolcanlogin
        FROM pg_roles WHERE rolname = ANY($1::text[]) ORDER BY rolname`,
-      [[ROLE.commandOwner, ROLE.commandExecutor, ROLE.evidenceOwner, ROLE.evidenceIssuer]],
+      [[
+        ROLE.commandOwner,
+        ROLE.commandExecutor,
+        ROLE.evidenceOwner,
+        ROLE.evidenceIssuer,
+        ROLE.contextOwner,
+        ROLE.contextResolver,
+      ]],
     );
-    assert.equal(roles.rowCount, 4);
+    assert.equal(roles.rowCount, 6);
     for (const role of roles.rows) {
       assert.equal(role.rolsuper, false);
       assert.equal(role.rolcreatedb, false);
@@ -580,17 +640,30 @@ async function verifyAuthoritySplit() {
       assert.equal(role.rolbypassrls, false);
       assert.equal(
         role.rolcanlogin,
-        role.rolname === ROLE.commandExecutor || role.rolname === ROLE.evidenceIssuer,
+        role.rolname === ROLE.commandExecutor ||
+          role.rolname === ROLE.evidenceIssuer ||
+          role.rolname === ROLE.contextResolver,
       );
     }
     const memberships = await admin.query(
       `SELECT count(*)::int AS count FROM pg_auth_members membership
        JOIN pg_roles member_role ON member_role.oid = membership.member
        WHERE member_role.rolname = ANY($1::text[])`,
-      [[ROLE.commandOwner, ROLE.commandExecutor, ROLE.evidenceOwner, ROLE.evidenceIssuer]],
+      [[
+        ROLE.commandOwner,
+        ROLE.commandExecutor,
+        ROLE.evidenceOwner,
+        ROLE.evidenceIssuer,
+        ROLE.contextOwner,
+        ROLE.contextResolver,
+      ]],
     );
     assert.equal(memberships.rows[0].count, 0);
-    for (const role of [ROLE.commandExecutor, ROLE.evidenceIssuer]) {
+    for (const role of [
+      ROLE.commandExecutor,
+      ROLE.evidenceIssuer,
+      ROLE.contextResolver,
+    ]) {
       const privileges = await admin.query(
         `SELECT count(*)::int AS count
          FROM information_schema.role_table_grants
@@ -604,10 +677,11 @@ async function verifyAuthoritySplit() {
        FROM pg_proc procedure
        JOIN pg_namespace namespace ON namespace.oid = procedure.pronamespace
        JOIN pg_roles owner_role ON owner_role.oid = procedure.proowner
-       WHERE namespace.nspname IN ('fas_cp_v1', 'fas_evidence_v1')
+       WHERE namespace.nspname IN ('fas_auth_v1', 'fas_cp_v1', 'fas_evidence_v1')
        GROUP BY namespace.nspname, owner_role.rolname ORDER BY namespace.nspname`,
     );
     assert.deepEqual(owners.rows, [
+      { nspname: "fas_auth_v1", rolname: ROLE.contextOwner, count: 1 },
       { nspname: "fas_cp_v1", rolname: ROLE.commandOwner, count: 15 },
       { nspname: "fas_evidence_v1", rolname: ROLE.evidenceOwner, count: 3 },
     ]);
@@ -651,8 +725,10 @@ async function seedFoundation() {
       await migrator.query(
         `INSERT INTO public.principals
           (id, principal_type, issuer, subject, status, risk_state)
-         VALUES ($1, 'HUMAN', 'adapter-gate', 'maker', 'ACTIVE', 'NORMAL')`,
-        [ID.humanPrincipal],
+         VALUES
+          ($1, 'HUMAN', 'adapter-gate', 'maker', 'ACTIVE', 'NORMAL'),
+          ($2, 'HUMAN', 'adapter-gate', 'unbound', 'ACTIVE', 'NORMAL')`,
+        [ID.humanPrincipal, ID.unboundPrincipal],
       );
       await migrator.query(
         `INSERT INTO public.tenants
@@ -661,10 +737,37 @@ async function seedFoundation() {
         [ID.tenant],
       );
       await migrator.query(
+        `INSERT INTO public.organizations
+          (id, tenant_id, legal_name, display_name, organization_type, status)
+         VALUES ($1, $2, 'Adapter Organization', 'Adapter Organization',
+                 'OPERATING_ENTITY', 'ACTIVE')`,
+        [ID.organization, ID.tenant],
+      );
+      await migrator.query(
+        `INSERT INTO public.branches (id, name)
+         VALUES ($1, 'Adapter organization-scope branch')`,
+        [LEGACY_BRANCH_ID],
+      );
+      await migrator.query(
+        `INSERT INTO public.tenant_organization_legacy_branches
+          (tenant_id, organization_id, legacy_branch_id)
+         VALUES ($1, $2, $3)`,
+        [ID.tenant, ID.organization, LEGACY_BRANCH_ID],
+      );
+      await migrator.query(
         `INSERT INTO public.memberships
-          (id, tenant_id, principal_id, status, valid_from)
-         VALUES ($1, $2, $3, 'ACTIVE', statement_timestamp() - interval '1 minute')`,
-        [ID.humanMembership, ID.tenant, ID.humanPrincipal],
+          (id, tenant_id, organization_id, legacy_branch_id, principal_id, status, valid_from)
+         VALUES
+          ($1, $2, NULL, NULL, $3, 'ACTIVE', statement_timestamp() - interval '1 minute'),
+          ($4, $2, $5, $6, $3, 'ACTIVE', statement_timestamp() - interval '1 minute')`,
+        [
+          ID.humanMembership,
+          ID.tenant,
+          ID.humanPrincipal,
+          ID.branchMembership,
+          ID.organization,
+          LEGACY_BRANCH_ID,
+        ],
       );
       await migrator.query(
         `INSERT INTO public.policy_versions
@@ -711,10 +814,11 @@ async function seedFoundation() {
           id, tenant_id, receipt_type, actor_principal_id, actor_membership_id,
           resource_type, resource_id, reason_code, correlation_id, evidence,
           receipt_hash
-        ) VALUES (
-          $1, $2, 'GRANT', $3, $4, 'ACCESS_ASSIGNMENT', $5,
-          'adapter_test', 'adapter-test-grant', '{}'::jsonb, $6
-        )`,
+        ) VALUES
+          ($1, $2, 'GRANT', $3, $4, 'ACCESS_ASSIGNMENT', $5,
+           'adapter_test', 'adapter-test-grant', '{}'::jsonb, $6),
+          ($7, $2, 'GRANT', $3, $4, 'ACCESS_ASSIGNMENT', $8,
+           'adapter_test', 'adapter-test-organization-grant', '{}'::jsonb, $9)`,
         [
           ID.grantReceipt,
           ID.tenant,
@@ -722,17 +826,21 @@ async function seedFoundation() {
           ID.humanMembership,
           ID.assignment,
           sha256("adapter-grant-receipt"),
+          ID.organizationGrantReceipt,
+          ID.organizationAssignment,
+          sha256("adapter-organization-grant-receipt"),
         ],
       );
       await migrator.query(
         `INSERT INTO public.access_assignments (
-          id, tenant_id, membership_id, role_package_version_id, scope_type,
+          id, tenant_id, membership_id, role_package_version_id, scope_type, organization_id,
           constraint_document, status, valid_from, granted_by_principal_id,
           granted_by_membership_id, grant_receipt_id, grant_receipt_type
-        ) VALUES (
-          $1, $2, $3, $4, 'TENANT', '{}'::jsonb, 'ACTIVE',
-          statement_timestamp() - interval '1 minute', $5, $3, $6, 'GRANT'
-        )`,
+        ) VALUES
+          ($1, $2, $3, $4, 'TENANT', NULL, '{}'::jsonb, 'ACTIVE',
+           statement_timestamp() - interval '1 minute', $5, $3, $6, 'GRANT'),
+          ($7, $2, $8, $4, 'ORGANIZATION', $9, '{}'::jsonb, 'ACTIVE',
+           statement_timestamp() - interval '1 minute', $5, $3, $10, 'GRANT')`,
         [
           ID.assignment,
           ID.tenant,
@@ -740,6 +848,10 @@ async function seedFoundation() {
           ID.rolePackage,
           ID.humanPrincipal,
           ID.grantReceipt,
+          ID.organizationAssignment,
+          ID.branchMembership,
+          ID.organization,
+          ID.organizationGrantReceipt,
         ],
       );
       await migrator.query(
@@ -831,6 +943,71 @@ function evidenceSigner(keyId = evidenceKeyId): ChangeSetEvidenceSigner {
   };
 }
 
+function activeContextVerificationKey(): ActiveContextVerificationKey {
+  const publicKeyPem = activeContextKeys.publicKey.export({
+    type: "spki",
+    format: "pem",
+  }).toString();
+  return {
+    keyId: "active-context-adapter-key-1",
+    algorithm: "Ed25519",
+    state: "ACTIVE",
+    issuerId: ID.activeContextIssuer,
+    environmentId: "test",
+    cellId: "cell-a",
+    publicKeyPem,
+    publicKeyFingerprint: fingerprintActiveContextPublicKey(publicKeyPem),
+    signFrom: NOW - 60_000,
+    signUntil: NOW + 60 * 60_000,
+    verifyUntil: NOW + 2 * 60 * 60_000,
+  };
+}
+
+function activeContextSigner(): ActiveContextExternalSigner {
+  return {
+    sign: async ({ signingInput }) =>
+      crypto.sign(null, signingInput, activeContextKeys.privateKey),
+  };
+}
+
+function cancelDuringAuthoritativeResolution(input: {
+  pool: pg.Pool;
+  ready: (pid: number) => void;
+}): pg.Pool {
+  let armed = true;
+  return {
+    connect: async () => {
+      const client = await input.pool.connect();
+      return new Proxy(client, {
+        get(target, property, receiver) {
+          if (property === "query") {
+            return async (text: string, values?: unknown[]) => {
+              if (
+                armed &&
+                text.includes("fas_auth_v1.resolve_active_context_for_issuance")
+              ) {
+                armed = false;
+                const backend = await target.query<{ pid: number }>(
+                  "SELECT pg_backend_pid()::int AS pid",
+                );
+                const pid = Number(backend.rows[0]?.pid);
+                if (!Number.isSafeInteger(pid) || pid <= 0) {
+                  throw new Error("active_context_cancel_backend_pid_invalid");
+                }
+                input.ready(pid);
+                await target.query("SELECT pg_sleep(30)");
+              }
+              return target.query(text, values as never[] | undefined);
+            };
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    },
+  } as unknown as pg.Pool;
+}
+
 async function main() {
   await bootstrapAuthority();
   await verifyAuthoritySplit();
@@ -852,7 +1029,292 @@ async function main() {
     lock_timeout: 5_000,
     idle_in_transaction_session_timeout: 15_000,
   });
+  const contextResolverPool = new Pool({
+    connectionString: contextResolverUrl,
+    max: 1,
+    connectionTimeoutMillis: 10_000,
+    statement_timeout: 15_000,
+    lock_timeout: 5_000,
+    idle_in_transaction_session_timeout: 15_000,
+  });
   try {
+    const contextKey = activeContextVerificationKey();
+    const contextRepository = new PostgresAuthoritativeActiveContextRepository({
+      pool: contextResolverPool,
+      expectedRole: ROLE.contextResolver,
+    });
+    const issuanceRequest = {
+      authenticatedPrincipalId: ID.humanPrincipal,
+      tenantId: ID.tenant,
+      organizationId: null,
+      legacyBranchId: null,
+    } as const;
+    const issueContext = (
+      contextId: string,
+      signer: ActiveContextExternalSigner = activeContextSigner(),
+      request: unknown = issuanceRequest,
+    ) =>
+      issueAuthoritativeActiveTenantContext({
+        request,
+        repository: contextRepository,
+        audience: "fas.active-context",
+        environmentId: "test",
+        cellId: "cell-a",
+        issuerId: contextKey.issuerId,
+        keyId: contextKey.keyId,
+        keyReference: "test-memory://active-context/adapter-key-1",
+        keyRing: [contextKey],
+        signer,
+        nextUuidV7: () => contextId,
+        now: () => NOW,
+      });
+
+    const issuedContext = await issueContext(ID.issuedContext);
+    assert.equal(
+      issuedContext.ok,
+      true,
+      issuedContext.ok ? undefined : `authoritative context issuance denied: ${issuedContext.reason}`,
+    );
+    if (!issuedContext.ok) throw new Error(issuedContext.reason);
+    const verifiedIssuedContext = verifyVersionedActiveTenantContext({
+      token: issuedContext.token,
+      keyRing: [contextKey],
+      expected: {
+        audience: "fas.active-context",
+        environmentId: "test",
+        cellId: "cell-a",
+        issuerId: contextKey.issuerId,
+        tenantId: ID.tenant,
+      },
+      now: NOW,
+    });
+    assert.equal(verifiedIssuedContext.ok, true);
+    if (!verifiedIssuedContext.ok) throw new Error(verifiedIssuedContext.reason);
+    assert.equal(verifiedIssuedContext.context.principalId, ID.humanPrincipal);
+    assert.equal(verifiedIssuedContext.context.membershipId, ID.humanMembership);
+    assert.deepEqual(verifiedIssuedContext.context.assignmentIds, [ID.assignment]);
+    assert.equal(verifiedIssuedContext.context.policyVersionId, ID.policy);
+
+    const organizationBranchContext = await issueContext(
+      ID.organizationBranchContext,
+      activeContextSigner(),
+      {
+        authenticatedPrincipalId: ID.humanPrincipal,
+        tenantId: ID.tenant,
+        organizationId: ID.organization,
+        legacyBranchId: LEGACY_BRANCH_ID,
+      },
+    );
+    assert.equal(
+      organizationBranchContext.ok,
+      true,
+      organizationBranchContext.ok
+        ? undefined
+        : `organization-scope issuance denied: ${organizationBranchContext.reason}`,
+    );
+    if (!organizationBranchContext.ok) {
+      throw new Error(organizationBranchContext.reason);
+    }
+    const verifiedOrganizationBranch = verifyVersionedActiveTenantContext({
+      token: organizationBranchContext.token,
+      keyRing: [contextKey],
+      expected: {
+        audience: "fas.active-context",
+        environmentId: "test",
+        cellId: "cell-a",
+        issuerId: contextKey.issuerId,
+        tenantId: ID.tenant,
+      },
+      now: NOW,
+    });
+    assert.equal(verifiedOrganizationBranch.ok, true);
+    if (!verifiedOrganizationBranch.ok) {
+      throw new Error(verifiedOrganizationBranch.reason);
+    }
+    assert.equal(verifiedOrganizationBranch.context.organizationId, ID.organization);
+    assert.equal(verifiedOrganizationBranch.context.legacyBranchId, LEGACY_BRANCH_ID);
+    assert.equal(verifiedOrganizationBranch.context.membershipId, ID.branchMembership);
+    assert.deepEqual(verifiedOrganizationBranch.context.assignmentIds, [
+      ID.organizationAssignment,
+    ]);
+
+    const signerReady = deferred<void>();
+    const releaseSigner = deferred<void>();
+    const issuanceRace = issueContext(ID.issuanceRaceContext, {
+      sign: async (signInput) => {
+        signerReady.resolve();
+        await releaseSigner.promise;
+        return activeContextSigner().sign(signInput);
+      },
+    });
+    await within(signerReady.promise, 10_000);
+    const membershipRevoker = new Client({
+      connectionString: migratorUrl,
+      connectionTimeoutMillis: 10_000,
+      statement_timeout: 15_000,
+      lock_timeout: 5_000,
+      idle_in_transaction_session_timeout: 15_000,
+    });
+    await membershipRevoker.connect();
+    let membershipRevokeTransactionOpen = false;
+    try {
+      await membershipRevoker.query("BEGIN");
+      membershipRevokeTransactionOpen = true;
+      await membershipRevoker.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+        ID.tenant,
+      ]);
+      const revokerBackend = await membershipRevoker.query<{ pid: number }>(
+        "SELECT pg_backend_pid()::int AS pid",
+      );
+      const revokerPid = Number(revokerBackend.rows[0]?.pid);
+      assert.ok(Number.isSafeInteger(revokerPid) && revokerPid > 0);
+      const revoke = membershipRevoker.query(
+        `UPDATE public.memberships
+         SET status = 'REVOKED', version = version + 1,
+             updated_at = statement_timestamp()
+         WHERE tenant_id = $1 AND id = $2`,
+        [ID.tenant, ID.humanMembership],
+      );
+      await within(waitForBackendLock(revokerPid), 10_000);
+      releaseSigner.resolve();
+      const raceIssued = await issuanceRace;
+      assert.equal(raceIssued.ok, true);
+      const revoked = await revoke;
+      assert.equal(revoked.rowCount, 1);
+      await membershipRevoker.query("COMMIT");
+      membershipRevokeTransactionOpen = false;
+
+      const deniedAfterRevoke = await issueContext(ID.membershipDeniedContext);
+      assert.deepEqual(deniedAfterRevoke, {
+        ok: false,
+        reason: "membership_inactive",
+      });
+    } finally {
+      releaseSigner.resolve();
+      if (membershipRevokeTransactionOpen) {
+        await membershipRevoker.query("ROLLBACK").catch(() => undefined);
+      }
+      await membershipRevoker.end();
+    }
+
+    await withClient(migratorUrl, async (migrator) => {
+      await migrator.query("BEGIN");
+      try {
+        await migrator.query(`SELECT set_config('app.tenant_id', $1, true)`, [ID.tenant]);
+        await migrator.query(
+          `UPDATE public.memberships
+           SET status = 'ACTIVE', version = version + 1,
+               updated_at = statement_timestamp()
+           WHERE tenant_id = $1 AND id = $2`,
+          [ID.tenant, ID.humanMembership],
+        );
+        await migrator.query(
+          `UPDATE public.policy_versions
+           SET state = 'REVOKED', revoked_at = statement_timestamp()
+           WHERE tenant_id = $1 AND id = $2`,
+          [ID.tenant, ID.policy],
+        );
+        await migrator.query("COMMIT");
+      } catch (error) {
+        await migrator.query("ROLLBACK");
+        throw error;
+      }
+    });
+    const deniedAfterPolicyRevoke = await issueContext(ID.policyDeniedContext);
+    assert.deepEqual(deniedAfterPolicyRevoke, {
+      ok: false,
+      reason: "policy_inactive",
+    });
+    await withClient(migratorUrl, async (migrator) => {
+      await migrator.query("BEGIN");
+      try {
+        await migrator.query(`SELECT set_config('app.tenant_id', $1, true)`, [ID.tenant]);
+        await migrator.query(
+          `UPDATE public.policy_versions
+           SET state = 'ACTIVE', revoked_at = NULL
+           WHERE tenant_id = $1 AND id = $2`,
+          [ID.tenant, ID.policy],
+        );
+        await migrator.query("COMMIT");
+      } catch (error) {
+        await migrator.query("ROLLBACK");
+        throw error;
+      }
+    });
+
+    let resolveContextCancellationPid: (pid: number) => void = () => undefined;
+    const contextCancellationPid = new Promise<number>((resolve) => {
+      resolveContextCancellationPid = resolve;
+    });
+    const cancellationRepository = new PostgresAuthoritativeActiveContextRepository({
+      pool: cancelDuringAuthoritativeResolution({
+        pool: contextResolverPool,
+        ready: resolveContextCancellationPid,
+      }),
+      expectedRole: ROLE.contextResolver,
+    });
+    const cancelledResolution = mustFail(
+      () =>
+        cancellationRepository.withLockedCurrentState(
+          { ...issuanceRequest, observedAt: NOW },
+          async () => "must-not-be-issued",
+        ),
+      /canceling statement due to user request/,
+    );
+    const resolverBackendPid = await within(contextCancellationPid, 10_000);
+    await withClient(adminUrl, async (admin) => {
+      const cancelled = await admin.query<{ cancelled: boolean }>(
+        "SELECT pg_cancel_backend($1)::boolean AS cancelled",
+        [resolverBackendPid],
+      );
+      assert.equal(cancelled.rows[0]?.cancelled, true);
+    });
+    await cancelledResolution;
+
+    await withClient(contextResolverUrl, async (resolver) => {
+      await mustFail(
+        () => resolver.query("SELECT * FROM public.principals"),
+        /permission denied/,
+      );
+      await mustFail(
+        () =>
+          resolver.query(
+            "SELECT fas_auth_v1.resolve_active_context_for_issuance($1,$2,$3,$4,$5)",
+            [ID.tenant, ID.humanPrincipal, null, null, NOW],
+          ),
+        /serializable transaction|tenant mismatch/,
+      );
+      await resolver.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+      try {
+        await resolver.query(`SELECT set_config('app.tenant_id', $1, true)`, [ID.tenant]);
+        const unbound = await resolver.query<{ principal_hidden: boolean }>(
+          `SELECT jsonb_typeof(
+             fas_auth_v1.resolve_active_context_for_issuance(
+               $1, $2, NULL, NULL, $3
+             )->'principal'
+           ) = 'null' AS principal_hidden`,
+          [ID.tenant, ID.unboundPrincipal, NOW],
+        );
+        assert.equal(unbound.rows[0]?.principal_hidden, true);
+        await mustFail(
+          () =>
+            resolver.query(
+              "SELECT fas_auth_v1.resolve_active_context_for_issuance($1,$2,$3,$4,$5)",
+              [
+                "018f5000-0000-7000-8000-0000000000ff",
+                ID.humanPrincipal,
+                null,
+                null,
+                NOW,
+              ],
+            ),
+          /tenant mismatch/,
+        );
+      } finally {
+        await resolver.query("ROLLBACK");
+      }
+    });
+
     const evidenceFailures: string[] = [];
     let storeNow = NOW;
     let cancellationArmed = false;
@@ -2230,7 +2692,7 @@ async function main() {
     );
     storeNow = NOW;
 
-    for (const pool of [executorPool, issuerPool]) {
+    for (const pool of [executorPool, issuerPool, contextResolverPool]) {
       const client = await pool.connect();
       try {
         const clean = await client.query(
@@ -2376,10 +2838,14 @@ async function main() {
       }
     });
   } finally {
-    await Promise.all([executorPool.end(), issuerPool.end()]);
+    await Promise.all([
+      executorPool.end(),
+      issuerPool.end(),
+      contextResolverPool.end(),
+    ]);
   }
   console.log(
-    "[postgres-adapter-gate] PASS: EXECUTE-only roles, real command store, ambiguous-commit replay, SQLSTATE 57014 cancellation rollback, membership/policy/key/grant/issuer revoke serialization, signed evidence, and pool cleanup",
+    "[postgres-adapter-gate] PASS: EXECUTE-only authoritative context issuance, real command store, ambiguous-commit replay, SQLSTATE 57014 cancellation rollback, membership/policy/key/grant/issuer revoke serialization, signed evidence, and pool cleanup",
   );
 }
 
