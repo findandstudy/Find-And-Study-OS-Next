@@ -18,7 +18,10 @@ import {
   type ChangeSetEvidenceSigner,
 } from "../src/lib/changeSetEvidenceEnvelope.js";
 import { canonicalJson } from "../src/lib/jsonCanonical.js";
-import { PostgresChangeSetCommandStore } from "../src/lib/postgresChangeSetCommandStore.js";
+import {
+  PostgresChangeSetCommandStore,
+  type PostgresChangeSetCommandStoreOptions,
+} from "../src/lib/postgresChangeSetCommandStore.js";
 import { PostgresChangeSetEvidenceIssuer } from "../src/lib/postgresChangeSetEvidenceIssuer.js";
 
 const { Client, Pool } = pg;
@@ -70,6 +73,9 @@ const ID = {
   transitionReceipt: "018f5000-0000-7000-8000-000000000014",
   rollbackProbe: "018f5000-0000-7000-8000-000000000015",
   createReplayAccess: "018f5000-0000-7000-8000-000000000019",
+  cancellationCommand: "018f5000-0000-7000-8000-00000000001a",
+  cancellationAccess: "018f5000-0000-7000-8000-00000000001b",
+  cancellationChangeSet: "018f5000-0000-7000-8000-00000000001c",
 } as const;
 
 const NOW = Date.now();
@@ -127,6 +133,23 @@ async function mustFail(operation: () => Promise<unknown>, pattern: RegExp) {
     assert.match(error.message, pattern);
     return true;
   });
+}
+
+async function within<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("adapter test synchronization timed out")),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 async function bootstrapAuthority() {
@@ -545,16 +568,35 @@ async function main() {
   try {
     const evidenceFailures: string[] = [];
     let storeNow = NOW;
-    const storeOptions = {
+    let cancellationArmed = false;
+    let resolveCancellationBackendPid: (pid: number) => void = () => undefined;
+    const cancellationBackendPid = new Promise<number>((resolve) => {
+      resolveCancellationBackendPid = resolve;
+    });
+    const storeOptions: Omit<PostgresChangeSetCommandStoreOptions, "pool"> = {
       expectedRole: ROLE.commandExecutor,
       expectedEnvironmentId: "test-ci",
       expectedCellId: "cell-a",
       now: () => storeNow,
-      resolveMutationAssurance: async () => ({
-        impersonating: false,
-        stepUpSatisfied: false,
-        stepUpReceiptId: null,
-      }),
+      resolveMutationAssurance: async ({ client }) => {
+        if (cancellationArmed) {
+          cancellationArmed = false;
+          const backend = await client.query<{ pid: number }>(
+            "SELECT pg_backend_pid()::int AS pid",
+          );
+          const pid = backend.rows[0]?.pid;
+          if (!Number.isSafeInteger(pid) || Number(pid) <= 0) {
+            throw new Error("cancellation_backend_pid_invalid");
+          }
+          resolveCancellationBackendPid(Number(pid));
+          await client.query("SELECT pg_sleep(30)");
+        }
+        return {
+          impersonating: false,
+          stepUpSatisfied: false,
+          stepUpReceiptId: null,
+        };
+      },
       onEvidenceVerificationFailure: (reason: string) =>
         evidenceFailures.push(reason),
     };
@@ -638,6 +680,110 @@ async function main() {
         transitionReceiptId: null,
         approvalReceiptId: null,
       },
+    });
+
+    cancellationArmed = true;
+    const cancelledCommand = executeCreateR1ChangeSetCommand({
+      context,
+      command: {
+        idempotencyKey: "adapter-cancellation-0001",
+        changeType: "FEATURE_FLAG",
+        title: "Cancellation rollback verification",
+        purpose: "Prove query cancellation rolls back the bounded command.",
+        targetScope: {
+          type: "TENANT",
+          organizationId: null,
+          legacyBranchId: null,
+        },
+        proposedConfig: {
+          ...proposedConfig,
+          reason: "This command must be cancelled before its claim.",
+        },
+      },
+      dependencies: {
+        store,
+        now: () => NOW,
+        nextUuidV7: uuidFactory([
+          ID.cancellationCommand,
+          ID.cancellationAccess,
+          ID.cancellationChangeSet,
+        ]),
+      },
+    });
+    const cancellationOutcome = cancelledCommand.then(
+      (value) => ({ kind: "resolved" as const, value }),
+      (error: unknown) => ({ kind: "rejected" as const, error }),
+    );
+    const cancelledPid = await within(
+      Promise.race([
+        cancellationBackendPid,
+        cancellationOutcome.then((outcome): never => {
+          if (outcome.kind === "rejected") throw outcome.error;
+          throw new Error("cancellation_command_resolved_before_backend_ready");
+        }),
+      ]),
+      10_000,
+    );
+    const cancellation = await withClient(adminUrl, (admin) =>
+      admin.query<{ cancelled: boolean }>(
+        "SELECT pg_cancel_backend($1)::boolean AS cancelled",
+        [cancelledPid],
+      ),
+    );
+    assert.equal(cancellation.rows[0]?.cancelled, true);
+    const cancelledOutcome = await cancellationOutcome;
+    assert.equal(cancelledOutcome.kind, "rejected");
+    if (cancelledOutcome.kind === "rejected") {
+      assert.ok(cancelledOutcome.error instanceof Error);
+      assert.equal(
+        (cancelledOutcome.error as Error & { code?: string }).code,
+        "57014",
+      );
+    }
+
+    const reusedClient = await executorPool.connect();
+    try {
+      const clean = await reusedClient.query<{
+        pid: number;
+        tenantSetting: string | null;
+      }>(
+        `SELECT pg_backend_pid()::int AS pid,
+                nullif(current_setting('app.tenant_id', true), '') AS "tenantSetting"`,
+      );
+      assert.equal(clean.rows[0]?.pid, cancelledPid);
+      assert.equal(clean.rows[0]?.tenantSetting, null);
+    } finally {
+      reusedClient.release();
+    }
+
+    await withClient(migratorUrl, async (migrator) => {
+      await migrator.query("BEGIN");
+      try {
+        await migrator.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+          ID.tenant,
+        ]);
+        const partial = await migrator.query<{ count: number }>(
+          `SELECT (
+             (SELECT count(*) FROM public.change_set_command_receipts
+              WHERE tenant_id = $1 AND id = $2)
+             + (SELECT count(*) FROM public.access_decision_receipts
+                WHERE tenant_id = $1 AND id = $3)
+             + (SELECT count(*) FROM public.change_sets
+                WHERE tenant_id = $1 AND id = $4)
+           )::int AS count`,
+          [
+            ID.tenant,
+            ID.cancellationCommand,
+            ID.cancellationAccess,
+            ID.cancellationChangeSet,
+          ],
+        );
+        assert.equal(partial.rows[0]?.count, 0);
+        await migrator.query("ROLLBACK");
+      } catch (error) {
+        await migrator.query("ROLLBACK");
+        throw error;
+      }
     });
 
     const challengeNonce = crypto.randomBytes(32).toString("base64url");
@@ -909,7 +1055,7 @@ async function main() {
     await Promise.all([executorPool.end(), issuerPool.end()]);
   }
   console.log(
-    "[postgres-adapter-gate] PASS: EXECUTE-only roles, real command store, ambiguous-commit replay, signed evidence, rollback, and pool cleanup",
+    "[postgres-adapter-gate] PASS: EXECUTE-only roles, real command store, ambiguous-commit replay, SQLSTATE 57014 cancellation rollback, signed evidence, and pool cleanup",
   );
 }
 

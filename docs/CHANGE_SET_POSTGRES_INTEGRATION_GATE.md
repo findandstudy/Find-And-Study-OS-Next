@@ -1,18 +1,19 @@
 # ChangeSet PostgreSQL Integration Gate
 
 Status: **62-MIGRATION FOUNDATION, DEFAULT-UNWIRED CONTEXT-BOUND
-COMMAND/EVIDENCE, AMBIGUOUS-COMMIT RECONCILIATION, AND DURABLE-AUDIT ADAPTER CI
-GREEN; NO-GO for runtime wiring**.
+COMMAND/EVIDENCE, QUERY-CANCELLATION ROLLBACK, AMBIGUOUS-COMMIT
+RECONCILIATION, AND DURABLE-AUDIT ADAPTER CI GREEN; NO-GO for runtime wiring**.
 
 This gate is not a delivery estimate and is not proof that migrations `0055`
 through `0061` have run in a long-lived environment. The approved local
 PostgreSQL endpoint `127.0.0.1:5433/fasos_apply_local` was unavailable. GitHub
-run `32541302983` applied all 62 reviewed migrations twice to an isolated
+run `32542603820` applied all 62 reviewed migrations twice to an isolated
 disposable PostgreSQL 16 database and passed the direct-SQL foundation matrix.
-Run `32541302979` passed the real default-unwired command-store,
-evidence-issuer and ambiguous-commit replay candidate; run `32541302975`
-passed the separate durable-audit and reconciliation-chain adapter. Run
-`32541302994` passed the Linux and Windows G0 jobs. No
+Run `32542603869` passed the real default-unwired command-store,
+evidence-issuer, query-cancellation rollback and ambiguous-commit replay
+candidate; run `32542603824` passed the separate durable-audit,
+cancellation-terminal and reconciliation-chain adapter. Run `32542603836`
+passed the Linux and Windows G0 jobs. No
 long-lived, production, staging, or production-derived database was mutated.
 
 ## Required database authority split
@@ -45,7 +46,7 @@ credential rollout.
 The test environment must use a disposable PostgreSQL instance matching the
 production major version and pinned by immutable image digest. It must create a
 random `fas_it_*` database, set statement, lock, and idle-transaction timeouts,
-and apply the real migration runner from `0000` through `0060` using only the
+and apply the real migration runner from `0000` through `0061` using only the
 migrator role.
 
 The harness is opt-in and must fail closed unless all of these are true:
@@ -144,7 +145,10 @@ VALIDATED, evidence consumption, canonical replay, rollback, same-client
 tenant-context cleanup and direct-role denials. It also simulates a PostgreSQL
 `COMMIT` that succeeds while its acknowledgement is lost, destroys that
 uncertain pool client and proves that one same-identity retry returns the
-canonical replay. The command validator
+canonical replay. A separate `pg_cancel_backend` case proves SQLSTATE `57014`
+rolls back before the command claim, leaves no partial command/access/ChangeSet
+rows, clears the transaction-local tenant setting, and safely reuses the same
+pool-of-one backend. The command validator
 independently binds artifact count and manifest hash into the signed outcome
 hash.
 
@@ -160,14 +164,19 @@ proves the only allowed unresolved state is
 single `TERMINAL/SUCCESS/COMMAND_RECONCILED` event without actor, context,
 request or hash drift.
 
-All checks passed on ambiguous-commit implementation head
-`ef35a590f0d8cc7394ada65d7d55e57192085fa4`: foundation run `32541302983`,
-command/evidence adapter run `32541302979`, durable-audit run `32541302975`,
-and G0 Linux/Windows run `32541302994`. The checks are not yet required by a
+The durable-audit candidate additionally cancels a policy-valid command while
+its transaction is blocked in a controlled PostgreSQL query. It proves that
+the business transaction has no partial row while the separately committed
+attempt advances exactly once to `TERMINAL/ERROR/INTERNAL_ERROR`.
+
+All checks passed on query-cancellation implementation head
+`9f6bb91e985930eda4e11f388b13a6abb8d04309`: foundation run `32542603820`,
+command/evidence adapter run `32542603869`, durable-audit run `32542603824`,
+and G0 Linux/Windows run `32542603836`. The checks are not yet required by a
 repository ruleset. The adapter candidate still does not cover HTTP
 authentication-to-branded-context wiring, binding that context into the
-separate audit writer, direct command-credential compromise, query cancellation,
-scheduled repair after an unresolved ambiguous commit, both lock orders for
+separate audit writer, direct command-credential compromise, scheduled repair
+after an unresolved ambiguous commit, both lock orders for
 membership/policy/key revocation, injected failure between every write,
 production KMS/HSM audit-key custody, incomplete-attempt reconciliation, or
 decision/step-up paths. Those gaps keep the full matrix and runtime wiring at

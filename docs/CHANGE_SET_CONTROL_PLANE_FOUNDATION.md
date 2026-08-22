@@ -299,6 +299,14 @@ future reconciler can correlate them without storing the raw key. This does
 not yet deliver scheduled incomplete-attempt repair or permission to wire the
 adapter into a route.
 
+The disposable PostgreSQL adapter gate also proves real SQLSTATE `57014`
+query-cancellation handling. Cancellation before the claim rolls the bounded
+business transaction back, leaves no command/access/ChangeSet residue, clears
+the tenant-local GUC, and permits safe reuse of the same pool-of-one backend.
+With the durable audit writer enabled, the separately committed start event is
+closed exactly once as `TERMINAL/ERROR/INTERNAL_ERROR`; cancellation is never
+misclassified as a successful command or an ambiguous `COMMIT`.
+
 Notification template variables must be declared whether referenced in the
 subject or body. Template variables that suggest passwords, secrets, tokens,
 passports, national IDs, or SSNs are not admitted. Plain-text fields reject
@@ -356,15 +364,15 @@ writer quarantines remain authoritative.
 ## Next safe slice
 
 The 62-migration PostgreSQL 16 foundation and default-unwired command, evidence,
-durable-audit, and context-bound transaction workflows described in
-`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on context-binding
-and ambiguous-commit implementation head
-`ef35a590f0d8cc7394ada65d7d55e57192085fa4` (foundation run `32541302983`,
-adapter run `32541302979`, audit run `32541302975`, and G0 Linux/Windows run
-`32541302994`).
+durable-audit, context-bound transaction, ambiguous-commit and query-
+cancellation workflows described in `CHANGE_SET_POSTGRES_INTEGRATION_GATE.md`
+are green on implementation head
+`9f6bb91e985930eda4e11f388b13a6abb8d04309` (foundation run `32542603820`,
+adapter run `32542603869`, audit run `32542603824`, and G0 Linux/Windows run
+`32542603836`).
 
-The next safe slice is the remaining adapter race/failure matrix: cancellation,
-scheduled repair of unresolved commit outcomes,
+The next safe slice is the remaining adapter race/failure matrix: scheduled
+repair of unresolved commit outcomes,
 membership/policy/key revocation in both lock orders, injected failure at every
 write boundary, and incomplete-attempt repair. The shared runtime role must not
 receive generic Control Plane DML. No API route or Super Admin UI may be

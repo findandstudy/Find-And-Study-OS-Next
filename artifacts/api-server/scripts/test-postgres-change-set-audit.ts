@@ -62,6 +62,9 @@ const ID = {
   reconcileStart: "018f6000-0000-7000-8000-00000000000e",
   reconcilePending: "018f6000-0000-7000-8000-00000000000f",
   reconcileTerminal: "018f6000-0000-7000-8000-000000000010",
+  cancellationAttempt: "018f6000-0000-7000-8000-000000000011",
+  cancellationStart: "018f6000-0000-7000-8000-000000000012",
+  cancellationTerminal: "018f6000-0000-7000-8000-000000000013",
 } as const;
 
 const NOW = Date.now();
@@ -99,6 +102,23 @@ async function mustFail(operation: () => Promise<unknown>, pattern: RegExp) {
     assert.match(error.message, pattern);
     return true;
   });
+}
+
+async function within<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("audit test synchronization timed out")),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function uuidFactory(values: readonly string[]) {
@@ -287,18 +307,40 @@ async function main() {
         ID.reconcileStart,
         ID.reconcilePending,
         ID.reconcileTerminal,
+        ID.cancellationAttempt,
+        ID.cancellationStart,
+        ID.cancellationTerminal,
       ]),
+    });
+    let cancellationArmed = false;
+    let resolveCancellationBackendPid: (pid: number) => void = () => undefined;
+    const cancellationBackendPid = new Promise<number>((resolve) => {
+      resolveCancellationBackendPid = resolve;
     });
     const store = new PostgresChangeSetCommandStore(executorPool, {
       expectedRole: ROLE.executor,
       expectedEnvironmentId: "test-ci",
       expectedCellId: "cell-a",
       now: () => NOW,
-      resolveMutationAssurance: async () => ({
-        impersonating: false,
-        stepUpSatisfied: false,
-        stepUpReceiptId: null,
-      }),
+      resolveMutationAssurance: async ({ client }) => {
+        if (cancellationArmed) {
+          cancellationArmed = false;
+          const backend = await client.query<{ pid: number }>(
+            "SELECT pg_backend_pid()::int AS pid",
+          );
+          const pid = backend.rows[0]?.pid;
+          if (!Number.isSafeInteger(pid) || Number(pid) <= 0) {
+            throw new Error("audit_cancellation_backend_pid_invalid");
+          }
+          resolveCancellationBackendPid(Number(pid));
+          await client.query("SELECT pg_sleep(30)");
+        }
+        return {
+          impersonating: false,
+          stepUpSatisfied: false,
+          stepUpReceiptId: null,
+        };
+      },
     });
     const context = verifiedContext();
     const replay = await executeCreateR1ChangeSetCommand({
@@ -392,13 +434,76 @@ async function main() {
     await reconciliationAttempt.recordCommitOutcomeUnknown();
     await reconciliationAttempt.recordReconciledResult(replay);
 
+    cancellationArmed = true;
+    const cancelledCommand = executeCreateR1ChangeSetCommand({
+      context,
+      command: {
+        idempotencyKey: "audit-cancellation-command-0001",
+        changeType: "FEATURE_FLAG",
+        title: "Durable cancellation audit verification",
+        purpose: "Prove cancellation rollback leaves a terminal audit error.",
+        targetScope: {
+          type: "TENANT",
+          organizationId: null,
+          legacyBranchId: null,
+        },
+        proposedConfig: {
+          flagKey: "journey.beta",
+          enabled: true,
+          cohortPercent: 10,
+          reason: "This command is cancelled before its claim.",
+        },
+      },
+      dependencies: {
+        store,
+        auditWriter,
+        now: () => NOW,
+        nextUuidV7: uuidFactory([
+          "018f6000-0000-7000-8000-000000000105",
+          "018f6000-0000-7000-8000-000000000106",
+          "018f6000-0000-7000-8000-000000000107",
+        ]),
+      },
+    });
+    const cancellationOutcome = cancelledCommand.then(
+      (value) => ({ kind: "resolved" as const, value }),
+      (error: unknown) => ({ kind: "rejected" as const, error }),
+    );
+    const cancelledPid = await within(
+      Promise.race([
+        cancellationBackendPid,
+        cancellationOutcome.then((outcome): never => {
+          if (outcome.kind === "rejected") throw outcome.error;
+          throw new Error("audit_cancellation_command_resolved_before_backend_ready");
+        }),
+      ]),
+      10_000,
+    );
+    const cancellation = await withClient(adminUrl, (admin) =>
+      admin.query<{ cancelled: boolean }>(
+        "SELECT pg_cancel_backend($1)::boolean AS cancelled",
+        [cancelledPid],
+      ),
+    );
+    assert.equal(cancellation.rows[0]?.cancelled, true);
+    const cancelledOutcome = await cancellationOutcome;
+    assert.equal(cancelledOutcome.kind, "rejected");
+    if (cancelledOutcome.kind === "rejected") {
+      assert.ok(cancelledOutcome.error instanceof Error);
+      assert.equal(
+        (cancelledOutcome.error as Error & { code?: string }).code,
+        "57014",
+      );
+    }
+
     const rows = await loadAuditRows([
       ID.successAttempt,
       ID.rejectAttempt,
       ID.raceAttempt,
       ID.reconcileAttempt,
+      ID.cancellationAttempt,
     ]);
-    assert.equal(rows.length, 9);
+    assert.equal(rows.length, 11);
     for (const row of rows) {
       assert.equal(row.eventHash, expectedEventHash(row));
       assert.match(String(row.idempotencyKeyFingerprint), /^[0-9a-f]{64}$/);
@@ -448,6 +553,22 @@ async function main() {
           "COMMAND_RECONCILED",
           ID.changeSet,
         ],
+      ],
+    );
+    const cancellationRows = rows.filter(
+      (row) => row.attemptId === ID.cancellationAttempt,
+    );
+    assert.deepEqual(
+      cancellationRows.map((row) => [
+        row.sequence,
+        row.phase,
+        row.outcome,
+        row.reasonCode,
+        row.changeSetId,
+      ]),
+      [
+        [1, "ATTEMPT_STARTED", "STARTED", "REQUEST_ACCEPTED", null],
+        [2, "TERMINAL", "ERROR", "INTERNAL_ERROR", null],
       ],
     );
 
@@ -540,7 +661,7 @@ async function main() {
     await Promise.all([executorPool.end(), auditPool.end()]);
   }
   console.log(
-    "[postgres-audit-gate] PASS: durable start/terminal chains, commit reconciliation, rollback survival, HMAC verification, tenant denial, role split, and concurrency",
+    "[postgres-audit-gate] PASS: durable start/terminal chains, commit reconciliation, SQLSTATE 57014 cancellation audit, rollback survival, HMAC verification, tenant denial, role split, and concurrency",
   );
 }
 
