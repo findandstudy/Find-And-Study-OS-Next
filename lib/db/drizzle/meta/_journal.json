@@ -463,6 +463,13 @@
       "when": 1787328000000,
       "tag": "0065_active_context_selection_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1787331600000,
+      "tag": "0066_active_context_selection_binding",
+      "breakpoints": true
     }
   ]
 }

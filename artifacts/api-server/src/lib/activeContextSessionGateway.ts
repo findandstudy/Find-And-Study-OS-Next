@@ -30,6 +30,7 @@ type HttpRequestLike = {
 };
 
 export type ActiveContextSessionState = {
+  selectionId: string;
   sessionFingerprint: string;
   sessionGeneration: number;
   status: "ACTIVE" | "REVOKED" | "ROTATED";
@@ -350,11 +351,13 @@ function parseSessionState(value: unknown): ActiveContextSessionState | null {
       "legacyBranchId",
       "organizationId",
       "originalSessionFingerprint",
+      "selectionId",
       "sessionFingerprint",
       "sessionGeneration",
       "status",
       "tenantId",
     ]) ||
+    !isUuidV7(value.selectionId) ||
     typeof value.sessionFingerprint !== "string" ||
     !SHA256_RE.test(value.sessionFingerprint) ||
     !isPositiveInteger(value.sessionGeneration) ||
@@ -380,6 +383,7 @@ function parseSessionState(value: unknown): ActiveContextSessionState | null {
     return null;
   }
   return {
+    selectionId: value.selectionId.toLowerCase(),
     sessionFingerprint: value.sessionFingerprint.toLowerCase(),
     sessionGeneration: Number(value.sessionGeneration),
     status: value.status as ActiveContextSessionState["status"],
@@ -615,6 +619,10 @@ export async function issueActiveContextForHttpSession(
 
         const result = await issueAuthoritativeActiveTenantContext({
           ...options.issuance,
+          selectionBinding: {
+            selectionId: state.selectionId,
+            sessionGeneration: state.sessionGeneration,
+          },
           request: {
             authenticatedPrincipalId: state.authenticatedPrincipalId,
             tenantId: state.tenantId,

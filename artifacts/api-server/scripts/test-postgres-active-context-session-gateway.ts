@@ -4,6 +4,7 @@ import pg from "pg";
 
 import {
   fingerprintActiveContextPublicKey,
+  verifyVersionedActiveTenantContext,
   type ActiveContextExternalSigner,
   type ActiveContextVerificationKey,
 } from "../src/lib/activeTenantContext.js";
@@ -257,6 +258,8 @@ async function bootstrapAuthority() {
 
       ALTER FUNCTION fas_session_v1.resolve_session_for_active_context(text, text, bigint)
         OWNER TO ${ROLE.sessionOwner};
+      ALTER FUNCTION fas_session_v1.resolve_session_for_active_context_bound(text, text, bigint)
+        OWNER TO ${ROLE.sessionOwner};
       ALTER FUNCTION fas_rate_limit_v1.consume_active_context_issuance(
         uuid, text, text, bigint, uuid, bigint, uuid
       ) OWNER TO ${ROLE.rateOwner};
@@ -272,6 +275,9 @@ async function bootstrapAuthority() {
         FROM PUBLIC, ${ROLE.lifecycleExecutor};
       GRANT EXECUTE ON FUNCTION
         fas_session_v1.resolve_session_for_active_context(text, text, bigint)
+      TO ${ROLE.sessionResolver};
+      GRANT EXECUTE ON FUNCTION
+        fas_session_v1.resolve_session_for_active_context_bound(text, text, bigint)
       TO ${ROLE.sessionResolver};
       GRANT EXECUTE ON FUNCTION
         fas_rate_limit_v1.consume_active_context_issuance(
@@ -692,6 +698,24 @@ async function main() {
     assert.equal(result.ok, true, result.ok ? undefined : JSON.stringify(result));
     if (!result.ok) throw new Error(`gateway_denied_${result.reason}`);
     assert.equal(result.rateLimitPermitId.length, 36);
+    const verified = verifyVersionedActiveTenantContext({
+      token: result.token,
+      keyRing: [verificationKey()],
+      expected: {
+        audience: AUDIENCE,
+        environmentId: ENVIRONMENT,
+        cellId: CELL,
+        issuerId: ID.issuer,
+        tenantId: ID.tenant,
+      },
+      expectedSelectionBinding: {
+        selectionId: ID.selection,
+        sessionGeneration: SESSION_GENERATION,
+      },
+      now: NOW,
+    });
+    assert.equal(verified.ok, true, verified.ok ? undefined : verified.reason);
+    if (!verified.ok) throw new Error(`gateway_token_denied_${verified.reason}`);
 
     await withClient(sessionResolverUrl, async (resolver) => {
       await mustFail(

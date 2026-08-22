@@ -24,6 +24,7 @@ const ID = {
   membership: "018fa000-0000-7000-8000-000000000006",
   assignment: "018fa000-0000-7000-8000-000000000007",
   policy: "018fa000-0000-7000-8000-000000000008",
+  selection: "018fa000-0000-7000-8000-00000000000b",
   issuer: "018fa000-0000-7000-8000-000000000009",
   otherIssuer: "018fa000-0000-7000-8000-00000000000a",
 };
@@ -157,6 +158,57 @@ test("versioned issuance binds key, audience, deployment, issuer, tenant, and co
   assert.equal(result.envelope.environmentId, ENVIRONMENT);
   assert.equal(result.envelope.cellId, CELL);
   assert.equal(result.envelope.issuerId, ID.issuer);
+});
+
+test("selection-bound versioned context requires the exact selection and generation", async () => {
+  const token = await issue({
+    subject: {
+      ...subject(),
+      selectionId: ID.selection,
+      sessionGeneration: 4,
+    },
+  });
+  const verified = verifyVersionedActiveTenantContext({
+    token,
+    keyRing: [key()],
+    expected: expected(),
+    expectedSelectionBinding: {
+      selectionId: ID.selection,
+      sessionGeneration: 4,
+    },
+    now: NOW,
+  });
+  assert.equal(verified.ok, true);
+  if (!verified.ok) return;
+  assert.equal(verified.context.tokenVersion, 2);
+  assert.equal(verified.context.selectionId, ID.selection);
+  assert.equal(verified.context.sessionGeneration, 4);
+  assert.deepEqual(
+    verifyVersionedActiveTenantContext({
+      token,
+      keyRing: [key()],
+      expected: expected(),
+      expectedSelectionBinding: {
+        selectionId: ID.selection,
+        sessionGeneration: 5,
+      },
+      now: NOW,
+    }),
+    { ok: false, reason: "selection_binding_mismatch" },
+  );
+  assert.deepEqual(
+    verifyVersionedActiveTenantContext({
+      token: await issue(),
+      keyRing: [key()],
+      expected: expected(),
+      expectedSelectionBinding: {
+        selectionId: ID.selection,
+        sessionGeneration: 4,
+      },
+      now: NOW,
+    }),
+    { ok: false, reason: "selection_binding_missing" },
+  );
 });
 
 test("VERIFY_ONLY supports bounded rotation while revoked and compromised keys deny", async () => {

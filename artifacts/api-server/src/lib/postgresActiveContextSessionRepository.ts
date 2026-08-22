@@ -135,7 +135,7 @@ export class PostgresActiveContextSessionRepository
         ],
       );
       const resolved = await client.query<SessionResolverRow>(
-        `SELECT fas_session_v1.resolve_session_for_active_context(
+        `SELECT fas_session_v1.resolve_session_for_active_context_bound(
            $1::text, $2::text, $3::bigint
          ) AS result`,
         [input.sessionId, input.sessionFingerprint, input.observedAt],

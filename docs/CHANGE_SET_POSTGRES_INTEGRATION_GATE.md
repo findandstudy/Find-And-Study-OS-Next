@@ -359,11 +359,13 @@ or delete, and the EXECUTE-only login receives no receipt-table privilege.
 This candidate has no positive CI claim until an exact PostgreSQL 16 final-head
 run passes.
 
-Selection lifecycle CI does not authorize runtime wiring. The current active-
-context token is not yet cryptographically bound to `selectionId` plus
-`sessionGeneration`, so a token issued before rotation/revocation remains a
-hard route/browser NO-GO until every privileged consumption revalidates the
-current ACTIVE selection.
+Selection lifecycle CI does not authorize runtime wiring. Migration 0066 and
+the gateway candidate bind newly issued token version 2 to the exact
+`selectionId` plus `sessionGeneration`; legacy version-1 tokens remain
+unacceptable wherever a selection-bound context is required. Every privileged
+consumption must still revalidate and lock the current ACTIVE selection in its
+business transaction, so route/browser wiring remains a hard NO-GO until that
+and durable outer-attempt reconciliation are proven.
 
 The exact gateway implementation tree
 `dcf62cb5d5fef588dc9b6c5e599fe1144f542dbb` passed foundation run

@@ -571,13 +571,15 @@ acknowledgements return a typed unknown-outcome error containing only command
 and request identifiers; the same canonical idempotent request is the sole
 receipt-reconciliation path.
 
-This candidate does not make issued active-context tokens revocable. The
-current signed token format still lacks `selectionId` and `sessionGeneration`;
-therefore a token issued before selection rotation or revocation can remain
-cryptographically valid until its bounded expiry. Every privileged request
-must bind and revalidate those claims against the current ACTIVE selection
-before any route/browser/runtime integration can be enabled. This is a hard
-runtime-wiring NO-GO, not a follow-up optimization.
+The 0065 candidate does not by itself make issued active-context tokens
+revocable. The additive 0066 candidate now gives the session resolver an exact
+`selectionId` and makes the gateway issue token version 2 with
+`selectionId` + `sessionGeneration`; the verifier can require an exact current
+binding and rejects legacy version-1 tokens on that path. Every privileged
+request must still reload and lock the current ACTIVE selection in its
+business transaction before any route/browser/runtime integration can be
+enabled. This remains a hard runtime-wiring NO-GO, not a follow-up
+optimization.
 
 No HTTP route, scheduler, Super Admin UI, publisher,
 production credential, or production migration may be connected before

@@ -38,6 +38,7 @@ const ID = {
   principal: "018fb000-0000-7000-8000-000000000005",
   otherPrincipal: "018fb000-0000-7000-8000-000000000006",
   membership: "018fb000-0000-7000-8000-000000000007",
+  selection: "018fb000-0000-7000-8000-00000000000c",
   assignment: "018fb000-0000-7000-8000-000000000008",
   policy: "018fb000-0000-7000-8000-000000000009",
   issuer: "018fb000-0000-7000-8000-00000000000a",
@@ -101,6 +102,7 @@ function sessionState(
 ): ActiveContextSessionState {
   const issuedAt = NOW - 60_000;
   return {
+    selectionId: ID.selection,
     sessionFingerprint: fingerprint(),
     sessionGeneration: 4,
     status: "ACTIVE",
@@ -291,6 +293,10 @@ test("HTTP gateway ignores client scope fields and binds the token to locked ser
       issuerId: ID.issuer,
       tenantId: ID.tenant,
     },
+    expectedSelectionBinding: {
+      selectionId: ID.selection,
+      sessionGeneration: 4,
+    },
     now: NOW,
   });
   assert.equal(verified.ok, true);
@@ -298,6 +304,9 @@ test("HTTP gateway ignores client scope fields and binds the token to locked ser
   assert.equal(verified.context.principalId, ID.principal);
   assert.equal(verified.context.organizationId, ID.organization);
   assert.equal(verified.context.legacyBranchId, 41);
+  assert.equal(verified.context.tokenVersion, 2);
+  assert.equal(verified.context.selectionId, ID.selection);
+  assert.equal(verified.context.sessionGeneration, 4);
 });
 
 test("method, path, bearer auth, origin, referer, cookie, and CSRF violations fail before session access", async () => {

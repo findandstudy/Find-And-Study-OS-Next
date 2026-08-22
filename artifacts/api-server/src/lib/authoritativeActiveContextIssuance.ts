@@ -3,6 +3,7 @@ import {
   ACTIVE_CONTEXT_TTL_MS,
   issueVersionedActiveTenantContext,
   type ActiveContextExternalSigner,
+  type ActiveContextSelectionBinding,
   type ActiveContextVerificationKey,
 } from "./activeTenantContext";
 
@@ -95,6 +96,7 @@ export type AuthoritativeActiveContextIssuanceOptions = {
   keyReference: string;
   keyRing: readonly ActiveContextVerificationKey[];
   signer: ActiveContextExternalSigner;
+  selectionBinding?: ActiveContextSelectionBinding;
   nextUuidV7: () => string;
   ttlMs?: number;
   resolutionBudgetMs?: number;
@@ -141,6 +143,16 @@ function isBranch(value: unknown): value is number | null {
 
 function isTimestamp(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function isSelectionBinding(value: unknown): value is ActiveContextSelectionBinding {
+  return (
+    isRecord(value) &&
+    exactKeys(value, ["selectionId", "sessionGeneration"]) &&
+    isUuidV7(value.selectionId) &&
+    Number.isSafeInteger(value.sessionGeneration) &&
+    Number(value.sessionGeneration) > 0
+  );
 }
 
 function isNullableTimestamp(value: unknown): value is number | null {
@@ -406,6 +418,12 @@ export async function issueAuthoritativeActiveTenantContext(
   ) {
     throw new Error("authoritative_active_context_configuration_invalid");
   }
+  if (
+    options.selectionBinding !== undefined &&
+    !isSelectionBinding(options.selectionBinding)
+  ) {
+    throw new Error("authoritative_active_context_selection_binding_invalid");
+  }
   const request = parseRequest(options.request);
   if (!request) return { ok: false, reason: "request_invalid" };
   const now = options.now ?? Date.now;
@@ -466,6 +484,7 @@ export async function issueAuthoritativeActiveTenantContext(
               assignmentIds,
               policyVersionId: state.policy.id,
               policyVersion: state.policy.version,
+              ...(options.selectionBinding ?? {}),
             },
             audience: options.audience,
             environmentId: options.environmentId,

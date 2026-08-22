@@ -16,8 +16,7 @@ const DEPLOYMENT_ID_RE = /^[a-z][a-z0-9-]{1,62}$/;
 const AUDIENCE_RE = /^[a-z][a-z0-9.-]{2,127}$/;
 const OPAQUE_SIGNER_REF_RE = /^(kms|hsm|test-memory):\/\/[A-Za-z0-9][A-Za-z0-9._:/-]{5,255}$/;
 
-export type ActiveTenantContextClaims = {
-  tokenVersion: 1;
+type ActiveContextBaseClaims = {
   contextId: string;
   tenantId: string;
   organizationId: string | null;
@@ -29,6 +28,19 @@ export type ActiveTenantContextClaims = {
   policyVersion: number;
   issuedAt: number;
   expiresAt: number;
+};
+
+export type ActiveTenantContextClaims =
+  | (ActiveContextBaseClaims & { tokenVersion: 1 })
+  | (ActiveContextBaseClaims & {
+      tokenVersion: 2;
+      selectionId: string;
+      sessionGeneration: number;
+    });
+
+export type ActiveContextSelectionBinding = {
+  selectionId: string;
+  sessionGeneration: number;
 };
 
 export type VerifiedActiveTenantContext = ActiveTenantContextClaims & {
@@ -120,6 +132,8 @@ export type ActiveContextVersionedVerificationFailure =
   | "cell_mismatch"
   | "issuer_mismatch"
   | "tenant_mismatch"
+  | "selection_binding_missing"
+  | "selection_binding_mismatch"
   | "not_yet_valid"
   | "expired";
 
@@ -289,7 +303,7 @@ function isNullableBranchId(value: unknown): value is number | null {
 function normalizeClaims(
   claims: ActiveTenantContextClaims,
 ): ActiveTenantContextClaims {
-  return {
+  const normalizedBase = {
     tokenVersion: 1,
     contextId: claims.contextId.toLowerCase(),
     tenantId: claims.tenantId.toLowerCase(),
@@ -304,32 +318,49 @@ function normalizeClaims(
     policyVersion: claims.policyVersion,
     issuedAt: claims.issuedAt,
     expiresAt: claims.expiresAt,
-  };
+  } as const;
+  if (claims.tokenVersion === 2) {
+    return {
+      ...normalizedBase,
+      tokenVersion: 2,
+      selectionId: claims.selectionId.toLowerCase(),
+      sessionGeneration: claims.sessionGeneration,
+    };
+  }
+  return normalizedBase;
 }
 
 function parseClaims(value: unknown): ActiveTenantContextClaims | null {
   if (!isPlainRecord(value)) return null;
-  if (
-    !hasExactKeys(value, [
-      "assignmentIds",
-      "contextId",
-      "expiresAt",
-      "issuedAt",
-      "legacyBranchId",
-      "membershipId",
-      "organizationId",
-      "policyVersion",
-      "policyVersionId",
-      "principalId",
-      "tenantId",
-      "tokenVersion",
-    ])
-  ) {
+  const baseFields = [
+    "assignmentIds",
+    "contextId",
+    "expiresAt",
+    "issuedAt",
+    "legacyBranchId",
+    "membershipId",
+    "organizationId",
+    "policyVersion",
+    "policyVersionId",
+    "principalId",
+    "tenantId",
+    "tokenVersion",
+  ] as const;
+  const selectionBoundFields = [
+    ...baseFields,
+    "selectionId",
+    "sessionGeneration",
+  ] as const;
+  const selectionBound = hasExactKeys(value, selectionBoundFields);
+  if (!selectionBound && !hasExactKeys(value, baseFields)) {
     return null;
   }
-  const claims = value as Partial<ActiveTenantContextClaims>;
+  const claims = value as Partial<ActiveTenantContextClaims> & {
+    selectionId?: unknown;
+    sessionGeneration?: unknown;
+  };
   if (
-    claims.tokenVersion !== 1 ||
+    claims.tokenVersion !== (selectionBound ? 2 : 1) ||
     !isUuidV7(claims.contextId) ||
     !isUuidV7(claims.tenantId) ||
     !isNullableUuidV7(claims.organizationId) ||
@@ -347,6 +378,15 @@ function parseClaims(value: unknown): ActiveTenantContextClaims | null {
     !claims.assignmentIds.every(isUuidV7)
   )
     return null;
+
+  if (
+    selectionBound &&
+    (!isUuidV7(claims.selectionId) ||
+      !Number.isSafeInteger(claims.sessionGeneration) ||
+      Number(claims.sessionGeneration) < 1)
+  ) {
+    return null;
+  }
 
   const normalized = normalizeClaims(claims as ActiveTenantContextClaims);
   if (
@@ -481,8 +521,25 @@ const ACTIVE_CONTEXT_SUBJECT_FIELDS = [
   "principalId",
   "tenantId",
 ] as const;
+const ACTIVE_CONTEXT_SELECTION_SUBJECT_FIELDS = [
+  ...ACTIVE_CONTEXT_SUBJECT_FIELDS,
+  "selectionId",
+  "sessionGeneration",
+] as const;
 const ACTIVE_CONTEXT_V2_PAYLOAD_FIELDS = [
   ...ACTIVE_CONTEXT_SUBJECT_FIELDS,
+  "audience",
+  "cellId",
+  "environmentId",
+  "expiresAt",
+  "issuedAt",
+  "issuerId",
+  "keyId",
+  "notBefore",
+  "tokenVersion",
+] as const;
+const ACTIVE_CONTEXT_SELECTION_V2_PAYLOAD_FIELDS = [
+  ...ACTIVE_CONTEXT_SELECTION_SUBJECT_FIELDS,
   "audience",
   "cellId",
   "environmentId",
@@ -621,7 +678,8 @@ function parseVersionedHeader(value: unknown): ActiveContextVersionedHeader | nu
 function parseVersionedPayload(value: unknown): ActiveContextVersionedPayload | null {
   if (
     !isPlainRecord(value) ||
-    !hasExactKeys(value, ACTIVE_CONTEXT_V2_PAYLOAD_FIELDS) ||
+    (!hasExactKeys(value, ACTIVE_CONTEXT_V2_PAYLOAD_FIELDS) &&
+      !hasExactKeys(value, ACTIVE_CONTEXT_SELECTION_V2_PAYLOAD_FIELDS)) ||
     typeof value.audience !== "string" ||
     !AUDIENCE_RE.test(value.audience) ||
     typeof value.environmentId !== "string" ||
@@ -648,6 +706,12 @@ function parseVersionedPayload(value: unknown): ActiveContextVersionedPayload | 
     policyVersion: value.policyVersion,
     issuedAt: value.issuedAt,
     expiresAt: value.expiresAt,
+    ...(Object.hasOwn(value, "selectionId")
+      ? {
+          selectionId: value.selectionId,
+          sessionGeneration: value.sessionGeneration,
+        }
+      : {}),
   });
   if (
     !claims ||
@@ -687,7 +751,8 @@ export async function issueVersionedActiveTenantContext(
   if (
     !options ||
     !isPlainRecord(options.subject) ||
-    !hasExactKeys(options.subject, ACTIVE_CONTEXT_SUBJECT_FIELDS) ||
+    (!hasExactKeys(options.subject, ACTIVE_CONTEXT_SUBJECT_FIELDS) &&
+      !hasExactKeys(options.subject, ACTIVE_CONTEXT_SELECTION_SUBJECT_FIELDS)) ||
     !Number.isSafeInteger(now) ||
     now < 0 ||
     !Number.isSafeInteger(ttlMs) ||
@@ -727,9 +792,13 @@ export async function issueVersionedActiveTenantContext(
   ) {
     throw new Error("active_context_signing_key_unavailable");
   }
+  const selectionBound =
+    isPlainRecord(options.subject) &&
+    Object.hasOwn(options.subject, "selectionId") &&
+    Object.hasOwn(options.subject, "sessionGeneration");
   const claims = parseClaims({
     ...options.subject,
-    tokenVersion: 1,
+    tokenVersion: selectionBound ? 2 : 1,
     issuedAt: now,
     expiresAt: now + ttlMs,
   });
@@ -777,6 +846,7 @@ export function verifyVersionedActiveTenantContext(input: {
   token: string | undefined;
   keyRing: readonly ActiveContextVerificationKey[];
   expected: ActiveContextVersionedTokenExpected;
+  expectedSelectionBinding?: ActiveContextSelectionBinding;
   now?: number;
 }): ActiveContextVersionedVerificationResult {
   if (!input?.token) return { ok: false, reason: "missing_token" };
@@ -852,6 +922,25 @@ export function verifyVersionedActiveTenantContext(input: {
     if (payload.tenantId !== expected.tenantId) {
       return { ok: false, reason: "tenant_mismatch" };
     }
+    if (input.expectedSelectionBinding !== undefined) {
+      const expectedBinding = input.expectedSelectionBinding;
+      if (
+        !isUuidV7(expectedBinding.selectionId) ||
+        !Number.isSafeInteger(expectedBinding.sessionGeneration) ||
+        expectedBinding.sessionGeneration < 1
+      ) {
+        return { ok: false, reason: "selection_binding_mismatch" };
+      }
+      if (payload.tokenVersion !== 2) {
+        return { ok: false, reason: "selection_binding_missing" };
+      }
+      if (
+        payload.selectionId !== expectedBinding.selectionId.toLowerCase() ||
+        payload.sessionGeneration !== expectedBinding.sessionGeneration
+      ) {
+        return { ok: false, reason: "selection_binding_mismatch" };
+      }
+    }
     if (
       payload.issuedAt < key.signFrom ||
       payload.issuedAt >= key.signUntil ||
@@ -876,6 +965,12 @@ export function verifyVersionedActiveTenantContext(input: {
       policyVersion: payload.policyVersion,
       issuedAt: payload.issuedAt,
       expiresAt: payload.expiresAt,
+      ...(payload.tokenVersion === 2
+        ? {
+            selectionId: payload.selectionId,
+            sessionGeneration: payload.sessionGeneration,
+          }
+        : {}),
     });
     if (!contextClaims) return { ok: false, reason: "invalid_claims" };
     return {
@@ -903,7 +998,10 @@ export function isVerifiedActiveTenantContext(
 ): value is VerifiedActiveTenantContext {
   if (!Number.isSafeInteger(now) || now < 0) return false;
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const candidate = value as Partial<VerifiedActiveTenantContext>;
+  const candidate = value as Partial<VerifiedActiveTenantContext> & {
+    selectionId?: unknown;
+    sessionGeneration?: unknown;
+  };
   if (candidate[VERIFIED_CONTEXT] !== true || !VERIFIED_CONTEXTS.has(value)) {
     return false;
   }
@@ -931,7 +1029,33 @@ export function isVerifiedActiveTenantContext(
     candidate.policyVersionId === normalized.policyVersionId &&
     candidate.policyVersion === normalized.policyVersion &&
     candidate.issuedAt === normalized.issuedAt &&
-    candidate.expiresAt === normalized.expiresAt
+    candidate.expiresAt === normalized.expiresAt &&
+    (normalized.tokenVersion === 1
+      ? !Object.hasOwn(candidate, "selectionId") &&
+        !Object.hasOwn(candidate, "sessionGeneration")
+      : candidate.selectionId === normalized.selectionId &&
+        candidate.sessionGeneration === normalized.sessionGeneration)
+  );
+}
+
+export function isSelectionBoundActiveTenantContext(
+  value: unknown,
+  now = Date.now(),
+): value is VerifiedActiveTenantContext & {
+  tokenVersion: 2;
+  selectionId: string;
+  sessionGeneration: number;
+} {
+  const candidate = value as Partial<VerifiedActiveTenantContext> & {
+    selectionId?: unknown;
+    sessionGeneration?: unknown;
+  };
+  return (
+    isVerifiedActiveTenantContext(value, now) &&
+    candidate.tokenVersion === 2 &&
+    isUuidV7(candidate.selectionId) &&
+    Number.isSafeInteger(candidate.sessionGeneration) &&
+    Number(candidate.sessionGeneration) > 0
   );
 }
 
