@@ -390,16 +390,16 @@ writer quarantines remain authoritative.
 
 The 62-migration PostgreSQL 16 foundation and default-unwired command, evidence,
 durable-audit, context-bound transaction, ambiguous-commit, query-cancellation,
-membership/policy revocation, evidence-key compromise, and exact tenant-grant
-revocation workflows described in `CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are
-green on implementation head `3539a3c543cdf1e4bc28f4efa7c17f1ddaaa36f4`
-(foundation run `32544900632`, adapter run `32544900679`, audit run
-`32544900649`, and G0 Linux/Windows run `32544900634`).
+membership/policy revocation, evidence-key compromise, exact tenant-grant, and
+global issuer revocation workflows described in
+`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on implementation head
+`9054010c7bffd84bfe549a952c42c26def892faf` (foundation run `32545500893`,
+adapter run `32545500898`, audit run `32545500894`, and G0 Linux/Windows run
+`32545500871`).
 
-The next safe slice is the remaining adapter race/failure matrix: scheduled
-repair of unresolved commit outcomes, global evidence issuer revocation in both
-lock orders, injected failure at every write boundary, and incomplete-attempt
-repair. The shared runtime role must not
+The next safe slice is the remaining adapter failure/recovery matrix: scheduled
+repair of unresolved commit outcomes, injected failure at every write boundary,
+and incomplete-attempt repair. The shared runtime role must not
 receive generic Control Plane DML. No API route or Super Admin UI may be
 connected before those controls, required checks, production role/bootstrap
 review and independent approval exist. Publisher and configuration
