@@ -165,6 +165,13 @@ concurrent key compromise must wait until that transition commits. Once the
 compromise commits, IN_REVIEW fails closed, its command/access/transition rows
 roll back, and its three evidence receipts remain unconsumed.
 
+The evidence-issuer adapter also exercises both tenant-grant revocation lock
+orders without a production hook. When issuance owns the issuer/key/grant
+verification locks first, the grant revoker waits until the signed receipt and
+its single-use request commit atomically. After the revocation commits, a
+second signed envelope tied to the same exact grant fails closed: its request
+stays `OPEN` and no evidence receipt is inserted.
+
 `.github/workflows/postgres-control-plane-audit-gate.yml` and
 `test-postgres-change-set-audit.ts` add the durable outer-attempt candidate.
 They prove a separately committed start event, terminal success and rejection

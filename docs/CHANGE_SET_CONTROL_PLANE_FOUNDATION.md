@@ -314,6 +314,12 @@ commits, the next identical command is denied before it can create a new
 command claim. Synthetic fixture restoration occurs only after the deny is
 observed and never weakens the runtime contract.
 
+The evidence-issuer harness uses the same fail-closed rule for an exact
+issuer-tenant grant. Issuance-first holds the grant lock through signed-receipt
+and single-use-request commit, so a concurrent revoker must wait. Once revoke
+commits, a second envelope bound to that grant is rejected before receipt
+persistence; its request remains open and no partial receipt is left behind.
+
 Evidence-key compromise is likewise serialized through the real transition
 adapter. A key update waits while a policy-valid SIMULATION receipt is locked
 and consumed; after the successful SIMULATED commit, the compromise can commit.

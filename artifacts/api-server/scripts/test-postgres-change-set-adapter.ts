@@ -103,6 +103,10 @@ const ID = {
   submitCommand: "018f5000-0000-7000-8000-00000000003f",
   submitAccess: "018f5000-0000-7000-8000-000000000040",
   submitTransition: "018f5000-0000-7000-8000-000000000041",
+  grantRaceIssuedRequest: "018f5000-0000-7000-8000-000000000042",
+  grantRaceIssuedEvidence: "018f5000-0000-7000-8000-000000000043",
+  grantRaceDeniedRequest: "018f5000-0000-7000-8000-000000000044",
+  grantRaceDeniedEvidence: "018f5000-0000-7000-8000-000000000045",
 } as const;
 
 const NOW = Date.now();
@@ -276,6 +280,39 @@ function pauseAfterEvidenceLoad(input: {
         return operation(wrapped);
       }),
   };
+}
+
+function pauseAfterEvidenceVerificationContextLoad(input: {
+  pool: pg.Pool;
+  ready: () => void;
+  release: Promise<void>;
+}): pg.Pool {
+  let armed = true;
+  return {
+    connect: async () => {
+      const client = await input.pool.connect();
+      return new Proxy(client, {
+        get(target, property, receiver) {
+          if (property === "query") {
+            return async (text: string, values?: unknown[]) => {
+              const result = await target.query(text, values);
+              if (
+                armed &&
+                text.includes("fas_evidence_v1.load_verification_context")
+              ) {
+                armed = false;
+                input.ready();
+                await input.release;
+              }
+              return result;
+            };
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    },
+  } as unknown as pg.Pool;
 }
 
 async function bootstrapAuthority() {
@@ -1563,6 +1600,232 @@ async function main() {
       }
     });
 
+    const grantRaceRequests = [
+      {
+        requestId: ID.grantRaceIssuedRequest,
+        receiptId: ID.grantRaceIssuedEvidence,
+        challengeNonce: crypto.randomBytes(32).toString("base64url"),
+        artifactManifestHash: sha256("adapter-grant-race-issued-artifact"),
+      },
+      {
+        requestId: ID.grantRaceDeniedRequest,
+        receiptId: ID.grantRaceDeniedEvidence,
+        challengeNonce: crypto.randomBytes(32).toString("base64url"),
+        artifactManifestHash: sha256("adapter-grant-race-denied-artifact"),
+      },
+    ] as const;
+    await withClient(migratorUrl, async (migrator) => {
+      await migrator.query("BEGIN");
+      try {
+        await migrator.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+          ID.tenant,
+        ]);
+        for (const request of grantRaceRequests) {
+          await migrator.query(
+            `INSERT INTO public.change_set_evidence_requests (
+              id, tenant_id, change_set_id, target_state, kind,
+              requested_by_principal_id, requested_by_membership_id,
+              subject_hash, policy_version_id, tool_id, tool_version,
+              challenge_nonce_hash, state, expires_at, created_at
+            ) VALUES ($1, $2, $3, 'IN_REVIEW', 'TEST_ARTIFACT', $4, $5,
+              $6, $7, $8, $9, $10, 'OPEN', to_timestamp($11 / 1000.0),
+              to_timestamp($12 / 1000.0))`,
+            [
+              request.requestId,
+              ID.tenant,
+              ID.changeSet,
+              ID.humanPrincipal,
+              ID.humanMembership,
+              sha256(proposedConfig),
+              ID.policy,
+              evidenceToolId,
+              evidenceToolVersion,
+              sha256(request.challengeNonce),
+              NOW + 10 * 60_000,
+              NOW - 1_000,
+            ],
+          );
+        }
+        await migrator.query("COMMIT");
+      } catch (error) {
+        await migrator.query("ROLLBACK");
+        throw error;
+      }
+    });
+    const grantRaceEnvelopes = await Promise.all(
+      grantRaceRequests.map((request) =>
+        issueChangeSetEvidenceEnvelope(
+          {
+            receiptId: request.receiptId,
+            evidenceRequestId: request.requestId,
+            challengeNonce: request.challengeNonce,
+            issuerTenantGrantId: ID.testArtifactGrant,
+            tenantId: ID.tenant,
+            changeSetId: ID.changeSet,
+            targetState: "IN_REVIEW",
+            kind: "TEST_ARTIFACT",
+            requestedByPrincipalId: ID.humanPrincipal,
+            requestedByMembershipId: ID.humanMembership,
+            subjectHash: sha256(proposedConfig),
+            policyVersionId: ID.policy,
+            toolId: evidenceToolId,
+            toolVersion: evidenceToolVersion,
+            outcome: "PASSED",
+            artifactCount: 1,
+            artifactManifestHash: request.artifactManifestHash,
+            ttlMs: 5 * 60_000,
+          },
+          evidenceSigner(),
+          NOW,
+        ),
+      ),
+    );
+
+    const grantContextReady = deferred<void>();
+    const releaseGrantContext = deferred<void>();
+    const grantRaceIssuer = new PostgresChangeSetEvidenceIssuer({
+      pool: pauseAfterEvidenceVerificationContextLoad({
+        pool: issuerPool,
+        ready: () => grantContextReady.resolve(),
+        release: releaseGrantContext.promise,
+      }),
+      expectedRole: ROLE.evidenceIssuer,
+      expectedEnvironmentId: "test-ci",
+      expectedCellId: "cell-a",
+      now: () => NOW,
+    });
+    const issuedDuringGrantRace = grantRaceIssuer.persistVerifiedEnvelope({
+      expectedTenantId: ID.tenant,
+      token: grantRaceEnvelopes[0].token,
+    });
+    const issuedDuringGrantRaceOutcome = issuedDuringGrantRace.then(
+      (value) => ({ kind: "resolved" as const, value }),
+      (error: unknown) => ({ kind: "rejected" as const, error }),
+    );
+    await within(
+      Promise.race([
+        grantContextReady.promise,
+        issuedDuringGrantRaceOutcome.then((outcome): never => {
+          if (outcome.kind === "rejected") throw outcome.error;
+          throw new Error("evidence_issuance_finished_before_grant_lock_gate");
+        }),
+      ]),
+      10_000,
+    );
+
+    const grantRevoker = new Client({
+      connectionString: migratorUrl,
+      connectionTimeoutMillis: 10_000,
+      statement_timeout: 15_000,
+      lock_timeout: 5_000,
+      idle_in_transaction_session_timeout: 15_000,
+    });
+    await grantRevoker.connect();
+    let grantRevokerTransactionOpen = false;
+    try {
+      await grantRevoker.query("BEGIN");
+      grantRevokerTransactionOpen = true;
+      await grantRevoker.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+        ID.tenant,
+      ]);
+      const backend = await grantRevoker.query<{ pid: number }>(
+        "SELECT pg_backend_pid()::int AS pid",
+      );
+      const grantRevokerPid = Number(backend.rows[0]?.pid);
+      assert.ok(Number.isSafeInteger(grantRevokerPid) && grantRevokerPid > 0);
+      const grantRevokeQuery = grantRevoker.query(
+        `UPDATE public.change_set_evidence_issuer_tenant_grants
+         SET state = 'REVOKED'
+         WHERE tenant_id = $1 AND id = $2`,
+        [ID.tenant, ID.testArtifactGrant],
+      );
+      const grantRevokeOutcome = grantRevokeQuery.then(
+        (value) => ({ kind: "resolved" as const, value }),
+        (error: unknown) => ({ kind: "rejected" as const, error }),
+      );
+      await within(
+        Promise.race([
+          waitForBackendLock(grantRevokerPid),
+          grantRevokeOutcome.then((outcome): never => {
+            if (outcome.kind === "rejected") throw outcome.error;
+            throw new Error("grant_revocation_did_not_wait_for_issuance_lock");
+          }),
+        ]),
+        10_000,
+      );
+
+      releaseGrantContext.resolve();
+      const issued = await issuedDuringGrantRaceOutcome;
+      assert.equal(issued.kind, "resolved");
+      if (issued.kind === "resolved") {
+        assert.deepEqual(issued.value, {
+          receiptId: ID.grantRaceIssuedEvidence,
+        });
+      }
+      const revoked = await grantRevokeOutcome;
+      assert.equal(revoked.kind, "resolved");
+      if (revoked.kind === "resolved") assert.equal(revoked.value.rowCount, 1);
+      await grantRevoker.query("COMMIT");
+      grantRevokerTransactionOpen = false;
+    } finally {
+      releaseGrantContext.resolve();
+      if (grantRevokerTransactionOpen) await grantRevoker.query("ROLLBACK");
+      await grantRevoker.end();
+    }
+
+    await mustFail(
+      () =>
+        issuer.persistVerifiedEnvelope({
+          expectedTenantId: ID.tenant,
+          token: grantRaceEnvelopes[1].token,
+        }),
+      /change_set_evidence_verification_failed:tenant_grant_inactive/,
+    );
+    await withClient(migratorUrl, async (migrator) => {
+      await migrator.query("BEGIN");
+      try {
+        await migrator.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+          ID.tenant,
+        ]);
+        const requests = await migrator.query(
+          `SELECT id, state, issued_receipt_id
+           FROM public.change_set_evidence_requests
+           WHERE tenant_id = $1 AND id = ANY($2::uuid[])
+           ORDER BY id`,
+          [
+            ID.tenant,
+            [ID.grantRaceIssuedRequest, ID.grantRaceDeniedRequest],
+          ],
+        );
+        assert.deepEqual(requests.rows, [
+          {
+            id: ID.grantRaceIssuedRequest,
+            state: "ISSUED",
+            issued_receipt_id: ID.grantRaceIssuedEvidence,
+          },
+          {
+            id: ID.grantRaceDeniedRequest,
+            state: "OPEN",
+            issued_receipt_id: null,
+          },
+        ]);
+        const receipts = await migrator.query<{ id: string }>(
+          `SELECT id FROM public.change_set_evidence_receipts
+           WHERE tenant_id = $1 AND id = ANY($2::uuid[])
+           ORDER BY id`,
+          [
+            ID.tenant,
+            [ID.grantRaceIssuedEvidence, ID.grantRaceDeniedEvidence],
+          ],
+        );
+        assert.deepEqual(receipts.rows, [{ id: ID.grantRaceIssuedEvidence }]);
+        await migrator.query("ROLLBACK");
+      } catch (error) {
+        await migrator.query("ROLLBACK");
+        throw error;
+      }
+    });
+
     await store.transaction(context, async () => {
       throw new Error("adapter_rollback_probe");
     }).then(
@@ -1651,6 +1914,8 @@ async function main() {
               ID.testArtifactEvidence,
               ID.rollbackPlanEvidence,
               ID.canaryPlanEvidence,
+              ID.grantRaceIssuedEvidence,
+              ID.grantRaceDeniedEvidence,
             ],
           ],
         );
@@ -1680,7 +1945,19 @@ async function main() {
             consumed_by_command_receipt_id: null,
             consumed: false,
           },
+          {
+            id: ID.grantRaceIssuedEvidence,
+            consumed_by_command_receipt_id: null,
+            consumed: false,
+          },
         ]);
+        const grantState = await migrator.query(
+          `SELECT state, revoked_at IS NOT NULL AS revoked
+           FROM public.change_set_evidence_issuer_tenant_grants
+           WHERE tenant_id = $1 AND id = $2`,
+          [ID.tenant, ID.testArtifactGrant],
+        );
+        assert.deepEqual(grantState.rows, [{ state: "REVOKED", revoked: true }]);
         const state = await migrator.query(
           `SELECT status, version::int FROM public.change_sets
            WHERE tenant_id = $1 AND id = $2`,
@@ -1697,7 +1974,7 @@ async function main() {
     await Promise.all([executorPool.end(), issuerPool.end()]);
   }
   console.log(
-    "[postgres-adapter-gate] PASS: EXECUTE-only roles, real command store, ambiguous-commit replay, SQLSTATE 57014 cancellation rollback, membership/policy/key revoke serialization, signed evidence, and pool cleanup",
+    "[postgres-adapter-gate] PASS: EXECUTE-only roles, real command store, ambiguous-commit replay, SQLSTATE 57014 cancellation rollback, membership/policy/key/grant revoke serialization, signed evidence, and pool cleanup",
   );
 }
 
