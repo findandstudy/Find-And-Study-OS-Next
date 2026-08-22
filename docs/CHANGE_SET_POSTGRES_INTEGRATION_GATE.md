@@ -404,6 +404,13 @@ IDs, request bodies, or free-form errors. This migration and adapter are still
 default-unwired and require a fresh PostgreSQL 16 grant/RLS/transition/race
 run before they can be considered an integration result.
 
+The session-gateway PostgreSQL harness also reads the persisted attempt and
+receipt rows after the lifecycle race: it requires `TERMINAL/COMPLETED`, the
+`COMMAND_RECONCILED` reason, the exact `STARTED -> PENDING -> TERMINAL`
+sequence, the reconciled result hash, and absence of the raw session ID or raw
+idempotency key. This is a test assertion only; it does not replace the fresh
+PostgreSQL 16 run or authorize a runtime repair worker.
+
 The pure `ActiveContextSelectionConsumptionRepairWorker` now claims a bounded
 pending attempt, reads a stored outcome only, reconciles by result hash, and
 never replays the business mutation. `NOT_FOUND`/`IN_PROGRESS` outcomes are
