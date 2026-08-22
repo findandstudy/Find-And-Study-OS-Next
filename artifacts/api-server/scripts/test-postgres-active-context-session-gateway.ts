@@ -67,6 +67,7 @@ const ID = {
   principal: "018f5000-0000-7000-8000-000000000002",
   membership: "018f5000-0000-7000-8000-000000000003",
   membershipTwo: "018f5000-0000-7000-8000-000000000005",
+  organizationTwo: "018f5000-0000-7000-8000-000000000060",
   context: "018fc000-0000-7000-8000-000000000001",
   selection: "018fc000-0000-7000-8000-000000000002",
   otherSelection: "018fc000-0000-7000-8000-000000000003",
@@ -359,12 +360,12 @@ async function seed() {
            id, tenant_id, organization_id, legacy_branch_id, principal_id,
            status, valid_from, valid_until, version, created_at, updated_at
          )
-         SELECT $1, tenant_id, NULL, NULL, principal_id,
+         SELECT $1, tenant_id, $5, NULL, principal_id,
                 status, valid_from, valid_until, 1,
                 statement_timestamp(), statement_timestamp()
          FROM public.memberships
          WHERE tenant_id = $2 AND id = $3 AND principal_id = $4`,
-        [ID.membershipTwo, ID.tenant, ID.membership, ID.principal],
+        [ID.membershipTwo, ID.tenant, ID.membership, ID.principal, ID.organizationTwo],
       );
       await migrator.query(
         `INSERT INTO public.sessions (sid, sess, expire, user_id)
@@ -651,17 +652,6 @@ async function main() {
         now: () => NOW,
       });
     const result = await issueGateway();
-    if (!result.ok) {
-      const debugState = await sessionRepository.withLockedCurrentSession(
-        {
-          sessionId: SID,
-          sessionFingerprint: fingerprint(SID),
-          observedAt: NOW,
-        },
-        async (state) => JSON.stringify(state),
-      );
-      console.error(`[gateway-debug-state] ${debugState}`);
-    }
     assert.equal(result.ok, true, result.ok ? undefined : JSON.stringify(result));
     if (!result.ok) throw new Error(`gateway_denied_${result.reason}`);
     assert.equal(result.rateLimitPermitId.length, 36);
