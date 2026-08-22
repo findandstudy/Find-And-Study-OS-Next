@@ -202,17 +202,19 @@ its transaction is blocked in a controlled PostgreSQL query. It proves that
 the business transaction has no partial row while the separately committed
 attempt advances exactly once to `TERMINAL/ERROR/INTERNAL_ERROR`.
 
-All checks passed on evidence-issuer-revocation implementation head
-`9054010c7bffd84bfe549a952c42c26def892faf`: foundation run `32545500893`,
-command/evidence adapter run `32545500898`, durable-audit run `32545500894`,
-and G0 Linux/Windows run `32545500871`. The checks are not yet required by a
-repository ruleset. The adapter candidate still does not cover HTTP
+All checks passed on CREATE-write-failure implementation head
+`61065835b6d81f33ee495d147936ed1197fa14b6`: foundation run `32546411632`,
+command/evidence adapter run `32546411637`, durable-audit run `32546411607`,
+and G0 Linux/Windows run `32546411633`. The checks are not yet required by a
+repository ruleset. The first candidate adapter run (`32546075216`) correctly
+failed before a write boundary because its fixture used unregistered feature
+flags; the corrected test reuses the only registered non-production flag and
+runs before canonical CREATE. The adapter candidate still does not cover HTTP
 authentication-to-branded-context wiring, binding that context into the
 separate audit writer, direct command-credential compromise, scheduled repair
-after an unresolved ambiguous commit, injected failure between every write,
-production KMS/HSM audit-key custody, incomplete-attempt reconciliation, or
-decision/step-up paths. Those gaps keep the full matrix and runtime wiring at
-NO-GO.
+after an unresolved ambiguous commit, production KMS/HSM audit-key custody,
+incomplete-attempt reconciliation, or decision/step-up paths. Those gaps keep
+the full matrix and runtime wiring at NO-GO.
 
 ## Runtime-wiring gate
 
