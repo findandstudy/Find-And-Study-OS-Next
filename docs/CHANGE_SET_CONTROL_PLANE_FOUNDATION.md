@@ -376,6 +376,42 @@ An R1 change must observe frozen guardrails for at least one hour. It can become
 failure, and revocation transitions require their own durable execution
 receipts. Failed, rejected, rolled-back, and revoked states are closed.
 
+## Default-off HTTP session issuance gateway candidate
+
+`activeContextSessionGateway.ts` adds a route-unwired browser-session boundary
+in front of authoritative active-context issuance. It is deliberately a pure
+orchestration contract: `app.ts`, `index.ts`, and every route module remain free
+of imports or registrations for the gateway.
+
+The gateway accepts an HTTP request object, but never reads tenant, principal,
+organization, or branch from body, query, or headers. It requires the fixed
+internal path and `POST`, rejects every Authorization header/API-token flow,
+requires a configured Origin (or matching Referer) and a constant-time exact
+double-submit CSRF value, and reads only the opaque 256-bit session cookie.
+
+The raw session ID is sent only to a required locked-session repository. The
+rate limiter sees a SHA-256 session fingerprint, current session generation,
+authoritative principal and tenant, a domain-separated subject hash, and an
+operation constant. A successful permit is exact-shape, UUIDv7 identified,
+subject-bound, short-lived, and checked again after signing. Missing, malformed,
+inactive, rotated, expired, cross-session, unverified/deleted, or impersonated
+session state fails before resolver/signing. The session lock remains held
+through rate-limit admission, PostgreSQL authorization resolution, and external
+signature completion.
+
+The active-context TTL is the minimum of the configured maximum, current idle
+session remainder, and 24-hour absolute-session remainder. Repository callback
+skip/replay/return substitution, rate-limiter outage or forged permit, resolver
+denial, backward clock, and total gateway-budget overrun discard the candidate
+token. The server-derived scope is passed to the existing locked authoritative
+resolver only after all HTTP/session checks pass.
+
+The pure negative matrix is part of the G0 workflow. It also statically proves
+that no application or route registration imports the gateway. This candidate
+does not implement the legacy-session-to-principal/tenant PostgreSQL adapter,
+network-backed rate limiter, response route, browser storage policy, or
+production credential.
+
 ## Deliberately not delivered
 
 This foundation does not yet deliver:
@@ -391,8 +427,8 @@ This foundation does not yet deliver:
 - production command-executor/evidence-issuer role bootstrap and credentials;
 - production evidence/audit/active-context KMS/HSM key custody and rotation,
   a PostgreSQL authoritative active-context resolver adapter, scheduled repair
-  activation, tenant-dispatch ownership/alerting, and HTTP
-  authentication/session extraction;
+  activation, tenant-dispatch ownership/alerting, and the production HTTP
+  session repository/rate-limiter/route wiring;
 - runtime adoption/backfill of the tenant/organization/legacy-branch map;
 - persistent environment grants for separated migrator and runtime application
   database roles;
@@ -454,11 +490,20 @@ adapter/evidence run `32554158158`, durable-audit run `32554158114`, and G0
 Linux/Windows run `32554158141` all succeeded. Repository-required checks and
 independent approval remain separate governance gates.
 
-The next safe slice after that gate is default-off HTTP authentication/session
-extraction into the already branded request binder, with no public route
-activation. Session principal, server-selected tenant/organization/branch,
-CSRF/origin, rate limit, absolute session age, and resolver/token audience must
-be exact and negative-tested. No generic table DML, scheduler, Super Admin UI,
-publisher, production credential, or production migration may be connected
+The default-off HTTP session issuance gateway candidate now covers request
+extraction, server-only scope input, Origin/Referer, CSRF, rate-limit permit,
+absolute/idle session age, rotation/impersonation denial, session-bounded token
+TTL, and resolver/audience handoff without registering a route. Its final-head
+GitHub CI evidence must be recorded before this paragraph is treated as a
+passed gate.
+
+The next safe slice after that evidence is an additive, default-unwired
+PostgreSQL session/context-selection repository and a dedicated rate-limit
+adapter. It must map the legacy authenticated user to exactly one current HUMAN
+principal and an explicit server-side tenant/organization/branch selection,
+lock session generation/status through issuance, deny missing or ambiguous
+mapping, use no generic table DML, and pass revoke/rotation/query-cancel/pool
+cleanup races in disposable PostgreSQL. No HTTP route, scheduler, Super Admin
+UI, publisher, production credential, or production migration may be connected
 before required checks, production role/bootstrap review, and independent
 approval exist.

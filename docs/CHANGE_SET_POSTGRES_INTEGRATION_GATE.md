@@ -274,10 +274,27 @@ Linux/Windows run `32554158141` all succeeded. These successful runs are
 evidence for the exact implementation tree, not proof that repository rules
 make the checks required.
 
-The adapter candidate still does not cover HTTP authentication/session
+The PostgreSQL adapter candidate itself still does not cover HTTP authentication/session
 extraction, direct resolver-credential compromise detection, scheduled repair
 activation and alert delivery, production KMS/HSM key custody/rotation, or
 decision/step-up paths. Those gaps keep runtime wiring at NO-GO.
+
+The next default-off layer, `activeContextSessionGateway.ts`, now defines the
+HTTP/session-to-authoritative-issuance contract without registering a route.
+It rejects API-token/bearer issuance, untrusted or conflicting Origin/Referer,
+invalid double-submit CSRF, missing/malformed/inactive/rotated/expired or
+impersonated sessions, session-cookie fingerprint mismatch, malformed/expired
+rate-limit permits, rate-limit dependency failure, and gateway deadline
+overrun. Client body/query scope fields are ignored; the locked session
+repository alone supplies principal, tenant, organization, and branch. Its
+rate-limit permit and session lock remain current through resolver and signer
+completion, and token TTL cannot exceed idle or absolute session expiry.
+
+This is still a pure gateway candidate. No PostgreSQL session/context-selection
+repository, durable rate-limit adapter, HTTP response route, browser token
+storage decision, or production credential is present. The PostgreSQL gate must
+gain those repository/rotation/cancellation cases before runtime wiring can be
+considered.
 
 ## Runtime-wiring gate
 
