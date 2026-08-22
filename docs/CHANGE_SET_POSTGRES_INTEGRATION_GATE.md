@@ -1,13 +1,14 @@
 # ChangeSet PostgreSQL Integration Gate
 
-Status: **64-MIGRATION FOUNDATION CANDIDATE, DEFAULT-UNWIRED CONTEXT-BOUND
+Status: **65-MIGRATION FOUNDATION CANDIDATE, DEFAULT-UNWIRED CONTEXT-BOUND
 COMMAND/EVIDENCE, QUERY-CANCELLATION ROLLBACK, MEMBERSHIP/POLICY REVOCATION
 SERIALIZATION, EVIDENCE-KEY COMPROMISE SERIALIZATION, AMBIGUOUS-COMMIT
-AND SCHEDULED RECEIPT-ONLY RECONCILIATION, AND DURABLE-AUDIT ADAPTER CI GREEN;
-NO-GO for runtime wiring**.
+AND SCHEDULED RECEIPT-ONLY RECONCILIATION, DURABLE-AUDIT ADAPTER CI GREEN,
+AND DEFAULT-UNWIRED SESSION/RATE-LIMIT ADAPTER CI PENDING; NO-GO for runtime
+wiring**.
 
 This gate is not a delivery estimate and is not proof that migrations `0055`
-through `0063` have run in a long-lived environment. The approved local
+through `0064` have run in a long-lived environment. The approved local
 PostgreSQL endpoint `127.0.0.1:5433/fasos_apply_local` was unavailable. GitHub
 run `32547890515` applied the prior 63 reviewed migrations twice to an isolated
 disposable PostgreSQL 16 database and passed the direct-SQL foundation matrix.
@@ -119,7 +120,7 @@ The gate passes only when CI records all of the following:
 `artifacts/api-server/scripts/test-postgres-control-plane-gate.ts` define the
 foundation PostgreSQL 16 gate. It uses an immutable official
 image digest, a per-run `fas_it_*` database, separate `fas_migrator` and
-`fas_app` logins. The current candidate targets all 64 migrations twice. It
+`fas_app` logins. The current candidate targets all 65 migrations twice. It
 directly
 exercises:
 
@@ -220,7 +221,7 @@ run `32551335113`, and G0 Linux/Windows run `32551335019`. The checks are not
 yet required by a repository ruleset. Two earlier scheduled-reconciliation
 candidate runs correctly failed because the foundation harness retained the
 prior 62-migration denominator in its main and atomic-rollback assertions; both
-guards now require 64/64.
+guards now require 65/65.
 
 The production-shaped request binder verifies the signed active context once,
 requires exact server-resolved principal, tenant, organization, and branch
@@ -290,11 +291,32 @@ repository alone supplies principal, tenant, organization, and branch. Its
 rate-limit permit and session lock remain current through resolver and signer
 completion, and token TTL cannot exceed idle or absolute session expiry.
 
-This is still a pure gateway candidate. No PostgreSQL session/context-selection
-repository, durable rate-limit adapter, HTTP response route, browser token
-storage decision, or production credential is present. The PostgreSQL gate must
-gain those repository/rotation/cancellation cases before runtime wiring can be
-considered.
+At the PR #24 gateway tree this was still a pure gateway candidate without a
+PostgreSQL session/context-selection repository or durable rate-limit adapter.
+It also had no HTTP response route, browser token storage decision, or
+production credential.
+
+Migration `0064` and the two narrow PostgreSQL adapters now provide that
+default-unwired repository candidate. `fas_session_v1` resolves only a hashed,
+server-held session to the latest explicit server-side context selection and
+locks the session, fresh account, HUMAN principal, membership, and selection
+through callback completion. `fas_rate_limit_v1` accepts no raw session ID,
+recomputes the exact domain-separated subject hash, revalidates the current
+selection, atomically limits the one-minute window, and writes one UUIDv7
+permit receipt for an allowed request. The session resolver and rate limiter
+use different LOGIN/NOLOGIN owner pairs and exact EXECUTE-only grants; neither
+login receives table DML.
+
+The candidate PostgreSQL matrix additionally requires: direct table denial;
+missing session/selection and fingerprint mismatch; current account and HUMAN
+membership binding; issuance-first rotation serialization;
+inactive/rotated/revoked selection; client scope fields
+ignored by the end-to-end gateway; invalid limiter subject; concurrent count
+never exceeding five persisted permits per window; SQLSTATE `57014` rollback;
+and clean `app.tenant_id` on pool reuse. This paragraph records the intended
+gate, not a PASS claim. Exact PostgreSQL 16 CI, independent review, and required
+repository checks remain necessary before any route or production credential
+is wired.
 
 The exact gateway implementation tree
 `dcf62cb5d5fef588dc9b6c5e599fe1144f542dbb` passed foundation run

@@ -155,6 +155,10 @@ export const principalsTable = pgTable(
   },
   (table) => [
     unique("principals_issuer_subject_uq").on(table.issuer, table.subject),
+    unique("principals_id_legacy_user_id_uq").on(
+      table.id,
+      table.legacyUserId,
+    ),
     uniqueIndex("principals_legacy_user_id_uidx")
       .on(table.legacyUserId)
       .where(sql`${table.legacyUserId} IS NOT NULL`),
@@ -244,6 +248,207 @@ export const membershipsTable = pgTable(
       sql`${table.legacyBranchId} IS NULL OR ${table.organizationId} IS NOT NULL`,
     ),
     check("memberships_version_chk", sql`${table.version} > 0`),
+  ],
+).enableRLS();
+
+export const activeSessionContextSelectionsTable = pgTable(
+  "active_session_context_selections",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenantsTable.id, { onDelete: "restrict" }),
+    sessionFingerprint: text("session_fingerprint").notNull(),
+    sessionGeneration: bigint("session_generation", { mode: "number" }).notNull(),
+    legacyUserId: integer("legacy_user_id").notNull(),
+    principalId: uuid("principal_id").notNull(),
+    membershipId: uuid("membership_id").notNull(),
+    organizationId: uuid("organization_id"),
+    legacyBranchId: integer("legacy_branch_id"),
+    status: text("status").notNull().default("ACTIVE"),
+    impersonatorPrincipalId: uuid("impersonator_principal_id").references(
+      () => principalsTable.id,
+      { onDelete: "restrict" },
+    ),
+    originalSessionFingerprint: text("original_session_fingerprint"),
+    selectedAt: timestamp("selected_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("active_session_context_selections_tenant_id_id_uq").on(
+      table.tenantId,
+      table.id,
+    ),
+    unique("active_session_context_selections_fingerprint_generation_uq").on(
+      table.sessionFingerprint,
+      table.sessionGeneration,
+    ),
+    uniqueIndex("active_session_context_selections_one_active_uidx")
+      .on(table.sessionFingerprint)
+      .where(sql`${table.status} = 'ACTIVE'`),
+    index("active_session_context_selections_tenant_principal_idx").on(
+      table.tenantId,
+      table.principalId,
+      table.membershipId,
+      table.status,
+    ),
+    foreignKey({
+      columns: [table.principalId, table.legacyUserId],
+      foreignColumns: [principalsTable.id, principalsTable.legacyUserId],
+      name: "active_session_context_selections_principal_user_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.membershipId, table.principalId],
+      foreignColumns: [
+        membershipsTable.tenantId,
+        membershipsTable.id,
+        membershipsTable.principalId,
+      ],
+      name: "active_session_context_selections_membership_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.organizationId],
+      foreignColumns: [organizationsTable.tenantId, organizationsTable.id],
+      name: "active_session_context_selections_organization_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.organizationId, table.legacyBranchId],
+      foreignColumns: [
+        tenantOrganizationLegacyBranchesTable.tenantId,
+        tenantOrganizationLegacyBranchesTable.organizationId,
+        tenantOrganizationLegacyBranchesTable.legacyBranchId,
+      ],
+      name: "active_session_context_selections_branch_fk",
+    }).onDelete("restrict"),
+    check("active_session_context_selections_id_uuidv7_chk", uuidV7(table.id)),
+    check(
+      "active_session_context_selections_fingerprint_chk",
+      sql`${table.sessionFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "active_session_context_selections_generation_chk",
+      sql`${table.sessionGeneration} > 0`,
+    ),
+    check(
+      "active_session_context_selections_status_chk",
+      sql`${table.status} IN ('ACTIVE', 'ROTATED', 'REVOKED')`,
+    ),
+    check(
+      "active_session_context_selections_scope_chk",
+      sql`${table.legacyBranchId} IS NULL OR ${table.organizationId} IS NOT NULL`,
+    ),
+    check(
+      "active_session_context_selections_impersonation_chk",
+      sql`(
+        (${table.impersonatorPrincipalId} IS NULL AND ${table.originalSessionFingerprint} IS NULL)
+        OR (
+          ${table.impersonatorPrincipalId} IS NOT NULL
+          AND ${table.originalSessionFingerprint} ~ '^[0-9a-f]{64}$'
+        )
+      )`,
+    ),
+    check(
+      "active_session_context_selections_revocation_chk",
+      sql`(
+        (${table.status} = 'ACTIVE' AND ${table.revokedAt} IS NULL)
+        OR (${table.status} IN ('ROTATED', 'REVOKED') AND ${table.revokedAt} IS NOT NULL)
+      )`,
+    ),
+  ],
+).enableRLS();
+
+export const activeContextIssuanceRateLimitsTable = pgTable(
+  "active_context_issuance_rate_limits",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenantsTable.id, { onDelete: "restrict" }),
+    subjectHash: text("subject_hash").notNull(),
+    sessionFingerprint: text("session_fingerprint").notNull(),
+    sessionGeneration: bigint("session_generation", { mode: "number" }).notNull(),
+    principalId: uuid("principal_id")
+      .notNull()
+      .references(() => principalsTable.id, { onDelete: "restrict" }),
+    windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull(),
+    requestCount: integer("request_count").notNull().default(1),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.subjectHash] }),
+    foreignKey({
+      columns: [table.sessionFingerprint, table.sessionGeneration],
+      foreignColumns: [
+        activeSessionContextSelectionsTable.sessionFingerprint,
+        activeSessionContextSelectionsTable.sessionGeneration,
+      ],
+      name: "active_context_issuance_rate_limits_selection_fk",
+    }).onDelete("restrict"),
+    check(
+      "active_context_issuance_rate_limits_hashes_chk",
+      sql`${table.subjectHash} ~ '^[0-9a-f]{64}$' AND ${table.sessionFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "active_context_issuance_rate_limits_generation_chk",
+      sql`${table.sessionGeneration} > 0`,
+    ),
+    check(
+      "active_context_issuance_rate_limits_count_chk",
+      sql`${table.requestCount} BETWEEN 1 AND 1000000`,
+    ),
+  ],
+).enableRLS();
+
+export const activeContextIssuancePermitsTable = pgTable(
+  "active_context_issuance_permits",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenantsTable.id, { onDelete: "restrict" }),
+    subjectHash: text("subject_hash").notNull(),
+    sessionFingerprint: text("session_fingerprint").notNull(),
+    sessionGeneration: bigint("session_generation", { mode: "number" }).notNull(),
+    principalId: uuid("principal_id")
+      .notNull()
+      .references(() => principalsTable.id, { onDelete: "restrict" }),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    unique("active_context_issuance_permits_tenant_id_id_uq").on(
+      table.tenantId,
+      table.id,
+    ),
+    foreignKey({
+      columns: [table.sessionFingerprint, table.sessionGeneration],
+      foreignColumns: [
+        activeSessionContextSelectionsTable.sessionFingerprint,
+        activeSessionContextSelectionsTable.sessionGeneration,
+      ],
+      name: "active_context_issuance_permits_selection_fk",
+    }).onDelete("restrict"),
+    check("active_context_issuance_permits_id_uuidv7_chk", uuidV7(table.id)),
+    check(
+      "active_context_issuance_permits_hashes_chk",
+      sql`${table.subjectHash} ~ '^[0-9a-f]{64}$' AND ${table.sessionFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "active_context_issuance_permits_generation_chk",
+      sql`${table.sessionGeneration} > 0`,
+    ),
+    check(
+      "active_context_issuance_permits_expiry_chk",
+      sql`${table.expiresAt} > ${table.issuedAt} AND ${table.expiresAt} <= ${table.issuedAt} + interval '15 seconds'`,
+    ),
   ],
 ).enableRLS();
 

@@ -99,3 +99,12 @@ jobs:
           PG_GATE_CONTEXT_RESOLVER_URL: postgresql://fas_auth_context_resolver@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
           PG_GATE_MIGRATOR_URL: postgresql://fas_migrator@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
         run: pnpm --filter @workspace/api-server run test:postgres-change-set-adapter
+
+      - name: Run the server-session and durable rate-limit adapter checks
+        env:
+          PG_GATE_ADMIN_URL: postgresql://postgres@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+          PG_GATE_MIGRATOR_URL: postgresql://fas_migrator@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+          PG_GATE_CONTEXT_RESOLVER_URL: postgresql://fas_auth_context_resolver@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+          PG_GATE_SESSION_RESOLVER_URL: postgresql://fas_session_resolver@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+          PG_GATE_RATE_LIMIT_URL: postgresql://fas_rate_limit_executor@127.0.0.1:5432/fas_it_${{ github.run_id }}_${{ github.run_attempt }}
+        run: pnpm --filter @workspace/api-server run test:postgres-active-context-session-gateway

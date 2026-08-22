@@ -3,7 +3,7 @@
 Status: additive, default-unwired foundation plus tested PostgreSQL command,
 evidence, and durable-audit adapter candidates. This document is a security and
 delivery contract, not evidence that the feature is enabled. Migrations `0055`
-through `0060` have not been applied to a long-lived database. No API route,
+through `0064` have not been applied to a long-lived database. No API route,
 Super Admin UI, publisher, worker, or materializer is wired to these adapters.
 
 ## Outcome
@@ -458,7 +458,7 @@ writer quarantines remain authoritative.
 
 ## Next safe slice
 
-The 64-migration PostgreSQL 16 foundation candidate and default-unwired command, evidence,
+The 65-migration PostgreSQL 16 foundation candidate and default-unwired command, evidence,
 durable-audit, request-context-bound transaction, ambiguous-commit,
 query-cancellation, membership/policy revocation, evidence-key compromise,
 exact tenant-grant, global issuer revocation, CREATE write-boundary rollback,
@@ -508,13 +508,30 @@ absolute/idle session age, rotation/impersonation denial, session-bounded token
 TTL, and resolver/audience handoff without registering a route. Its final-head
 GitHub CI evidence is recorded above; runtime wiring remains NO-GO.
 
-The next safe slice after that evidence is an additive, default-unwired
-PostgreSQL session/context-selection repository and a dedicated rate-limit
-adapter. It must map the legacy authenticated user to exactly one current HUMAN
-principal and an explicit server-side tenant/organization/branch selection,
-lock session generation/status through issuance, deny missing or ambiguous
-mapping, use no generic table DML, and pass revoke/rotation/query-cancel/pool
-cleanup races in disposable PostgreSQL. No HTTP route, scheduler, Super Admin
-UI, publisher, production credential, or production migration may be connected
-before required checks, production role/bootstrap review, and independent
-approval exist.
+Migration `0064`, `PostgresActiveContextSessionRepository`, and
+`PostgresActiveContextIssuanceRateLimiter` are the additive, default-unwired
+candidate for that next boundary. The server-side selection binds a hashed
+session identifier and monotonic generation to one legacy user, current HUMAN
+principal, tenant membership, and optional organization/legacy branch. The
+session login receives only exact fixed-search-path RPC execution; a separate
+NOLOGIN owner locks the raw server session, fresh account, principal,
+membership, and selection. Raw session IDs are never stored in the selection
+or limiter tables. Missing mappings, session fingerprint mismatch, inactive or
+rotated selection, stale membership, account revocation, expired sessions, and
+impersonation fail closed.
+
+The rate-limit login is separate from the session resolver. It receives only
+one exact RPC, recomputes the domain-separated subject hash in PostgreSQL,
+revalidates the active session selection, atomically bounds a one-minute
+window, and appends a short-lived UUIDv7 permit receipt. Neither runtime login
+has generic table DML or access to the other credential's function. The
+disposable PostgreSQL candidate test covers direct-table denial, request-scope
+injection, issuance-first rotation serialization, revoke-first state,
+rate-limit concurrency, invalid subject hashes,
+SQLSTATE `57014` cancellation, rollback, and pool tenant-context cleanup.
+
+This `0064` candidate is not runtime evidence until the PostgreSQL 16 workflow
+passes on its exact implementation tree. No HTTP route, selection writer,
+scheduler, Super Admin UI, publisher, production credential, or production
+migration may be connected before required checks, production role/bootstrap
+review, and independent approval exist.

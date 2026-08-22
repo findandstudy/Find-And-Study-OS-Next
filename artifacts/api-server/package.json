@@ -49,6 +49,7 @@
     "test:change-set-evidence-envelope": "tsx --test ./scripts/test-change-set-evidence-envelope.ts",
     "test:postgres-control-plane-gate": "tsx ./scripts/test-postgres-control-plane-gate.ts",
     "test:postgres-change-set-adapter": "tsx ./scripts/test-postgres-change-set-adapter.ts",
+    "test:postgres-active-context-session-gateway": "tsx ./scripts/test-postgres-active-context-session-gateway.ts",
     "test:postgres-change-set-audit": "tsx ./scripts/test-postgres-change-set-audit.ts",
     "test:ai-agent-admin": "tsx --test ./scripts/test-ai-agent-admin.ts",
     "test:ai-agent-models": "tsx --test ./scripts/test-ai-agent-models.ts",

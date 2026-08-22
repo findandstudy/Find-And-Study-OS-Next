@@ -16,26 +16,26 @@ some source locations can appear in more than one surface class.
 
 ## Frozen baseline
 
-The current registry contains 148 explicitly classified files and 1,981
+The current registry contains 151 explicitly classified files and 1,995
 static surface matches:
 
 | Ownership class | Files |
 |---|---:|
 | Tenant-owned | 46 |
 | External integration | 22 |
-| Privileged configuration | 16 |
+| Privileged configuration | 19 |
 | Public ingress | 5 |
 | Platform-global | 16 |
 | Mixed legacy | 43 |
 
-All 148 files are currently `externalPilot=quarantine`. This is deliberate:
+All 151 files are currently `externalPilot=quarantine`. This is deliberate:
 classification is not authorization, and a file does not leave quarantine
-until its effective tenant boundary is proven. The strict gate currently
-reports 120 critical/high files still quarantined. That failure is the honest
-baseline, not a test defect.
+until its effective tenant boundary is proven. The strict gate still reports
+critical/high files in quarantine. That failure is the honest baseline, not a
+test defect.
 
 The surface total is a review denominator, not a claim that the application
-performs 1,975 unique runtime writes. Pattern overlap prevents unsafe
+performs 1,995 unique runtime writes. Pattern overlap prevents unsafe
 undercounting; promotion evidence is evaluated per registered file and its
 reachable runtime paths.
 
