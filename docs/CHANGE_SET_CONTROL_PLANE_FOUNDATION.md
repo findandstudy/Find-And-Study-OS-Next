@@ -389,9 +389,9 @@ This foundation does not yet deliver:
 - a KMS/HSM-backed production signer, key rotation ceremony, or issuer runtime
   credential;
 - production command-executor/evidence-issuer role bootstrap and credentials;
-- production audit-key custody/rotation, versioned active-context key-ring
-  issuance/rotation, scheduled repair activation, tenant-dispatch
-  ownership/alerting, and HTTP authentication/session extraction;
+- production evidence/audit/active-context KMS/HSM key custody and rotation,
+  authoritative active-context subject resolution, scheduled repair activation,
+  tenant-dispatch ownership/alerting, and HTTP authentication/session extraction;
 - runtime adoption/backfill of the tenant/organization/legacy-branch map;
 - persistent environment grants for separated migrator and runtime application
   database roles;
@@ -414,22 +414,27 @@ durable-audit, request-context-bound transaction, ambiguous-commit,
 query-cancellation, membership/policy revocation, evidence-key compromise,
 exact tenant-grant, global issuer revocation, CREATE write-boundary rollback,
 and scheduled receipt-only repair workflows described in
-`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on request-binding
-implementation head `12cb7f9be8eaaea75d095d5e2fa95a30a3c840f5`
-(foundation run `32549276908`, adapter run `32549276783`, durable-audit and
-scheduled-repair run `32549276825`, and G0 Linux/Windows run `32549276854`).
-The binder proves exact tenant, principal, membership, organization, branch,
-policy, context-id, and expiry agreement. Its adapter suites cover revocation,
-timeout, cancellation, and pool reuse without granting generic Control Plane
-DML to the shared runtime role.
+`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on active-context-key-ring
+implementation head `5e6b9bf31ca7b9c6bbaab7863ededebad63bc9c8`
+(foundation run `32550545344`, adapter run `32550545491`, durable-audit and
+scheduled-repair run `32550545342`, and G0 Linux/Windows run `32550545348`).
+The request binder proves exact tenant, principal, membership, organization,
+branch, policy, context-id, and expiry agreement. The v2 envelope additionally
+binds `kid`, Ed25519 algorithm, audience, environment/cell, issuer, token
+version, not-before, expiry, and tenant scope. `ACTIVE` and bounded
+`VERIFY_ONLY` verification pass; unknown, stale, cross-deployment, downgraded,
+revoked, compromised, malformed, or tampered tokens fail closed. Signing
+material is represented only by an opaque KMS/HSM reference; CI uses an
+ephemeral process-memory key and production mode rejects that test reference.
 
-The next safe slice is a default-unwired, versioned active-context key ring and
-server-side issuance bootstrap. It must bind `kid`, algorithm, audience,
-environment/cell, issuer, token version, not-before, expiry, and tenant scope;
-support `ACTIVE -> VERIFY_ONLY -> REVOKED/COMPROMISED` rotation with exact
-boundary tests; keep signing material behind an opaque KMS/HSM reference; and
-reject unknown, stale, cross-environment, or downgraded tokens. CI may use only
-an ephemeral process-memory signer. No scheduler, API route, Super Admin UI, or
-production credential may be connected before required checks, production
-role/bootstrap review, and independent approval exist. Publisher and
-configuration materialization adapters remain separate and default-off.
+The next safe slice is a default-unwired authoritative issuance orchestrator.
+It must accept only authenticated principal plus server-branded tenant,
+organization, and branch identity; resolve current membership, assignment set,
+policy version, and tenant state from a repository; generate the context ID and
+timestamps server-side; and pass that immutable subject to the v2 issuer.
+Client-provided membership, assignment, policy, issuer, key, timestamps, or
+scope expansion must be impossible. Suspend/revoke/policy-rotation races and
+resolver timeout must fail before signing. No scheduler, HTTP route, Super
+Admin UI, or production credential may be connected before required checks,
+production role/bootstrap review, and independent approval exist. Publisher
+and configuration materialization adapters remain separate and default-off.

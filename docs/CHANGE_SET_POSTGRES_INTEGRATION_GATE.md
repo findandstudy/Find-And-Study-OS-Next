@@ -213,10 +213,10 @@ valid completed receipt resumes the existing HMAC chain as
 terminal error plus explicit operational escalation. Invalid identity or
 result hashes fail closed. The scheduler entrypoint remains unwired.
 
-All checks passed on request-context-binding implementation head
-`12cb7f9be8eaaea75d095d5e2fa95a30a3c840f5`: foundation run `32549276908`,
-command/evidence adapter run `32549276783`, durable-audit and scheduled-repair
-run `32549276825`, and G0 Linux/Windows run `32549276854`. The checks are not
+All checks passed on active-context-key-ring implementation head
+`5e6b9bf31ca7b9c6bbaab7863ededebad63bc9c8`: foundation run `32550545344`,
+command/evidence adapter run `32550545491`, durable-audit and scheduled-repair
+run `32550545342`, and G0 Linux/Windows run `32550545348`. The checks are not
 yet required by a repository ruleset. Two earlier scheduled-reconciliation
 candidate runs correctly failed because the foundation harness retained the
 prior 62-migration denominator in its main and atomic-rollback assertions; both
@@ -231,11 +231,21 @@ membership/policy revocation through that gateway; the durable-audit path uses
 it for canonical replay, rejection, SQLSTATE `57014` cancellation, and existing
 pool-cleanup evidence. It remains default-unwired and exposes no HTTP route.
 
-The adapter candidate still does not cover versioned active-context key-ring
-issuance/rotation, HTTP authentication/session extraction, direct
+The v2 active-context envelope uses an exact Ed25519 header/payload/signature
+contract and a public verification key ring. It binds key ID, audience,
+environment, cell, issuer, tenant, not-before, TTL, and the existing context
+identity; supports bounded `ACTIVE`/`VERIFY_ONLY` verification; and rejects
+revoked, compromised, unknown, downgraded, cross-deployment, malformed, or
+tampered tokens. The request binder selects v2 explicitly and cannot silently
+fall back to the legacy HMAC verifier. Private signing material is not present
+in the key ring or token; only an opaque signer reference crosses the issuance
+boundary, and the process-memory test signer is denied in production mode.
+
+The adapter candidate still does not cover authoritative DB-backed issuance
+subject resolution, HTTP authentication/session extraction, direct
 command-credential compromise, scheduled repair activation and alert delivery,
-production KMS/HSM audit-key custody, or decision/step-up paths. Those gaps keep
-runtime wiring at NO-GO.
+production KMS/HSM key custody/rotation, or decision/step-up paths. Those gaps
+keep runtime wiring at NO-GO.
 
 ## Runtime-wiring gate
 
