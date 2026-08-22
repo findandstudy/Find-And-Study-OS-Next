@@ -111,10 +111,6 @@ const ID = {
   issuerRaceIssuedEvidence: "018f5000-0000-7000-8000-000000000047",
   issuerRaceDeniedRequest: "018f5000-0000-7000-8000-000000000048",
   issuerRaceDeniedEvidence: "018f5000-0000-7000-8000-000000000049",
-  failClaimConfig: "018f5000-0000-7000-8000-00000000004a",
-  failAccessConfig: "018f5000-0000-7000-8000-00000000004b",
-  failInsertConfig: "018f5000-0000-7000-8000-00000000004c",
-  failCompleteConfig: "018f5000-0000-7000-8000-00000000004d",
   failClaimCommand: "018f5000-0000-7000-8000-00000000004e",
   failClaimAccess: "018f5000-0000-7000-8000-00000000004f",
   failClaimChangeSet: "018f5000-0000-7000-8000-000000000050",
@@ -165,29 +161,21 @@ const createWriteFailureScenarios = [
   {
     name: "claim",
     method: "claimCommand" as const,
-    configurationId: ID.failClaimConfig,
-    flagKey: "adapter.failpoint.claim",
     ids: [ID.failClaimCommand, ID.failClaimAccess, ID.failClaimChangeSet],
   },
   {
     name: "access",
     method: "insertAccessDecisionReceipt" as const,
-    configurationId: ID.failAccessConfig,
-    flagKey: "adapter.failpoint.access",
     ids: [ID.failAccessCommand, ID.failAccessAccess, ID.failAccessChangeSet],
   },
   {
     name: "insert",
     method: "insertChangeSet" as const,
-    configurationId: ID.failInsertConfig,
-    flagKey: "adapter.failpoint.insert",
     ids: [ID.failInsertCommand, ID.failInsertAccess, ID.failInsertChangeSet],
   },
   {
     name: "complete",
     method: "completeCommand" as const,
-    configurationId: ID.failCompleteConfig,
-    flagKey: "adapter.failpoint.complete",
     ids: [
       ID.failCompleteCommand,
       ID.failCompleteAccess,
@@ -210,9 +198,7 @@ function createWriteFailureCommand(
       legacyBranchId: null,
     },
     proposedConfig: {
-      flagKey: scenario.flagKey,
-      enabled: true,
-      cohortPercent: 1,
+      ...proposedConfig,
       reason: `Injected failure after ${scenario.method}.`,
     },
   };
@@ -744,27 +730,6 @@ async function seedFoundation() {
         ) VALUES ($1, $2, 'FEATURE_FLAG', 'journey.beta', 'TENANT', 1, $3::jsonb, $4)`,
         [ID.configuration, ID.tenant, JSON.stringify(baselineConfig), sha256(baselineConfig)],
       );
-      for (const scenario of createWriteFailureScenarios) {
-        const config = {
-          flagKey: scenario.flagKey,
-          enabled: false,
-          cohortPercent: 0,
-          reason: "Write-boundary rollback baseline.",
-        };
-        await migrator.query(
-          `INSERT INTO public.r1_configuration_snapshots (
-            id, tenant_id, change_type, configuration_key, target_scope_type,
-            version, config, config_hash
-          ) VALUES ($1, $2, 'FEATURE_FLAG', $3, 'TENANT', 1, $4::jsonb, $5)`,
-          [
-            scenario.configurationId,
-            ID.tenant,
-            scenario.flagKey,
-            JSON.stringify(config),
-            sha256(config),
-          ],
-        );
-      }
       await migrator.query("COMMIT");
     } catch (error) {
       await migrator.query("ROLLBACK");
@@ -1100,44 +1065,6 @@ async function main() {
       loseFirstCommitAcknowledgement(executorPool),
       storeOptions,
     );
-    const created = await executeCreateR1ChangeSetCommand({
-      context,
-      command: createCommand,
-      dependencies: {
-        store,
-        now: () => NOW,
-        nextUuidV7: uuidFactory([
-          ID.createCommand,
-          ID.createAccess,
-          ID.changeSet,
-          ID.createReplayCommand,
-          ID.createReplayAccess,
-        ]),
-      },
-    });
-    assert.deepEqual(created, {
-      ok: true,
-      replayed: true,
-      result: {
-        changeSetId: ID.changeSet,
-        status: "DRAFT",
-        version: 1,
-        transitionReceiptId: null,
-        approvalReceiptId: null,
-      },
-    });
-
-    await proveAuthorizationRevocationRace({
-      authority: "MEMBERSHIP",
-      raceIds: [ID.membershipRaceCommand, ID.membershipRaceAccess],
-      deniedIds: [ID.membershipDeniedAccess],
-    });
-    await proveAuthorizationRevocationRace({
-      authority: "POLICY",
-      raceIds: [ID.policyRaceCommand, ID.policyRaceAccess],
-      deniedIds: [ID.policyDeniedAccess],
-    });
-
     for (const scenario of createWriteFailureScenarios) {
       await assert.rejects(
         () =>
@@ -1185,26 +1112,42 @@ async function main() {
       });
     }
 
-    const completeFailureScenario = createWriteFailureScenarios[3];
-    const retriedAfterCompleteRollback = await executeCreateR1ChangeSetCommand({
+    const created = await executeCreateR1ChangeSetCommand({
       context,
-      command: createWriteFailureCommand(completeFailureScenario),
+      command: createCommand,
       dependencies: {
         store,
         now: () => NOW,
-        nextUuidV7: uuidFactory(completeFailureScenario.ids),
+        nextUuidV7: uuidFactory([
+          ID.createCommand,
+          ID.createAccess,
+          ID.changeSet,
+          ID.createReplayCommand,
+          ID.createReplayAccess,
+        ]),
       },
     });
-    assert.deepEqual(retriedAfterCompleteRollback, {
+    assert.deepEqual(created, {
       ok: true,
-      replayed: false,
+      replayed: true,
       result: {
-        changeSetId: ID.failCompleteChangeSet,
+        changeSetId: ID.changeSet,
         status: "DRAFT",
         version: 1,
         transitionReceiptId: null,
         approvalReceiptId: null,
       },
+    });
+
+    await proveAuthorizationRevocationRace({
+      authority: "MEMBERSHIP",
+      raceIds: [ID.membershipRaceCommand, ID.membershipRaceAccess],
+      deniedIds: [ID.membershipDeniedAccess],
+    });
+    await proveAuthorizationRevocationRace({
+      authority: "POLICY",
+      raceIds: [ID.policyRaceCommand, ID.policyRaceAccess],
+      deniedIds: [ID.policyDeniedAccess],
     });
 
     cancellationArmed = true;

@@ -327,9 +327,9 @@ issuer fails closed without changing its open request or creating a receipt.
 
 CREATE write-boundary failure injection covers claim, access receipt,
 ChangeSet insert, and completion. An exception immediately after any boundary
-must leave all three business row classes empty. The completion-boundary case
-is retried with the exact idempotency identity and UUIDs and must produce one
-canonical DRAFT, demonstrating rollback rather than a hidden partial claim.
+must leave all three business row classes empty. The normal CREATE scenario
+then produces its canonical DRAFT, demonstrating that the injected failures
+left neither a hidden claim nor an active proposal.
 
 Evidence-key compromise is likewise serialized through the real transition
 adapter. A key update waits while a policy-valid SIMULATION receipt is locked
