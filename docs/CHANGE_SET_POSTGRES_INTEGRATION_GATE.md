@@ -172,6 +172,12 @@ its single-use request commit atomically. After the revocation commits, a
 second signed envelope tied to the same exact grant fails closed: its request
 stays `OPEN` and no evidence receipt is inserted.
 
+The global issuer lifecycle is exercised last because revocation is terminal.
+When issuance owns the issuer verification lock first, the issuer revoker must
+wait until receipt/request commit. After global revoke commits, another validly
+signed envelope from that issuer is rejected as inactive before persistence;
+the denied request stays open and no partial receipt is left behind.
+
 `.github/workflows/postgres-control-plane-audit-gate.yml` and
 `test-postgres-change-set-audit.ts` add the durable outer-attempt candidate.
 They prove a separately committed start event, terminal success and rejection

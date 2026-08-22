@@ -107,6 +107,10 @@ const ID = {
   grantRaceIssuedEvidence: "018f5000-0000-7000-8000-000000000043",
   grantRaceDeniedRequest: "018f5000-0000-7000-8000-000000000044",
   grantRaceDeniedEvidence: "018f5000-0000-7000-8000-000000000045",
+  issuerRaceIssuedRequest: "018f5000-0000-7000-8000-000000000046",
+  issuerRaceIssuedEvidence: "018f5000-0000-7000-8000-000000000047",
+  issuerRaceDeniedRequest: "018f5000-0000-7000-8000-000000000048",
+  issuerRaceDeniedEvidence: "018f5000-0000-7000-8000-000000000049",
 } as const;
 
 const NOW = Date.now();
@@ -1826,6 +1830,230 @@ async function main() {
       }
     });
 
+    const issuerRaceRequests = [
+      {
+        requestId: ID.issuerRaceIssuedRequest,
+        receiptId: ID.issuerRaceIssuedEvidence,
+        challengeNonce: crypto.randomBytes(32).toString("base64url"),
+      },
+      {
+        requestId: ID.issuerRaceDeniedRequest,
+        receiptId: ID.issuerRaceDeniedEvidence,
+        challengeNonce: crypto.randomBytes(32).toString("base64url"),
+      },
+    ] as const;
+    await withClient(migratorUrl, async (migrator) => {
+      await migrator.query("BEGIN");
+      try {
+        await migrator.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+          ID.tenant,
+        ]);
+        for (const request of issuerRaceRequests) {
+          await migrator.query(
+            `INSERT INTO public.change_set_evidence_requests (
+              id, tenant_id, change_set_id, target_state, kind,
+              requested_by_principal_id, requested_by_membership_id,
+              subject_hash, policy_version_id, tool_id, tool_version,
+              challenge_nonce_hash, state, expires_at, created_at
+            ) VALUES ($1, $2, $3, 'IN_REVIEW', 'ROLLBACK_PLAN', $4, $5,
+              $6, $7, $8, $9, $10, 'OPEN', to_timestamp($11 / 1000.0),
+              to_timestamp($12 / 1000.0))`,
+            [
+              request.requestId,
+              ID.tenant,
+              ID.changeSet,
+              ID.humanPrincipal,
+              ID.humanMembership,
+              sha256(proposedConfig),
+              ID.policy,
+              evidenceToolId,
+              evidenceToolVersion,
+              sha256(request.challengeNonce),
+              NOW + 10 * 60_000,
+              NOW - 1_000,
+            ],
+          );
+        }
+        await migrator.query("COMMIT");
+      } catch (error) {
+        await migrator.query("ROLLBACK");
+        throw error;
+      }
+    });
+    const issuerRaceEnvelopes = await Promise.all(
+      issuerRaceRequests.map((request) =>
+        issueChangeSetEvidenceEnvelope(
+          {
+            receiptId: request.receiptId,
+            evidenceRequestId: request.requestId,
+            challengeNonce: request.challengeNonce,
+            issuerTenantGrantId: ID.rollbackPlanGrant,
+            tenantId: ID.tenant,
+            changeSetId: ID.changeSet,
+            targetState: "IN_REVIEW",
+            kind: "ROLLBACK_PLAN",
+            requestedByPrincipalId: ID.humanPrincipal,
+            requestedByMembershipId: ID.humanMembership,
+            subjectHash: sha256(proposedConfig),
+            policyVersionId: ID.policy,
+            toolId: evidenceToolId,
+            toolVersion: evidenceToolVersion,
+            outcome: "PASSED",
+            artifactCount: null,
+            artifactManifestHash: null,
+            ttlMs: 5 * 60_000,
+          },
+          evidenceSigner(),
+          NOW,
+        ),
+      ),
+    );
+
+    const issuerContextReady = deferred<void>();
+    const releaseIssuerContext = deferred<void>();
+    const issuerRaceAdapter = new PostgresChangeSetEvidenceIssuer({
+      pool: pauseAfterEvidenceVerificationContextLoad({
+        pool: issuerPool,
+        ready: () => issuerContextReady.resolve(),
+        release: releaseIssuerContext.promise,
+      }),
+      expectedRole: ROLE.evidenceIssuer,
+      expectedEnvironmentId: "test-ci",
+      expectedCellId: "cell-a",
+      now: () => NOW,
+    });
+    const issuedDuringIssuerRace = issuerRaceAdapter.persistVerifiedEnvelope({
+      expectedTenantId: ID.tenant,
+      token: issuerRaceEnvelopes[0].token,
+    });
+    const issuedDuringIssuerRaceOutcome = issuedDuringIssuerRace.then(
+      (value) => ({ kind: "resolved" as const, value }),
+      (error: unknown) => ({ kind: "rejected" as const, error }),
+    );
+    await within(
+      Promise.race([
+        issuerContextReady.promise,
+        issuedDuringIssuerRaceOutcome.then((outcome): never => {
+          if (outcome.kind === "rejected") throw outcome.error;
+          throw new Error("evidence_issuance_finished_before_issuer_lock_gate");
+        }),
+      ]),
+      10_000,
+    );
+
+    const issuerRevoker = new Client({
+      connectionString: migratorUrl,
+      connectionTimeoutMillis: 10_000,
+      statement_timeout: 15_000,
+      lock_timeout: 5_000,
+      idle_in_transaction_session_timeout: 15_000,
+    });
+    await issuerRevoker.connect();
+    let issuerRevokerTransactionOpen = false;
+    try {
+      await issuerRevoker.query("BEGIN");
+      issuerRevokerTransactionOpen = true;
+      await issuerRevoker.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+        ID.tenant,
+      ]);
+      const backend = await issuerRevoker.query<{ pid: number }>(
+        "SELECT pg_backend_pid()::int AS pid",
+      );
+      const issuerRevokerPid = Number(backend.rows[0]?.pid);
+      assert.ok(Number.isSafeInteger(issuerRevokerPid) && issuerRevokerPid > 0);
+      const issuerRevokeQuery = issuerRevoker.query(
+        `UPDATE public.change_set_evidence_issuers
+         SET state = 'REVOKED'
+         WHERE id = $1`,
+        [evidenceIssuerId],
+      );
+      const issuerRevokeOutcome = issuerRevokeQuery.then(
+        (value) => ({ kind: "resolved" as const, value }),
+        (error: unknown) => ({ kind: "rejected" as const, error }),
+      );
+      await within(
+        Promise.race([
+          waitForBackendLock(issuerRevokerPid),
+          issuerRevokeOutcome.then((outcome): never => {
+            if (outcome.kind === "rejected") throw outcome.error;
+            throw new Error("issuer_revocation_did_not_wait_for_issuance_lock");
+          }),
+        ]),
+        10_000,
+      );
+
+      releaseIssuerContext.resolve();
+      const issued = await issuedDuringIssuerRaceOutcome;
+      assert.equal(issued.kind, "resolved");
+      if (issued.kind === "resolved") {
+        assert.deepEqual(issued.value, {
+          receiptId: ID.issuerRaceIssuedEvidence,
+        });
+      }
+      const revoked = await issuerRevokeOutcome;
+      assert.equal(revoked.kind, "resolved");
+      if (revoked.kind === "resolved") assert.equal(revoked.value.rowCount, 1);
+      await issuerRevoker.query("COMMIT");
+      issuerRevokerTransactionOpen = false;
+    } finally {
+      releaseIssuerContext.resolve();
+      if (issuerRevokerTransactionOpen) await issuerRevoker.query("ROLLBACK");
+      await issuerRevoker.end();
+    }
+
+    await mustFail(
+      () =>
+        issuer.persistVerifiedEnvelope({
+          expectedTenantId: ID.tenant,
+          token: issuerRaceEnvelopes[1].token,
+        }),
+      /change_set_evidence_verification_failed:key_inactive/,
+    );
+    await withClient(migratorUrl, async (migrator) => {
+      await migrator.query("BEGIN");
+      try {
+        await migrator.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+          ID.tenant,
+        ]);
+        const requests = await migrator.query(
+          `SELECT id, state, issued_receipt_id
+           FROM public.change_set_evidence_requests
+           WHERE tenant_id = $1 AND id = ANY($2::uuid[])
+           ORDER BY id`,
+          [
+            ID.tenant,
+            [ID.issuerRaceIssuedRequest, ID.issuerRaceDeniedRequest],
+          ],
+        );
+        assert.deepEqual(requests.rows, [
+          {
+            id: ID.issuerRaceIssuedRequest,
+            state: "ISSUED",
+            issued_receipt_id: ID.issuerRaceIssuedEvidence,
+          },
+          {
+            id: ID.issuerRaceDeniedRequest,
+            state: "OPEN",
+            issued_receipt_id: null,
+          },
+        ]);
+        const receipts = await migrator.query<{ id: string }>(
+          `SELECT id FROM public.change_set_evidence_receipts
+           WHERE tenant_id = $1 AND id = ANY($2::uuid[])
+           ORDER BY id`,
+          [
+            ID.tenant,
+            [ID.issuerRaceIssuedEvidence, ID.issuerRaceDeniedEvidence],
+          ],
+        );
+        assert.deepEqual(receipts.rows, [{ id: ID.issuerRaceIssuedEvidence }]);
+        await migrator.query("ROLLBACK");
+      } catch (error) {
+        await migrator.query("ROLLBACK");
+        throw error;
+      }
+    });
+
     await store.transaction(context, async () => {
       throw new Error("adapter_rollback_probe");
     }).then(
@@ -1916,6 +2144,8 @@ async function main() {
               ID.canaryPlanEvidence,
               ID.grantRaceIssuedEvidence,
               ID.grantRaceDeniedEvidence,
+              ID.issuerRaceIssuedEvidence,
+              ID.issuerRaceDeniedEvidence,
             ],
           ],
         );
@@ -1950,6 +2180,11 @@ async function main() {
             consumed_by_command_receipt_id: null,
             consumed: false,
           },
+          {
+            id: ID.issuerRaceIssuedEvidence,
+            consumed_by_command_receipt_id: null,
+            consumed: false,
+          },
         ]);
         const grantState = await migrator.query(
           `SELECT state, revoked_at IS NOT NULL AS revoked
@@ -1958,6 +2193,13 @@ async function main() {
           [ID.tenant, ID.testArtifactGrant],
         );
         assert.deepEqual(grantState.rows, [{ state: "REVOKED", revoked: true }]);
+        const issuerState = await migrator.query(
+          `SELECT state, revoked_at IS NOT NULL AS revoked
+           FROM public.change_set_evidence_issuers
+           WHERE id = $1`,
+          [evidenceIssuerId],
+        );
+        assert.deepEqual(issuerState.rows, [{ state: "REVOKED", revoked: true }]);
         const state = await migrator.query(
           `SELECT status, version::int FROM public.change_sets
            WHERE tenant_id = $1 AND id = $2`,
@@ -1974,7 +2216,7 @@ async function main() {
     await Promise.all([executorPool.end(), issuerPool.end()]);
   }
   console.log(
-    "[postgres-adapter-gate] PASS: EXECUTE-only roles, real command store, ambiguous-commit replay, SQLSTATE 57014 cancellation rollback, membership/policy/key/grant revoke serialization, signed evidence, and pool cleanup",
+    "[postgres-adapter-gate] PASS: EXECUTE-only roles, real command store, ambiguous-commit replay, SQLSTATE 57014 cancellation rollback, membership/policy/key/grant/issuer revoke serialization, signed evidence, and pool cleanup",
   );
 }
 

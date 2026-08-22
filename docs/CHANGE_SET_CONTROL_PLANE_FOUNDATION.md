@@ -320,6 +320,11 @@ and single-use-request commit, so a concurrent revoker must wait. Once revoke
 commits, a second envelope bound to that grant is rejected before receipt
 persistence; its request remains open and no partial receipt is left behind.
 
+Global issuer revocation uses the same two lock orders and runs last because
+issuer lifecycle is terminal. An in-flight issuance that already owns the
+issuer lock finishes atomically before revoke; every later envelope from that
+issuer fails closed without changing its open request or creating a receipt.
+
 Evidence-key compromise is likewise serialized through the real transition
 adapter. A key update waits while a policy-valid SIMULATION receipt is locked
 and consumed; after the successful SIMULATED commit, the compromise can commit.
