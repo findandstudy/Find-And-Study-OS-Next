@@ -213,18 +213,29 @@ valid completed receipt resumes the existing HMAC chain as
 terminal error plus explicit operational escalation. Invalid identity or
 result hashes fail closed. The scheduler entrypoint remains unwired.
 
-All checks passed on scheduled-reconciliation implementation head
-`2e46e8e557575875e8805e82a6db7a822aa8bf7f`: foundation run `32547890515`,
-command/evidence adapter run `32547890517`, durable-audit and scheduled-repair
-run `32547890514`, and G0 Linux/Windows run `32547890509`. The checks are not
-yet required by a repository ruleset. Two earlier candidate runs correctly
-failed because the foundation harness retained the prior 62-migration
-denominator in its main and atomic-rollback assertions; both guards now require
-63/63. The adapter candidate still does not cover HTTP
-authentication-to-branded-context wiring, binding that context into the
-separate audit writer, direct command-credential compromise, scheduled repair
-activation and alert delivery, production KMS/HSM audit-key custody, or
-decision/step-up paths. Those gaps keep runtime wiring at NO-GO.
+All checks passed on request-context-binding implementation head
+`12cb7f9be8eaaea75d095d5e2fa95a30a3c840f5`: foundation run `32549276908`,
+command/evidence adapter run `32549276783`, durable-audit and scheduled-repair
+run `32549276825`, and G0 Linux/Windows run `32549276854`. The checks are not
+yet required by a repository ruleset. Two earlier scheduled-reconciliation
+candidate runs correctly failed because the foundation harness retained the
+prior 62-migration denominator in its main and atomic-rollback assertions; both
+guards now require 63/63.
+
+The production-shaped request binder verifies the signed active context once,
+requires exact server-resolved principal, tenant, organization, and branch
+identity, and gives the command store and durable-audit writer the same opaque
+verified context object. Audit start rejects tenant, context, principal,
+membership, policy, and expiry drift. The PostgreSQL adapter path now exercises
+membership/policy revocation through that gateway; the durable-audit path uses
+it for canonical replay, rejection, SQLSTATE `57014` cancellation, and existing
+pool-cleanup evidence. It remains default-unwired and exposes no HTTP route.
+
+The adapter candidate still does not cover versioned active-context key-ring
+issuance/rotation, HTTP authentication/session extraction, direct
+command-credential compromise, scheduled repair activation and alert delivery,
+production KMS/HSM audit-key custody, or decision/step-up paths. Those gaps keep
+runtime wiring at NO-GO.
 
 ## Runtime-wiring gate
 

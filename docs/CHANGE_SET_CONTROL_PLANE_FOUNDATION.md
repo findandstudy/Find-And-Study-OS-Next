@@ -282,9 +282,13 @@ cleared or changed. The writer uses domain-separated HMAC-SHA-256 fingerprints,
 re-verifies the stored chain head before appending, and fails closed if the
 start event cannot be persisted. The disposable harness gives it a dedicated
 EXECUTE-only login and a separate `NOLOGIN` function owner. It is still
-default-unwired and uses only an ephemeral CI key; production KMS/HSM custody,
-HTTP-to-branded-context and audit-writer context binding, and the full
-race/failure matrix remain mandatory before any runtime route can use it.
+default-unwired and uses only an ephemeral CI key. The request binder now gives
+the command store and audit writer the same server-verified active-context
+object and rejects principal, tenant, organization, branch, membership, policy,
+context-id, or expiry drift before a business side effect. Production KMS/HSM
+custody, versioned active-context key rotation, HTTP authentication/session
+extraction, and the full route-side race/failure matrix remain mandatory before
+any runtime route can use it.
 
 Migration `0061_change_set_commit_reconciliation.sql` and the command adapter
 add the first bounded ambiguous-commit contract. An error returned by the
@@ -385,9 +389,9 @@ This foundation does not yet deliver:
 - a KMS/HSM-backed production signer, key rotation ceremony, or issuer runtime
   credential;
 - production command-executor/evidence-issuer role bootstrap and credentials;
-- production audit-key custody/rotation, scheduled repair activation,
-  tenant-dispatch ownership/alerting, HTTP-to-branded-context wiring, and
-  signed active-context-to-audit-tenant binding;
+- production audit-key custody/rotation, versioned active-context key-ring
+  issuance/rotation, scheduled repair activation, tenant-dispatch
+  ownership/alerting, and HTTP authentication/session extraction;
 - runtime adoption/backfill of the tenant/organization/legacy-branch map;
 - persistent environment grants for separated migrator and runtime application
   database roles;
@@ -406,22 +410,26 @@ writer quarantines remain authoritative.
 ## Next safe slice
 
 The 63-migration PostgreSQL 16 foundation and default-unwired command, evidence,
-durable-audit, context-bound transaction, ambiguous-commit, query-cancellation,
-membership/policy revocation, evidence-key compromise, exact tenant-grant, and
-global issuer revocation workflows, CREATE write-boundary rollback and
-scheduled receipt-only repair,
-described in
-`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on implementation head
-`2e46e8e557575875e8805e82a6db7a822aa8bf7f` (foundation run `32547890515`,
-adapter run `32547890517`, durable-audit and scheduled-repair run
-`32547890514`, and G0 Linux/Windows run `32547890509`).
+durable-audit, request-context-bound transaction, ambiguous-commit,
+query-cancellation, membership/policy revocation, evidence-key compromise,
+exact tenant-grant, global issuer revocation, CREATE write-boundary rollback,
+and scheduled receipt-only repair workflows described in
+`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on request-binding
+implementation head `12cb7f9be8eaaea75d095d5e2fa95a30a3c840f5`
+(foundation run `32549276908`, adapter run `32549276783`, durable-audit and
+scheduled-repair run `32549276825`, and G0 Linux/Windows run `32549276854`).
+The binder proves exact tenant, principal, membership, organization, branch,
+policy, context-id, and expiry agreement. Its adapter suites cover revocation,
+timeout, cancellation, and pool reuse without granting generic Control Plane
+DML to the shared runtime role.
 
-The next slice must bind one production-shaped, server-verified request context
-to both the command transaction and the separate durable-audit writer without
-adding an HTTP route. It must prove exact tenant, principal, membership,
-organization, policy, context-id and expiry agreement; mismatch, revoke,
-timeout, cancellation and pool-reuse paths must fail closed. The shared runtime
-role must not receive generic Control Plane DML. No scheduler, API route or
-Super Admin UI may be connected before required checks, production
-role/bootstrap review and independent approval exist. Publisher and
+The next safe slice is a default-unwired, versioned active-context key ring and
+server-side issuance bootstrap. It must bind `kid`, algorithm, audience,
+environment/cell, issuer, token version, not-before, expiry, and tenant scope;
+support `ACTIVE -> VERIFY_ONLY -> REVOKED/COMPROMISED` rotation with exact
+boundary tests; keep signing material behind an opaque KMS/HSM reference; and
+reject unknown, stale, cross-environment, or downgraded tokens. CI may use only
+an ephemeral process-memory signer. No scheduler, API route, Super Admin UI, or
+production credential may be connected before required checks, production
+role/bootstrap review, and independent approval exist. Publisher and
 configuration materialization adapters remain separate and default-off.
