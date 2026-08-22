@@ -393,6 +393,17 @@ ledger. This is a contract/test slice only: the PostgreSQL attempt table,
 append-only receipt RPC, scheduled worker, and receipt-only reconciliation are
 still required before any runtime wiring.
 
+The next additive migration, `0068_active_context_selection_consumption_attempts`,
+adds tenant-scoped attempt identity plus an immutable receipt stream. Its
+fixed-search-path RPCs permit only `STARTED -> PENDING -> TERMINAL` (or direct
+terminal) transitions, bind the attempt to the exact selection generation and
+principal/membership, and make same-idempotency replay deterministic. The
+PostgreSQL ledger adapter uses a separate serializable transaction, clean
+tenant-local GUC, and fixed reason/outcome enums; it never stores raw session
+IDs, request bodies, or free-form errors. This migration and adapter are still
+default-unwired and require a fresh PostgreSQL 16 grant/RLS/transition/race
+run before they can be considered an integration result.
+
 Selection lifecycle CI does not authorize runtime wiring. Migration 0066 and
 the gateway candidate bind newly issued token version 2 to the exact
 `selectionId` plus `sessionGeneration`; legacy version-1 tokens remain

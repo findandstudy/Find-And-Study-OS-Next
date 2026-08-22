@@ -28,14 +28,22 @@ export type SelectionConsumptionAttemptLedger = {
   start(input: SelectionConsumptionAttemptIdentity): Promise<void>;
   complete(input: {
     attemptId: string;
+    tenantId: string;
+    resultHash: string;
+  }): Promise<void>;
+  reconcile(input: {
+    attemptId: string;
+    tenantId: string;
     resultHash: string;
   }): Promise<void>;
   pending(input: {
     attemptId: string;
+    tenantId: string;
     reason: "COMMIT_OUTCOME_UNKNOWN";
   }): Promise<void>;
   fail(input: {
     attemptId: string;
+    tenantId: string;
     reason: SelectionConsumptionAttemptFailure;
   }): Promise<void>;
 };
@@ -133,6 +141,7 @@ export async function runSelectionConsumptionAttempt<T>(
     !isRecord(options.ledger) ||
     typeof options.ledger.start !== "function" ||
     typeof options.ledger.complete !== "function" ||
+    typeof options.ledger.reconcile !== "function" ||
     typeof options.ledger.pending !== "function" ||
     typeof options.ledger.fail !== "function" ||
     typeof options.operation !== "function" ||
@@ -155,6 +164,7 @@ export async function runSelectionConsumptionAttempt<T>(
     }
     await options.ledger.complete({
       attemptId: attempt.attemptId,
+      tenantId: attempt.tenantId,
       resultHash,
     });
     return value;
@@ -165,6 +175,7 @@ export async function runSelectionConsumptionAttempt<T>(
     if (isUnknown) {
       await options.ledger.pending({
         attemptId: attempt.attemptId,
+        tenantId: attempt.tenantId,
         reason: "COMMIT_OUTCOME_UNKNOWN",
       });
       throw new SelectionConsumptionAttemptCommitOutcomeUnknownError(
@@ -173,6 +184,7 @@ export async function runSelectionConsumptionAttempt<T>(
     }
     await options.ledger.fail({
       attemptId: attempt.attemptId,
+      tenantId: attempt.tenantId,
       reason: (options.classifyFailure ?? defaultFailure)(error),
     });
     throw error instanceof Error

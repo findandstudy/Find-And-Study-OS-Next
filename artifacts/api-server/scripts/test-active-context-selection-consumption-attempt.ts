@@ -29,13 +29,16 @@ function ledger() {
       events.push(`start:${input.attemptId}`);
     },
     async complete(input) {
-      events.push(`complete:${input.attemptId}:${input.resultHash}`);
+      events.push(`complete:${input.tenantId}:${input.attemptId}:${input.resultHash}`);
+    },
+    async reconcile(input) {
+      events.push(`reconcile:${input.tenantId}:${input.attemptId}:${input.resultHash}`);
     },
     async pending(input) {
-      events.push(`pending:${input.attemptId}:${input.reason}`);
+      events.push(`pending:${input.tenantId}:${input.attemptId}:${input.reason}`);
     },
     async fail(input) {
-      events.push(`fail:${input.attemptId}:${input.reason}`);
+      events.push(`fail:${input.tenantId}:${input.attemptId}:${input.reason}`);
     },
   };
   return { implementation, events };
@@ -52,7 +55,7 @@ test("successful operation completes one attempt with only a result hash", async
   assert.deepEqual(result, { ok: true });
   assert.deepEqual(fixture.events, [
     `start:${ATTEMPT.attemptId}`,
-    `complete:${ATTEMPT.attemptId}:${"c".repeat(64)}`,
+    `complete:${ATTEMPT.tenantId}:${ATTEMPT.attemptId}:${"c".repeat(64)}`,
   ]);
 });
 
@@ -75,7 +78,7 @@ test("commit ambiguity becomes typed PENDING and never records a terminal error"
   );
   assert.deepEqual(fixture.events, [
     `start:${ATTEMPT.attemptId}`,
-    `pending:${ATTEMPT.attemptId}:COMMIT_OUTCOME_UNKNOWN`,
+    `pending:${ATTEMPT.tenantId}:${ATTEMPT.attemptId}:COMMIT_OUTCOME_UNKNOWN`,
   ]);
 });
 
@@ -94,7 +97,7 @@ test("ordinary operation failure records a fixed reason and preserves the error"
   );
   assert.deepEqual(fixture.events, [
     `start:${ATTEMPT.attemptId}`,
-    `fail:${ATTEMPT.attemptId}:INTERNAL_ERROR`,
+    `fail:${ATTEMPT.tenantId}:${ATTEMPT.attemptId}:INTERNAL_ERROR`,
   ]);
 });
 

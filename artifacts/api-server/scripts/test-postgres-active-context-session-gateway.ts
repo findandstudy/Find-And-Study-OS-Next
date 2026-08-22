@@ -20,6 +20,7 @@ import {
 } from "../src/lib/postgresActiveContextSelectionLifecycle.js";
 import { withLockedSelectionBoundActiveContext } from "../src/lib/activeContextSelectionConsumption.js";
 import { PostgresActiveContextSelectionConsumptionRepository } from "../src/lib/postgresActiveContextSelectionConsumptionRepository.js";
+import { PostgresActiveContextSelectionConsumptionAttemptLedger } from "../src/lib/postgresActiveContextSelectionConsumptionAttemptLedger.js";
 import { PostgresActiveContextSessionRepository } from "../src/lib/postgresActiveContextSessionRepository.js";
 import { PostgresAuthoritativeActiveContextRepository } from "../src/lib/postgresAuthoritativeActiveContextRepository.js";
 
@@ -76,6 +77,7 @@ const ID = {
   otherSelection: "018fc000-0000-7000-8000-000000000003",
   issuer: "018fc000-0000-7000-8000-000000000004",
   impersonatedSelection: "018fc000-0000-7000-8000-000000000006",
+  consumptionAttempt: "018fc000-0000-7000-8000-000000000007",
 } as const;
 
 const USER_ID = 910_001;
@@ -257,12 +259,22 @@ async function bootstrapAuthority() {
       GRANT UPDATE (id) ON TABLE
         public.active_session_context_selection_command_receipts
       TO ${ROLE.lifecycleOwner};
+      GRANT SELECT, INSERT, UPDATE ON TABLE
+        public.active_context_selection_consumption_attempts
+      TO ${ROLE.sessionOwner};
+      GRANT SELECT, INSERT ON TABLE
+        public.active_context_selection_consumption_attempt_receipts
+      TO ${ROLE.sessionOwner};
 
       ALTER FUNCTION fas_session_v1.resolve_session_for_active_context(text, text, bigint)
         OWNER TO ${ROLE.sessionOwner};
       ALTER FUNCTION fas_session_v1.resolve_session_for_active_context_bound(text, text, bigint)
         OWNER TO ${ROLE.sessionOwner};
       ALTER FUNCTION fas_session_v1.lock_selection_for_consumption(uuid, uuid, bigint)
+        OWNER TO ${ROLE.sessionOwner};
+      ALTER FUNCTION fas_session_v1.start_selection_consumption_attempt(jsonb)
+        OWNER TO ${ROLE.sessionOwner};
+      ALTER FUNCTION fas_session_v1.finish_selection_consumption_attempt(jsonb)
         OWNER TO ${ROLE.sessionOwner};
       ALTER FUNCTION fas_rate_limit_v1.consume_active_context_issuance(
         uuid, text, text, bigint, uuid, bigint, uuid
@@ -285,6 +297,12 @@ async function bootstrapAuthority() {
       TO ${ROLE.sessionResolver};
       GRANT EXECUTE ON FUNCTION
         fas_session_v1.lock_selection_for_consumption(uuid, uuid, bigint)
+      TO ${ROLE.sessionResolver};
+      GRANT EXECUTE ON FUNCTION
+        fas_session_v1.start_selection_consumption_attempt(jsonb)
+      TO ${ROLE.sessionResolver};
+      GRANT EXECUTE ON FUNCTION
+        fas_session_v1.finish_selection_consumption_attempt(jsonb)
       TO ${ROLE.sessionResolver};
       GRANT EXECUTE ON FUNCTION
         fas_rate_limit_v1.consume_active_context_issuance(
@@ -670,6 +688,11 @@ async function main() {
         pool: sessionPool,
         expectedRole: ROLE.sessionResolver,
       });
+    const selectionConsumptionAttemptLedger =
+      new PostgresActiveContextSelectionConsumptionAttemptLedger({
+        pool: sessionPool,
+        expectedRole: ROLE.sessionResolver,
+      });
     const nextPermit = nextUuidV7Factory();
     const rateLimiter = new PostgresActiveContextIssuanceRateLimiter({
       pool: ratePool,
@@ -752,6 +775,32 @@ async function main() {
     });
     assert.equal(consumed, "selection-consumption-ok");
     assert.equal(consumptionOperationCalled, true);
+
+    const attemptIdentity = {
+      attemptId: ID.consumptionAttempt,
+      tenantId: ID.tenant,
+      contextId: verified.context.contextId,
+      selectionId: verified.context.selectionId,
+      sessionGeneration: verified.context.sessionGeneration,
+      principalId: verified.context.principalId,
+      membershipId: verified.context.membershipId,
+      idempotencyKeyHash: "a".repeat(64),
+      requestHash: "b".repeat(64),
+      environmentId: ENVIRONMENT,
+      cellId: CELL,
+    } as const;
+    await selectionConsumptionAttemptLedger.start(attemptIdentity);
+    await selectionConsumptionAttemptLedger.pending({
+      tenantId: ID.tenant,
+      attemptId: ID.consumptionAttempt,
+      reason: "COMMIT_OUTCOME_UNKNOWN",
+    });
+    await selectionConsumptionAttemptLedger.reconcile({
+      tenantId: ID.tenant,
+      attemptId: ID.consumptionAttempt,
+      resultHash: "c".repeat(64),
+    });
+    await selectionConsumptionAttemptLedger.start(attemptIdentity);
 
     let selectionConsumptionPid: (pid: number) => void = () => undefined;
     const selectionConsumptionPidReady = new Promise<number>((resolve) => {

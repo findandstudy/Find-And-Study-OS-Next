@@ -45,6 +45,7 @@
     "test:active-context-session-gateway": "tsx --test ./scripts/test-active-context-session-gateway.ts",
     "test:active-context-selection-consumption": "tsx --test ./scripts/test-active-context-selection-consumption-repository.ts",
     "test:active-context-selection-attempt": "tsx --test ./scripts/test-active-context-selection-consumption-attempt.ts",
+    "test:active-context-selection-attempt-ledger": "tsx --test ./scripts/test-postgres-active-context-selection-consumption-attempt-ledger.ts",
     "test:change-set-request-context": "tsx --test ./scripts/test-change-set-request-context.ts",
     "test:change-set-policy": "tsx --test ./scripts/test-change-set-policy.ts",
     "test:change-set-command": "tsx --test ./scripts/test-change-set-command.ts",
