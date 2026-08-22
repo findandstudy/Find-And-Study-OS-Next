@@ -1,20 +1,21 @@
 # ChangeSet PostgreSQL Integration Gate
 
-Status: **62-MIGRATION FOUNDATION, DEFAULT-UNWIRED CONTEXT-BOUND
+Status: **63-MIGRATION FOUNDATION, DEFAULT-UNWIRED CONTEXT-BOUND
 COMMAND/EVIDENCE, QUERY-CANCELLATION ROLLBACK, MEMBERSHIP/POLICY REVOCATION
 SERIALIZATION, EVIDENCE-KEY COMPROMISE SERIALIZATION, AMBIGUOUS-COMMIT
-RECONCILIATION, AND DURABLE-AUDIT ADAPTER CI GREEN; NO-GO for runtime wiring**.
+AND SCHEDULED RECEIPT-ONLY RECONCILIATION, AND DURABLE-AUDIT ADAPTER CI GREEN;
+NO-GO for runtime wiring**.
 
 This gate is not a delivery estimate and is not proof that migrations `0055`
-through `0061` have run in a long-lived environment. The approved local
+through `0062` have run in a long-lived environment. The approved local
 PostgreSQL endpoint `127.0.0.1:5433/fasos_apply_local` was unavailable. GitHub
-run `32542603820` applied all 62 reviewed migrations twice to an isolated
+run `32547890515` applied all 63 reviewed migrations twice to an isolated
 disposable PostgreSQL 16 database and passed the direct-SQL foundation matrix.
-Run `32542603869` passed the real default-unwired command-store,
+Run `32547890517` passed the real default-unwired command-store,
 evidence-issuer, query-cancellation rollback and ambiguous-commit replay
-candidate; run `32542603824` passed the separate durable-audit,
-cancellation-terminal and reconciliation-chain adapter. Run `32542603836`
-passed the Linux and Windows G0 jobs. No
+candidate; run `32547890514` passed the separate durable-audit,
+cancellation-terminal, reconciliation-chain and scheduled repair adapter. Run
+`32547890509` passed the Linux and Windows G0 jobs. No
 long-lived, production, staging, or production-derived database was mutated.
 
 ## Required database authority split
@@ -212,14 +213,14 @@ valid completed receipt resumes the existing HMAC chain as
 terminal error plus explicit operational escalation. Invalid identity or
 result hashes fail closed. The scheduler entrypoint remains unwired.
 
-All checks passed on CREATE-write-failure implementation head
-`61065835b6d81f33ee495d147936ed1197fa14b6`: foundation run `32546411632`,
-command/evidence adapter run `32546411637`, durable-audit run `32546411607`,
-and G0 Linux/Windows run `32546411633`. The checks are not yet required by a
-repository ruleset. The first candidate adapter run (`32546075216`) correctly
-failed before a write boundary because its fixture used unregistered feature
-flags; the corrected test reuses the only registered non-production flag and
-runs before canonical CREATE. The adapter candidate still does not cover HTTP
+All checks passed on scheduled-reconciliation implementation head
+`2e46e8e557575875e8805e82a6db7a822aa8bf7f`: foundation run `32547890515`,
+command/evidence adapter run `32547890517`, durable-audit and scheduled-repair
+run `32547890514`, and G0 Linux/Windows run `32547890509`. The checks are not
+yet required by a repository ruleset. Two earlier candidate runs correctly
+failed because the foundation harness retained the prior 62-migration
+denominator in its main and atomic-rollback assertions; both guards now require
+63/63. The adapter candidate still does not cover HTTP
 authentication-to-branded-context wiring, binding that context into the
 separate audit writer, direct command-credential compromise, scheduled repair
 activation and alert delivery, production KMS/HSM audit-key custody, or

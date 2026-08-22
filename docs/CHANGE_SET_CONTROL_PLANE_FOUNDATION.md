@@ -405,21 +405,23 @@ writer quarantines remain authoritative.
 
 ## Next safe slice
 
-The 62-migration PostgreSQL 16 foundation and default-unwired command, evidence,
+The 63-migration PostgreSQL 16 foundation and default-unwired command, evidence,
 durable-audit, context-bound transaction, ambiguous-commit, query-cancellation,
 membership/policy revocation, evidence-key compromise, exact tenant-grant, and
-global issuer revocation workflows, plus CREATE write-boundary rollback,
+global issuer revocation workflows, CREATE write-boundary rollback and
+scheduled receipt-only repair,
 described in
 `CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on implementation head
-`61065835b6d81f33ee495d147936ed1197fa14b6` (foundation run `32546411632`,
-adapter run `32546411637`, audit run `32546411607`, and G0 Linux/Windows run
-`32546411633`).
+`2e46e8e557575875e8805e82a6db7a822aa8bf7f` (foundation run `32547890515`,
+adapter run `32547890517`, durable-audit and scheduled-repair run
+`32547890514`, and G0 Linux/Windows run `32547890509`).
 
-The current candidate adds scheduled receipt-only reconciliation without
-runtime activation. Before any scheduler is wired, the disposable PostgreSQL
-gate must prove lease concurrency, committed-receipt resolution, exhausted
-no-command escalation, direct-table denial, and tenant-context cleanup. The
-shared runtime role must not receive generic Control Plane DML. No API route or
+The next slice must bind one production-shaped, server-verified request context
+to both the command transaction and the separate durable-audit writer without
+adding an HTTP route. It must prove exact tenant, principal, membership,
+organization, policy, context-id and expiry agreement; mismatch, revoke,
+timeout, cancellation and pool-reuse paths must fail closed. The shared runtime
+role must not receive generic Control Plane DML. No scheduler, API route or
 Super Admin UI may be connected before required checks, production
 role/bootstrap review and independent approval exist. Publisher and
 configuration materialization adapters remain separate and default-off.
