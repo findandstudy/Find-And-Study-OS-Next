@@ -359,7 +359,7 @@ async function seed() {
            id, tenant_id, organization_id, legacy_branch_id, principal_id,
            status, valid_from, valid_until, version, created_at, updated_at
          )
-         SELECT $1, tenant_id, organization_id, legacy_branch_id, principal_id,
+         SELECT $1, tenant_id, NULL, NULL, principal_id,
                 status, valid_from, valid_until, 1,
                 statement_timestamp(), statement_timestamp()
          FROM public.memberships
