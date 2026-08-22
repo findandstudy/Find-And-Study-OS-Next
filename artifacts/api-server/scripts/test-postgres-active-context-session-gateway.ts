@@ -658,9 +658,9 @@ async function main() {
           sessionFingerprint: fingerprint(SID),
           observedAt: NOW,
         },
-        async (state) => state,
+        async (state) => JSON.stringify(state),
       );
-      console.error(`[gateway-debug-state] ${JSON.stringify(debugState)}`);
+      console.error(`[gateway-debug-state] ${debugState}`);
     }
     assert.equal(result.ok, true, result.ok ? undefined : JSON.stringify(result));
     if (!result.ok) throw new Error(`gateway_denied_${result.reason}`);
