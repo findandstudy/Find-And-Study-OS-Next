@@ -4,7 +4,7 @@ Status: **65-MIGRATION FOUNDATION CANDIDATE, DEFAULT-UNWIRED CONTEXT-BOUND
 COMMAND/EVIDENCE, QUERY-CANCELLATION ROLLBACK, MEMBERSHIP/POLICY REVOCATION
 SERIALIZATION, EVIDENCE-KEY COMPROMISE SERIALIZATION, AMBIGUOUS-COMMIT
 AND SCHEDULED RECEIPT-ONLY RECONCILIATION, DURABLE-AUDIT ADAPTER CI GREEN,
-AND DEFAULT-UNWIRED SESSION/RATE-LIMIT ADAPTER CI PENDING; NO-GO for runtime
+AND DEFAULT-UNWIRED SESSION/RATE-LIMIT ADAPTER CI GREEN; NO-GO for runtime
 wiring**.
 
 This gate is not a delivery estimate and is not proof that migrations `0055`
@@ -313,10 +313,15 @@ membership binding; issuance-first rotation serialization;
 inactive/rotated/revoked selection; client scope fields
 ignored by the end-to-end gateway; invalid limiter subject; concurrent count
 never exceeding five persisted permits per window; SQLSTATE `57014` rollback;
-and clean `app.tenant_id` on pool reuse. This paragraph records the intended
-gate, not a PASS claim. Exact PostgreSQL 16 CI, independent review, and required
-repository checks remain necessary before any route or production credential
-is wired.
+and clean `app.tenant_id` on pool reuse. The exact implementation tree
+`8dcad10ba085b4b2b5109843332b7dcebfd0858b` passed PostgreSQL foundation run
+`32557659145`, adapter/evidence/session run `32557659147`, durable-audit run
+`32557659177`, and G0 Linux/Windows run `32557659146` on GitHub head
+`2c216128a60a634a1ee56a2967a2a7ad7be84495`. The prior red runs
+`32557456825` and `32557546603` found and caused correction of test fixture
+typing and NOLOGIN-owner row-lock privileges; neither is evidence. Independent
+review and required repository checks remain necessary before any route or
+production credential is wired.
 
 The exact gateway implementation tree
 `dcf62cb5d5fef588dc9b6c5e599fe1144f542dbb` passed foundation run

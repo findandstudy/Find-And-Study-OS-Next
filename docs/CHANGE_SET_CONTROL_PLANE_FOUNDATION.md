@@ -530,8 +530,18 @@ injection, issuance-first rotation serialization, revoke-first state,
 rate-limit concurrency, invalid subject hashes,
 SQLSTATE `57014` cancellation, rollback, and pool tenant-context cleanup.
 
-This `0064` candidate is not runtime evidence until the PostgreSQL 16 workflow
-passes on its exact implementation tree. No HTTP route, selection writer,
-scheduler, Super Admin UI, publisher, production credential, or production
-migration may be connected before required checks, production role/bootstrap
-review, and independent approval exist.
+The `0064` implementation passed on GitHub head
+`2c216128a60a634a1ee56a2967a2a7ad7be84495` (local equivalent
+`ed1136dcef575111deee417bb64a6c05557b4b97`, shared tree
+`8dcad10ba085b4b2b5109843332b7dcebfd0858b`): foundation run
+`32557659145`, adapter/evidence/session run `32557659147`, durable-audit run
+`32557659177`, and G0 Linux/Windows run `32557659146` all succeeded. The first
+adapter run `32557456825` exposed an untyped synthetic fixture parameter; the
+second `32557546603` exposed missing row-lock privilege on the NOLOGIN function
+owners. Both fail-closed test defects were corrected, and neither failed run is
+treated as evidence.
+
+No HTTP route, selection writer, scheduler, Super Admin UI, publisher,
+production credential, or production migration may be connected before
+required checks, production role/bootstrap review, and independent approval
+exist. Green disposable CI is not runtime activation evidence.
