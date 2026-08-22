@@ -210,11 +210,11 @@ async function bootstrapAuthority() {
         ${ROLE.sessionOwner}, ${ROLE.sessionResolver},
         ${ROLE.rateOwner}, ${ROLE.rateExecutor};
 
-      GRANT SELECT ON TABLE
+      GRANT SELECT, UPDATE ON TABLE
         public.sessions, public.users, public.principals, public.memberships,
         public.active_session_context_selections
       TO ${ROLE.sessionOwner};
-      GRANT SELECT ON TABLE public.active_session_context_selections
+      GRANT SELECT, UPDATE ON TABLE public.active_session_context_selections
       TO ${ROLE.rateOwner};
       GRANT SELECT, INSERT, UPDATE ON TABLE
         public.active_context_issuance_rate_limits
