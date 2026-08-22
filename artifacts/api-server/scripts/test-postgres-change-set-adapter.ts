@@ -11,6 +11,7 @@ import {
 import {
   executeCreateR1ChangeSetCommand,
   executeTransitionR1ChangeSetCommand,
+  type ChangeSetCommandResult,
 } from "../src/lib/changeSetCommand.js";
 import {
   fingerprintChangeSetEvidencePublicKey,
@@ -76,6 +77,12 @@ const ID = {
   cancellationCommand: "018f5000-0000-7000-8000-00000000001a",
   cancellationAccess: "018f5000-0000-7000-8000-00000000001b",
   cancellationChangeSet: "018f5000-0000-7000-8000-00000000001c",
+  membershipRaceCommand: "018f5000-0000-7000-8000-000000000020",
+  membershipRaceAccess: "018f5000-0000-7000-8000-000000000021",
+  membershipDeniedAccess: "018f5000-0000-7000-8000-000000000022",
+  policyRaceCommand: "018f5000-0000-7000-8000-000000000023",
+  policyRaceAccess: "018f5000-0000-7000-8000-000000000024",
+  policyDeniedAccess: "018f5000-0000-7000-8000-000000000025",
 } as const;
 
 const NOW = Date.now();
@@ -96,6 +103,18 @@ const proposedConfig = {
   enabled: true,
   cohortPercent: 5,
   reason: "Bounded adapter verification.",
+};
+const createCommand = {
+  idempotencyKey: "adapter-create-0001",
+  changeType: "FEATURE_FLAG",
+  title: "Journey beta adapter verification",
+  purpose: "Prove the default-unwired PostgreSQL command adapter.",
+  targetScope: {
+    type: "TENANT" as const,
+    organizationId: null,
+    legacyBranchId: null,
+  },
+  proposedConfig,
 };
 
 function requiredUrl(name: string): string {
@@ -150,6 +169,55 @@ async function within<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+}
+
+function deferred<T>() {
+  let resolve: (value: T | PromiseLike<T>) => void = () => undefined;
+  let reject: (error: unknown) => void = () => undefined;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function waitForBackendLock(pid: number): Promise<void> {
+  await withClient(adminUrl, async (admin) => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const activity = await admin.query<{
+        state: string | null;
+        waitEventType: string | null;
+      }>(
+        `SELECT state, wait_event_type AS "waitEventType"
+         FROM pg_stat_activity
+         WHERE pid = $1`,
+        [pid],
+      );
+      if (
+        activity.rows[0]?.state === "active" &&
+        activity.rows[0]?.waitEventType === "Lock"
+      ) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error("revocation_backend_did_not_wait_on_command_lock");
+  });
+}
+
+async function executeCanonicalCreateReplay(input: {
+  store: PostgresChangeSetCommandStore;
+  ids: readonly string[];
+}): Promise<ChangeSetCommandResult> {
+  return executeCreateR1ChangeSetCommand({
+    context: verifiedContext(),
+    command: createCommand,
+    dependencies: {
+      store: input.store,
+      now: () => NOW,
+      nextUuidV7: uuidFactory(input.ids),
+    },
+  });
 }
 
 async function bootstrapAuthority() {
@@ -569,6 +637,12 @@ async function main() {
     const evidenceFailures: string[] = [];
     let storeNow = NOW;
     let cancellationArmed = false;
+    let authorizationRaceGate:
+      | {
+          ready: (pid: number) => void;
+          release: Promise<void>;
+        }
+      | null = null;
     let resolveCancellationBackendPid: (pid: number) => void = () => undefined;
     const cancellationBackendPid = new Promise<number>((resolve) => {
       resolveCancellationBackendPid = resolve;
@@ -579,6 +653,19 @@ async function main() {
       expectedCellId: "cell-a",
       now: () => storeNow,
       resolveMutationAssurance: async ({ client }) => {
+        if (authorizationRaceGate) {
+          const gate = authorizationRaceGate;
+          authorizationRaceGate = null;
+          const backend = await client.query<{ pid: number }>(
+            "SELECT pg_backend_pid()::int AS pid",
+          );
+          const pid = backend.rows[0]?.pid;
+          if (!Number.isSafeInteger(pid) || Number(pid) <= 0) {
+            throw new Error("authorization_race_backend_pid_invalid");
+          }
+          gate.ready(Number(pid));
+          await gate.release;
+        }
         if (cancellationArmed) {
           cancellationArmed = false;
           const backend = await client.query<{ pid: number }>(
@@ -605,6 +692,141 @@ async function main() {
       storeOptions,
     );
     const context = verifiedContext();
+    const proveAuthorizationRevocationRace = async (input: {
+      authority: "MEMBERSHIP" | "POLICY";
+      raceIds: readonly string[];
+      deniedIds: readonly string[];
+    }) => {
+      const commandReady = deferred<number>();
+      const releaseCommand = deferred<void>();
+      authorizationRaceGate = {
+        ready: commandReady.resolve,
+        release: releaseCommand.promise,
+      };
+      const commandPromise = executeCanonicalCreateReplay({
+        store,
+        ids: input.raceIds,
+      });
+      const commandOutcome = commandPromise.then(
+        (value) => ({ kind: "resolved" as const, value }),
+        (error: unknown) => ({ kind: "rejected" as const, error }),
+      );
+      await within(
+        Promise.race([
+          commandReady.promise,
+          commandOutcome.then((outcome): never => {
+            if (outcome.kind === "rejected") throw outcome.error;
+            throw new Error("authorization_race_command_finished_before_gate");
+          }),
+        ]),
+        10_000,
+      );
+
+      const revoker = new Client({
+        connectionString: migratorUrl,
+        connectionTimeoutMillis: 10_000,
+        statement_timeout: 15_000,
+        lock_timeout: 5_000,
+        idle_in_transaction_session_timeout: 15_000,
+      });
+      await revoker.connect();
+      let transactionOpen = false;
+      try {
+        await revoker.query("BEGIN");
+        transactionOpen = true;
+        await revoker.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+          ID.tenant,
+        ]);
+        const backend = await revoker.query<{ pid: number }>(
+          "SELECT pg_backend_pid()::int AS pid",
+        );
+        const revokerPid = Number(backend.rows[0]?.pid);
+        assert.ok(Number.isSafeInteger(revokerPid) && revokerPid > 0);
+        const revokeQuery =
+          input.authority === "MEMBERSHIP"
+            ? revoker.query(
+                `UPDATE public.memberships
+                 SET status = 'REVOKED', version = version + 1,
+                     updated_at = statement_timestamp()
+                 WHERE tenant_id = $1 AND id = $2`,
+                [ID.tenant, ID.humanMembership],
+              )
+            : revoker.query(
+                `UPDATE public.policy_versions
+                 SET state = 'REVOKED', revoked_at = statement_timestamp()
+                 WHERE tenant_id = $1 AND id = $2`,
+                [ID.tenant, ID.policy],
+              );
+        const revokeOutcome = revokeQuery.then(
+          (value) => ({ kind: "resolved" as const, value }),
+          (error: unknown) => ({ kind: "rejected" as const, error }),
+        );
+        await within(
+          Promise.race([
+            waitForBackendLock(revokerPid),
+            revokeOutcome.then((outcome): never => {
+              if (outcome.kind === "rejected") throw outcome.error;
+              throw new Error("revocation_did_not_wait_for_command_transaction");
+            }),
+          ]),
+          10_000,
+        );
+
+        releaseCommand.resolve();
+        const command = await commandOutcome;
+        assert.equal(command.kind, "resolved");
+        if (command.kind === "resolved") {
+          assert.equal(command.value.ok, true);
+          if (command.value.ok) assert.equal(command.value.replayed, true);
+        }
+        const revoked = await revokeOutcome;
+        assert.equal(revoked.kind, "resolved");
+        if (revoked.kind === "resolved") assert.equal(revoked.value.rowCount, 1);
+        await revoker.query("COMMIT");
+        transactionOpen = false;
+
+        const denied = await executeCanonicalCreateReplay({
+          store,
+          ids: input.deniedIds,
+        });
+        assert.equal(denied.ok, false);
+        if (!denied.ok) assert.equal(denied.reason, "authorization_denied");
+      } finally {
+        releaseCommand.resolve();
+        authorizationRaceGate = null;
+        if (transactionOpen) await revoker.query("ROLLBACK");
+        await revoker.end();
+      }
+
+      await withClient(migratorUrl, async (migrator) => {
+        await migrator.query("BEGIN");
+        try {
+          await migrator.query(`SELECT set_config('app.tenant_id', $1, true)`, [
+            ID.tenant,
+          ]);
+          if (input.authority === "MEMBERSHIP") {
+            await migrator.query(
+              `UPDATE public.memberships
+               SET status = 'ACTIVE', version = 1, valid_until = NULL,
+                   updated_at = statement_timestamp()
+               WHERE tenant_id = $1 AND id = $2`,
+              [ID.tenant, ID.humanMembership],
+            );
+          } else {
+            await migrator.query(
+              `UPDATE public.policy_versions
+               SET state = 'ACTIVE', revoked_at = NULL
+               WHERE tenant_id = $1 AND id = $2`,
+              [ID.tenant, ID.policy],
+            );
+          }
+          await migrator.query("COMMIT");
+        } catch (error) {
+          await migrator.query("ROLLBACK");
+          throw error;
+        }
+      });
+    };
     await mustFail(
       () =>
         contextTestStore.transaction(
@@ -650,14 +872,7 @@ async function main() {
     );
     const created = await executeCreateR1ChangeSetCommand({
       context,
-      command: {
-        idempotencyKey: "adapter-create-0001",
-        changeType: "FEATURE_FLAG",
-        title: "Journey beta adapter verification",
-        purpose: "Prove the default-unwired PostgreSQL command adapter.",
-        targetScope: { type: "TENANT", organizationId: null, legacyBranchId: null },
-        proposedConfig,
-      },
+      command: createCommand,
       dependencies: {
         store,
         now: () => NOW,
@@ -680,6 +895,17 @@ async function main() {
         transitionReceiptId: null,
         approvalReceiptId: null,
       },
+    });
+
+    await proveAuthorizationRevocationRace({
+      authority: "MEMBERSHIP",
+      raceIds: [ID.membershipRaceCommand, ID.membershipRaceAccess],
+      deniedIds: [ID.membershipDeniedAccess],
+    });
+    await proveAuthorizationRevocationRace({
+      authority: "POLICY",
+      raceIds: [ID.policyRaceCommand, ID.policyRaceAccess],
+      deniedIds: [ID.policyDeniedAccess],
     });
 
     cancellationArmed = true;

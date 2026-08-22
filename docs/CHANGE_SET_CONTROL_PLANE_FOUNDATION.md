@@ -307,6 +307,13 @@ With the durable audit writer enabled, the separately committed start event is
 closed exactly once as `TERMINAL/ERROR/INTERNAL_ERROR`; cancellation is never
 misclassified as a successful command or an ambiguous `COMMIT`.
 
+The real adapter harness also serializes membership and policy revocation in
+both lock orders. When the command owns the current-state locks first, the
+revoker waits until the canonical replay commits. Once the revoke transaction
+commits, the next identical command is denied before it can create a new
+command claim. Synthetic fixture restoration occurs only after the deny is
+observed and never weakens the runtime contract.
+
 Notification template variables must be declared whether referenced in the
 subject or body. Template variables that suggest passwords, secrets, tokens,
 passports, national IDs, or SSNs are not admitted. Plain-text fields reject
@@ -364,17 +371,17 @@ writer quarantines remain authoritative.
 ## Next safe slice
 
 The 62-migration PostgreSQL 16 foundation and default-unwired command, evidence,
-durable-audit, context-bound transaction, ambiguous-commit and query-
-cancellation workflows described in `CHANGE_SET_POSTGRES_INTEGRATION_GATE.md`
-are green on implementation head
-`9f6bb91e985930eda4e11f388b13a6abb8d04309` (foundation run `32542603820`,
-adapter run `32542603869`, audit run `32542603824`, and G0 Linux/Windows run
-`32542603836`).
+durable-audit, context-bound transaction, ambiguous-commit, query-cancellation,
+and membership/policy revocation workflows described in
+`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on implementation head
+`360de74d305ff07a810628701c722eb19b1f3e16` (foundation run `32543303215`,
+adapter run `32543303199`, audit run `32543303200`, and G0 Linux/Windows run
+`32543303201`).
 
 The next safe slice is the remaining adapter race/failure matrix: scheduled
-repair of unresolved commit outcomes,
-membership/policy/key revocation in both lock orders, injected failure at every
-write boundary, and incomplete-attempt repair. The shared runtime role must not
+repair of unresolved commit outcomes, evidence issuer/key/grant revocation in
+both lock orders, injected failure at every write boundary, and incomplete-
+attempt repair. The shared runtime role must not
 receive generic Control Plane DML. No API route or Super Admin UI may be
 connected before those controls, required checks, production role/bootstrap
 review and independent approval exist. Publisher and configuration

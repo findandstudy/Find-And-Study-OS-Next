@@ -1,8 +1,9 @@
 # ChangeSet PostgreSQL Integration Gate
 
 Status: **62-MIGRATION FOUNDATION, DEFAULT-UNWIRED CONTEXT-BOUND
-COMMAND/EVIDENCE, QUERY-CANCELLATION ROLLBACK, AMBIGUOUS-COMMIT
-RECONCILIATION, AND DURABLE-AUDIT ADAPTER CI GREEN; NO-GO for runtime wiring**.
+COMMAND/EVIDENCE, QUERY-CANCELLATION ROLLBACK, MEMBERSHIP/POLICY REVOCATION
+SERIALIZATION, AMBIGUOUS-COMMIT RECONCILIATION, AND DURABLE-AUDIT ADAPTER CI
+GREEN; NO-GO for runtime wiring**.
 
 This gate is not a delivery estimate and is not proof that migrations `0055`
 through `0061` have run in a long-lived environment. The approved local
@@ -148,7 +149,12 @@ uncertain pool client and proves that one same-identity retry returns the
 canonical replay. A separate `pg_cancel_backend` case proves SQLSTATE `57014`
 rolls back before the command claim, leaves no partial command/access/ChangeSet
 rows, clears the transaction-local tenant setting, and safely reuses the same
-pool-of-one backend. The command validator
+pool-of-one backend. Real adapter races additionally pause after current
+membership and policy rows are locked. A concurrent revoke must wait for the
+authorized replay transaction; after that revoke commits, the same signed
+context and command fail closed before a new command claim. Both membership and
+policy lock orders are exercised without a test-only production hook. The
+command validator
 independently binds artifact count and manifest hash into the signed outcome
 hash.
 
@@ -169,15 +175,15 @@ its transaction is blocked in a controlled PostgreSQL query. It proves that
 the business transaction has no partial row while the separately committed
 attempt advances exactly once to `TERMINAL/ERROR/INTERNAL_ERROR`.
 
-All checks passed on query-cancellation implementation head
-`9f6bb91e985930eda4e11f388b13a6abb8d04309`: foundation run `32542603820`,
-command/evidence adapter run `32542603869`, durable-audit run `32542603824`,
-and G0 Linux/Windows run `32542603836`. The checks are not yet required by a
+All checks passed on authorization-revocation implementation head
+`360de74d305ff07a810628701c722eb19b1f3e16`: foundation run `32543303215`,
+command/evidence adapter run `32543303199`, durable-audit run `32543303200`,
+and G0 Linux/Windows run `32543303201`. The checks are not yet required by a
 repository ruleset. The adapter candidate still does not cover HTTP
 authentication-to-branded-context wiring, binding that context into the
 separate audit writer, direct command-credential compromise, scheduled repair
-after an unresolved ambiguous commit, both lock orders for
-membership/policy/key revocation, injected failure between every write,
+after an unresolved ambiguous commit, both lock orders for evidence issuer/key/
+grant revocation, injected failure between every write,
 production KMS/HSM audit-key custody, incomplete-attempt reconciliation, or
 decision/step-up paths. Those gaps keep the full matrix and runtime wiring at
 NO-GO.
