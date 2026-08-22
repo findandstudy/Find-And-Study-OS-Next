@@ -118,7 +118,7 @@ The gate passes only when CI records all of the following:
 `artifacts/api-server/scripts/test-postgres-control-plane-gate.ts` define the
 foundation PostgreSQL 16 gate. It uses an immutable official
 image digest, a per-run `fas_it_*` database, separate `fas_migrator` and
-`fas_app` logins. The current candidate targets all 62 migrations twice. It
+`fas_app` logins. The current candidate targets all 63 migrations twice. It
 directly
 exercises:
 
