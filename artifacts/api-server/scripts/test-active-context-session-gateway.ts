@@ -628,7 +628,9 @@ test("gateway remains absent from every application and route registration modul
     const source = fs.readFileSync(candidate, "utf8");
     assert.equal(
       source.includes("activeContextSessionGateway") ||
-        source.includes("issueActiveContextForHttpSession"),
+        source.includes("issueActiveContextForHttpSession") ||
+        source.includes("postgresActiveContextSelectionLifecycle") ||
+        source.includes("PostgresActiveContextSelectionLifecycle"),
       false,
       candidate,
     );

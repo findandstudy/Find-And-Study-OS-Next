@@ -1,14 +1,14 @@
 # ChangeSet PostgreSQL Integration Gate
 
-Status: **65-MIGRATION FOUNDATION CANDIDATE, DEFAULT-UNWIRED CONTEXT-BOUND
+Status: **66-MIGRATION FOUNDATION CANDIDATE, DEFAULT-UNWIRED CONTEXT-BOUND
 COMMAND/EVIDENCE, QUERY-CANCELLATION ROLLBACK, MEMBERSHIP/POLICY REVOCATION
 SERIALIZATION, EVIDENCE-KEY COMPROMISE SERIALIZATION, AMBIGUOUS-COMMIT
 AND SCHEDULED RECEIPT-ONLY RECONCILIATION, DURABLE-AUDIT ADAPTER CI GREEN,
-AND DEFAULT-UNWIRED SESSION/RATE-LIMIT ADAPTER CI GREEN; NO-GO for runtime
-wiring**.
+AND DEFAULT-UNWIRED SESSION/RATE-LIMIT ADAPTER CI GREEN; SELECTION-LIFECYCLE
+CANDIDATE AWAITS POSTGRESQL CI; NO-GO for runtime wiring**.
 
 This gate is not a delivery estimate and is not proof that migrations `0055`
-through `0064` have run in a long-lived environment. The approved local
+through `0065` have run in a long-lived environment. The approved local
 PostgreSQL endpoint `127.0.0.1:5433/fasos_apply_local` was unavailable. GitHub
 run `32547890515` applied the prior 63 reviewed migrations twice to an isolated
 disposable PostgreSQL 16 database and passed the direct-SQL foundation matrix.
@@ -120,7 +120,7 @@ The gate passes only when CI records all of the following:
 `artifacts/api-server/scripts/test-postgres-control-plane-gate.ts` define the
 foundation PostgreSQL 16 gate. It uses an immutable official
 image digest, a per-run `fas_it_*` database, separate `fas_migrator` and
-`fas_app` logins. The current candidate targets all 65 migrations twice. It
+`fas_app` logins. The current candidate targets all 66 migrations twice. It
 directly
 exercises:
 
@@ -221,7 +221,7 @@ run `32551335113`, and G0 Linux/Windows run `32551335019`. The checks are not
 yet required by a repository ruleset. Two earlier scheduled-reconciliation
 candidate runs correctly failed because the foundation harness retained the
 prior 62-migration denominator in its main and atomic-rollback assertions; both
-guards now require 65/65.
+guards now require the current 66/66 ledger denominator.
 
 The production-shaped request binder verifies the signed active context once,
 requires exact server-resolved principal, tenant, organization, and branch
@@ -322,6 +322,44 @@ and clean `app.tenant_id` on pool reuse. The exact implementation tree
 typing and NOLOGIN-owner row-lock privileges; neither is evidence. Independent
 review and required repository checks remain necessary before any route or
 production credential is wired.
+
+Migration `0065` adds a separate EXECUTE-only self-session selection lifecycle
+candidate. Its new login has no table DML and its NOLOGIN owner can only lock
+the authoritative session/account/principal/membership rows, transition the
+current selection, and append a typed command receipt. The RPC accepts only
+`SELECT` and `REVOKE`, recomputes the raw session fingerprint, requires exact
+current selection id/generation, denies cross-tenant switching, and derives the
+actor and target membership from locked server state. It cannot create an
+authorization grant or mutate a role package. The adapter HMAC-fingerprints the
+idempotency key with a separate secret and reconciles an ambiguous COMMIT only
+by replaying the same canonical request.
+
+`0065` is an empty-foundation migration, not an in-place adoption migration. It
+locks the `0064` selection/rate/permit tables and aborts if any contains a row;
+a non-empty environment requires a separately reviewed provenance-preserving
+adoption plan. The adoption test must seed a pre-`0065` row under the same
+FORCE-RLS posture and prove the migration aborts while FORCE RLS is restored.
+The test matrix must also inject one and two lost COMMIT
+acknowledgements, prove exactly one receipt, expose the unresolved case as a
+typed non-PII unknown outcome, and reconcile only by the same request.
+
+The PostgreSQL candidate matrix must prove: exact login/owner attributes and
+cross-RPC/table denial; SERIALIZABLE NULL command/environment/cell rejection;
+initial selection creation with same-key exactly-once replay and changed-request
+conflict; issuance-first rotation serialization; different-key same-generation
+single winner; stale and cross-tenant denial; no skipped generation; terminal
+resurrection, identity mutation, receipt mutation, and deletion denial; raw
+session and idempotency-key absence; SQLSTATE `57014` rollback; and clean pool
+tenant GUC. The receipt tenant policy is SELECT-only for observers; lifecycle
+receipt insertion remains confined to the lifecycle owner path.
+This candidate has no positive CI claim until an exact PostgreSQL 16 final-head
+run passes.
+
+Selection lifecycle CI does not authorize runtime wiring. The current active-
+context token is not yet cryptographically bound to `selectionId` plus
+`sessionGeneration`, so a token issued before rotation/revocation remains a
+hard route/browser NO-GO until every privileged consumption revalidates the
+current ACTIVE selection.
 
 The exact gateway implementation tree
 `dcf62cb5d5fef588dc9b6c5e599fe1144f542dbb` passed foundation run

@@ -3,7 +3,7 @@
 Status: additive, default-unwired foundation plus tested PostgreSQL command,
 evidence, and durable-audit adapter candidates. This document is a security and
 delivery contract, not evidence that the feature is enabled. Migrations `0055`
-through `0064` have not been applied to a long-lived database. No API route,
+through `0065` have not been applied to a long-lived database. No API route,
 Super Admin UI, publisher, worker, or materializer is wired to these adapters.
 
 ## Outcome
@@ -458,7 +458,7 @@ writer quarantines remain authoritative.
 
 ## Next safe slice
 
-The 65-migration PostgreSQL 16 foundation candidate and default-unwired command, evidence,
+The 66-migration PostgreSQL 16 foundation candidate and default-unwired command, evidence,
 durable-audit, request-context-bound transaction, ambiguous-commit,
 query-cancellation, membership/policy revocation, evidence-key compromise,
 exact tenant-grant, global issuer revocation, CREATE write-boundary rollback,
@@ -541,7 +541,45 @@ second `32557546603` exposed missing row-lock privilege on the NOLOGIN function
 owners. Both fail-closed test defects were corrected, and neither failed run is
 treated as evidence.
 
-No HTTP route, selection writer, scheduler, Super Admin UI, publisher,
+Migration `0065` and `PostgresActiveContextSelectionLifecycle` add the next
+default-unwired self-session lifecycle candidate. It can select an active
+membership (including an initial selection) for the same current HUMAN
+principal inside the same tenant, or revoke the exact current selection. It
+cannot create a membership,
+grant a role/capability, switch tenant, act on behalf of another principal, or
+accept tenant/principal/authorization fields outside the exact command shape.
+Normal self-selection therefore does not use maker-checker; privileged grants
+and admin on-behalf operations remain separate, out-of-scope workflows.
+
+The adapter requires the current UUIDv7 selection id and monotonic generation,
+uses a separate HMAC secret for the idempotency fingerprint, pins the exact
+executor role, and calls one fixed-search-path SECURITY DEFINER RPC in a
+SERIALIZABLE transaction. The RPC recomputes the raw session fingerprint,
+locks the authoritative session/account/principal/membership/selection state,
+denies cross-tenant or stale switches, and atomically writes an immutable typed
+receipt. The raw session id and raw idempotency key are not duplicated into
+the new lifecycle, receipt, rate-limit, or audit payloads (the canonical
+session store still owns its session identifier). A
+database trigger permits only `ACTIVE -> ROTATED|REVOKED|EXPIRED`, fixes the
+terminal timestamp/reason, preserves lineage, and denies terminal resurrection,
+identity mutation, and deletion. Runtime logins receive no generic table DML.
+Because `0064` was never wired, `0065` deliberately requires its three session-
+selection/rate tables to be empty under an ACCESS EXCLUSIVE migration lock. A
+non-empty installation fails with an explicit adoption-migration requirement;
+it is never guessed or silently backfilled. Two unresolved COMMIT
+acknowledgements return a typed unknown-outcome error containing only command
+and request identifiers; the same canonical idempotent request is the sole
+receipt-reconciliation path.
+
+This candidate does not make issued active-context tokens revocable. The
+current signed token format still lacks `selectionId` and `sessionGeneration`;
+therefore a token issued before selection rotation or revocation can remain
+cryptographically valid until its bounded expiry. Every privileged request
+must bind and revalidate those claims against the current ACTIVE selection
+before any route/browser/runtime integration can be enabled. This is a hard
+runtime-wiring NO-GO, not a follow-up optimization.
+
+No HTTP route, scheduler, Super Admin UI, publisher,
 production credential, or production migration may be connected before
 required checks, production role/bootstrap review, and independent approval
 exist. Green disposable CI is not runtime activation evidence.

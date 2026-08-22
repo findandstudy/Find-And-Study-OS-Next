@@ -271,6 +271,9 @@ export const activeSessionContextSelectionsTable = pgTable(
       { onDelete: "restrict" },
     ),
     originalSessionFingerprint: text("original_session_fingerprint"),
+    previousSelectionId: uuid("previous_selection_id"),
+    rowVersion: bigint("row_version", { mode: "number" }).notNull().default(1),
+    terminationReason: text("termination_reason"),
     selectedAt: timestamp("selected_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -288,6 +291,30 @@ export const activeSessionContextSelectionsTable = pgTable(
     unique("active_session_context_selections_fingerprint_generation_uq").on(
       table.sessionFingerprint,
       table.sessionGeneration,
+    ),
+    unique("active_session_context_selections_previous_uq").on(
+      table.previousSelectionId,
+    ),
+    unique("active_session_context_selections_expected_binding_uq").on(
+      table.tenantId,
+      table.id,
+      table.sessionFingerprint,
+      table.sessionGeneration,
+      table.principalId,
+    ),
+    unique("active_session_context_selections_result_binding_uq").on(
+      table.tenantId,
+      table.id,
+      table.sessionFingerprint,
+      table.sessionGeneration,
+      table.principalId,
+      table.membershipId,
+    ),
+    unique("active_session_context_selections_rate_binding_uq").on(
+      table.tenantId,
+      table.sessionFingerprint,
+      table.sessionGeneration,
+      table.principalId,
     ),
     uniqueIndex("active_session_context_selections_one_active_uidx")
       .on(table.sessionFingerprint)
@@ -326,6 +353,11 @@ export const activeSessionContextSelectionsTable = pgTable(
       ],
       name: "active_session_context_selections_branch_fk",
     }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.previousSelectionId],
+      foreignColumns: [table.tenantId, table.id],
+      name: "active_session_context_selections_previous_fk",
+    }).onDelete("restrict"),
     check("active_session_context_selections_id_uuidv7_chk", uuidV7(table.id)),
     check(
       "active_session_context_selections_fingerprint_chk",
@@ -336,8 +368,12 @@ export const activeSessionContextSelectionsTable = pgTable(
       sql`${table.sessionGeneration} > 0`,
     ),
     check(
+      "active_session_context_selections_generation_safe_chk",
+      sql`${table.sessionGeneration} <= 9007199254740991`,
+    ),
+    check(
       "active_session_context_selections_status_chk",
-      sql`${table.status} IN ('ACTIVE', 'ROTATED', 'REVOKED')`,
+      sql`${table.status} IN ('ACTIVE', 'ROTATED', 'REVOKED', 'EXPIRED')`,
     ),
     check(
       "active_session_context_selections_scope_chk",
@@ -354,11 +390,24 @@ export const activeSessionContextSelectionsTable = pgTable(
       )`,
     ),
     check(
-      "active_session_context_selections_revocation_chk",
+      "active_session_context_selections_termination_reason_chk",
       sql`(
-        (${table.status} = 'ACTIVE' AND ${table.revokedAt} IS NULL)
-        OR (${table.status} IN ('ROTATED', 'REVOKED') AND ${table.revokedAt} IS NOT NULL)
+        (${table.status} = 'ACTIVE' AND ${table.revokedAt} IS NULL AND ${table.terminationReason} IS NULL)
+        OR (${table.status} = 'ROTATED' AND ${table.revokedAt} IS NOT NULL AND ${table.terminationReason} IS NOT NULL AND ${table.terminationReason} = 'SELF_SWITCH')
+        OR (${table.status} = 'REVOKED' AND ${table.revokedAt} IS NOT NULL AND ${table.terminationReason} IS NOT NULL AND ${table.terminationReason} IN ('SELF_REVOKE', 'SESSION_REVOKED', 'SECURITY_REVOKE'))
+        OR (${table.status} = 'EXPIRED' AND ${table.revokedAt} IS NOT NULL AND ${table.terminationReason} IS NOT NULL AND ${table.terminationReason} = 'SESSION_EXPIRED')
       )`,
+    ),
+    check(
+      "active_session_context_selections_lineage_shape_chk",
+      sql`(
+        (${table.sessionGeneration} = 1 AND ${table.previousSelectionId} IS NULL)
+        OR (${table.sessionGeneration} > 1 AND ${table.previousSelectionId} IS NOT NULL)
+      )`,
+    ),
+    check(
+      "active_session_context_selections_row_version_chk",
+      sql`${table.rowVersion} > 0`,
     ),
   ],
 ).enableRLS();
@@ -391,6 +440,21 @@ export const activeContextIssuanceRateLimitsTable = pgTable(
         activeSessionContextSelectionsTable.sessionGeneration,
       ],
       name: "active_context_issuance_rate_limits_selection_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [
+        table.tenantId,
+        table.sessionFingerprint,
+        table.sessionGeneration,
+        table.principalId,
+      ],
+      foreignColumns: [
+        activeSessionContextSelectionsTable.tenantId,
+        activeSessionContextSelectionsTable.sessionFingerprint,
+        activeSessionContextSelectionsTable.sessionGeneration,
+        activeSessionContextSelectionsTable.principalId,
+      ],
+      name: "active_context_issuance_rate_limits_exact_selection_fk",
     }).onDelete("restrict"),
     check(
       "active_context_issuance_rate_limits_hashes_chk",
@@ -436,6 +500,21 @@ export const activeContextIssuancePermitsTable = pgTable(
       ],
       name: "active_context_issuance_permits_selection_fk",
     }).onDelete("restrict"),
+    foreignKey({
+      columns: [
+        table.tenantId,
+        table.sessionFingerprint,
+        table.sessionGeneration,
+        table.principalId,
+      ],
+      foreignColumns: [
+        activeSessionContextSelectionsTable.tenantId,
+        activeSessionContextSelectionsTable.sessionFingerprint,
+        activeSessionContextSelectionsTable.sessionGeneration,
+        activeSessionContextSelectionsTable.principalId,
+      ],
+      name: "active_context_issuance_permits_exact_selection_fk",
+    }).onDelete("restrict"),
     check("active_context_issuance_permits_id_uuidv7_chk", uuidV7(table.id)),
     check(
       "active_context_issuance_permits_hashes_chk",
@@ -448,6 +527,232 @@ export const activeContextIssuancePermitsTable = pgTable(
     check(
       "active_context_issuance_permits_expiry_chk",
       sql`${table.expiresAt} > ${table.issuedAt} AND ${table.expiresAt} <= ${table.issuedAt} + interval '15 seconds'`,
+    ),
+  ],
+).enableRLS();
+
+export const activeSessionContextSelectionCommandReceiptsTable = pgTable(
+  "active_session_context_selection_command_receipts",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenantsTable.id, { onDelete: "restrict" }),
+    sessionFingerprint: text("session_fingerprint").notNull(),
+    actorPrincipalId: uuid("actor_principal_id").notNull(),
+    actorMembershipId: uuid("actor_membership_id").notNull(),
+    commandType: text("command_type").notNull(),
+    requestedTenantId: uuid("requested_tenant_id"),
+    requestedMembershipId: uuid("requested_membership_id"),
+    expectedSelectionId: uuid("expected_selection_id"),
+    expectedGeneration: bigint("expected_generation", { mode: "number" }).notNull(),
+    outcome: text("outcome").notNull(),
+    previousSelectionId: uuid("previous_selection_id"),
+    resultSelectionId: uuid("result_selection_id").notNull(),
+    resultGeneration: bigint("result_generation", { mode: "number" }).notNull(),
+    resultStatus: text("result_status").notNull(),
+    idempotencyKeyHash: text("idempotency_key_hash").notNull(),
+    requestHash: text("request_hash").notNull(),
+    resultHash: text("result_hash").notNull(),
+    environmentId: text("environment_id").notNull(),
+    cellId: text("cell_id").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("active_session_context_selection_commands_tenant_id_id_uq").on(
+      table.tenantId,
+      table.id,
+    ),
+    unique("active_session_context_selection_commands_idempotency_uq").on(
+      table.sessionFingerprint,
+      table.idempotencyKeyHash,
+    ),
+    index("active_session_context_selection_commands_tenant_actor_idx").on(
+      table.tenantId,
+      table.actorPrincipalId,
+      table.occurredAt,
+    ),
+    foreignKey({
+      columns: [table.tenantId, table.actorMembershipId, table.actorPrincipalId],
+      foreignColumns: [
+        membershipsTable.tenantId,
+        membershipsTable.id,
+        membershipsTable.principalId,
+      ],
+      name: "active_session_context_selection_commands_actor_membership_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [
+        table.requestedTenantId,
+        table.requestedMembershipId,
+        table.actorPrincipalId,
+      ],
+      foreignColumns: [
+        membershipsTable.tenantId,
+        membershipsTable.id,
+        membershipsTable.principalId,
+      ],
+      name: "active_session_context_selection_commands_requested_membership_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.previousSelectionId],
+      foreignColumns: [
+        activeSessionContextSelectionsTable.tenantId,
+        activeSessionContextSelectionsTable.id,
+      ],
+      name: "active_session_context_selection_commands_previous_selection_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.expectedSelectionId],
+      foreignColumns: [
+        activeSessionContextSelectionsTable.tenantId,
+        activeSessionContextSelectionsTable.id,
+      ],
+      name: "active_session_context_selection_commands_expected_selection_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [
+        table.tenantId,
+        table.expectedSelectionId,
+        table.sessionFingerprint,
+        table.expectedGeneration,
+        table.actorPrincipalId,
+      ],
+      foreignColumns: [
+        activeSessionContextSelectionsTable.tenantId,
+        activeSessionContextSelectionsTable.id,
+        activeSessionContextSelectionsTable.sessionFingerprint,
+        activeSessionContextSelectionsTable.sessionGeneration,
+        activeSessionContextSelectionsTable.principalId,
+      ],
+      name: "active_session_context_selection_commands_expected_binding_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.tenantId, table.resultSelectionId],
+      foreignColumns: [
+        activeSessionContextSelectionsTable.tenantId,
+        activeSessionContextSelectionsTable.id,
+      ],
+      name: "active_session_context_selection_commands_result_selection_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [
+        table.tenantId,
+        table.resultSelectionId,
+        table.sessionFingerprint,
+        table.resultGeneration,
+        table.actorPrincipalId,
+        table.actorMembershipId,
+      ],
+      foreignColumns: [
+        activeSessionContextSelectionsTable.tenantId,
+        activeSessionContextSelectionsTable.id,
+        activeSessionContextSelectionsTable.sessionFingerprint,
+        activeSessionContextSelectionsTable.sessionGeneration,
+        activeSessionContextSelectionsTable.principalId,
+        activeSessionContextSelectionsTable.membershipId,
+      ],
+      name: "active_session_context_selection_commands_result_binding_fk",
+    }).onDelete("restrict"),
+    check("active_session_context_selection_commands_id_uuidv7_chk", uuidV7(table.id)),
+    check(
+      "active_session_context_selection_commands_fingerprint_chk",
+      sql`${table.sessionFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "active_session_context_selection_commands_type_chk",
+      sql`${table.commandType} IN ('SELECT', 'REVOKE')`,
+    ),
+    check(
+      "active_session_context_selection_commands_target_chk",
+      sql`(
+        (
+          ${table.commandType} = 'SELECT'
+          AND ${table.requestedTenantId} IS NOT NULL
+          AND ${table.requestedMembershipId} IS NOT NULL
+          AND (
+            (${table.expectedSelectionId} IS NULL AND ${table.expectedGeneration} = 0)
+            OR (${table.expectedSelectionId} IS NOT NULL AND ${table.expectedGeneration} > 0)
+          )
+        )
+        OR (
+          ${table.commandType} = 'REVOKE'
+          AND ${table.requestedTenantId} IS NULL
+          AND ${table.requestedMembershipId} IS NULL
+          AND ${table.expectedSelectionId} IS NOT NULL
+          AND ${table.expectedGeneration} > 0
+        )
+      )`,
+    ),
+    check(
+      "active_session_context_selection_commands_outcome_chk",
+      sql`${table.outcome} IN ('SELECTED', 'UNCHANGED', 'REVOKED')`,
+    ),
+    check(
+      "active_session_context_selection_commands_semantics_chk",
+      sql`(
+        (
+          ${table.commandType} = 'SELECT'
+          AND ${table.outcome} IN ('SELECTED', 'UNCHANGED')
+          AND ${table.tenantId} IS NOT DISTINCT FROM ${table.requestedTenantId}
+          AND ${table.actorMembershipId} IS NOT DISTINCT FROM ${table.requestedMembershipId}
+        )
+        OR (${table.commandType} = 'REVOKE' AND ${table.outcome} = 'REVOKED')
+      )`,
+    ),
+    check(
+      "active_session_context_selection_commands_result_chk",
+      sql`${table.resultGeneration} > 0
+        AND ${table.resultGeneration} <= 9007199254740991
+        AND ${table.expectedGeneration} <= 9007199254740991
+        AND (
+          (
+            ${table.outcome} = 'SELECTED'
+            AND ${table.resultStatus} = 'ACTIVE'
+            AND (
+              (
+                ${table.expectedSelectionId} IS NULL
+                AND ${table.expectedGeneration} = 0
+                AND ${table.previousSelectionId} IS NULL
+                AND ${table.resultGeneration} = 1
+              )
+              OR (
+                ${table.expectedSelectionId} IS NOT NULL
+                AND ${table.expectedGeneration} > 0
+                AND ${table.previousSelectionId} IS NOT DISTINCT FROM ${table.expectedSelectionId}
+                AND ${table.resultGeneration} = ${table.expectedGeneration} + 1
+              )
+            )
+          )
+          OR (
+            ${table.outcome} = 'UNCHANGED'
+            AND ${table.resultStatus} = 'ACTIVE'
+            AND ${table.expectedSelectionId} IS NOT NULL
+            AND ${table.previousSelectionId} IS NULL
+            AND ${table.resultSelectionId} IS NOT DISTINCT FROM ${table.expectedSelectionId}
+            AND ${table.resultGeneration} = ${table.expectedGeneration}
+          )
+          OR (
+            ${table.outcome} = 'REVOKED'
+            AND ${table.resultStatus} = 'REVOKED'
+            AND ${table.previousSelectionId} IS NOT DISTINCT FROM ${table.expectedSelectionId}
+            AND ${table.resultSelectionId} IS NOT DISTINCT FROM ${table.expectedSelectionId}
+            AND ${table.resultGeneration} = ${table.expectedGeneration}
+          )
+        )`,
+    ),
+    check(
+      "active_session_context_selection_commands_hashes_chk",
+      sql`${table.idempotencyKeyHash} ~ '^[0-9a-f]{64}$'
+        AND ${table.requestHash} ~ '^[0-9a-f]{64}$'
+        AND ${table.resultHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "active_session_context_selection_commands_deployment_chk",
+      sql`${table.environmentId} ~ '^[a-z][a-z0-9-]{1,62}$'
+        AND ${table.cellId} ~ '^[a-z][a-z0-9-]{1,62}$'`,
     ),
   ],
 ).enableRLS();

@@ -60,6 +60,8 @@ const sessionOwnerRole = "fas_session_owner";
 const sessionResolverRole = "fas_session_resolver";
 const rateLimitOwnerRole = "fas_rate_limit_owner";
 const rateLimitExecutorRole = "fas_rate_limit_executor";
+const sessionLifecycleOwnerRole = "fas_session_lifecycle_owner";
+const sessionLifecycleExecutorRole = "fas_session_lifecycle_executor";
 
 async function withClient<T>(
   url: string,
@@ -125,6 +127,10 @@ async function setup() {
         NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
       CREATE ROLE ${rateLimitExecutorRole}
         LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+      CREATE ROLE ${sessionLifecycleOwnerRole}
+        NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+      CREATE ROLE ${sessionLifecycleExecutorRole}
+        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
       ALTER DATABASE ${databaseName} OWNER TO ${migratorRole};
       REVOKE TEMPORARY ON DATABASE ${databaseName} FROM PUBLIC;
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
@@ -151,6 +157,11 @@ async function setup() {
       ALTER ROLE ${rateLimitExecutorRole} SET statement_timeout = '15s';
       ALTER ROLE ${rateLimitExecutorRole} SET lock_timeout = '5s';
       ALTER ROLE ${rateLimitExecutorRole} SET idle_in_transaction_session_timeout = '15s';
+      ALTER ROLE ${sessionLifecycleExecutorRole} SET statement_timeout = '15s';
+      ALTER ROLE ${sessionLifecycleExecutorRole} SET lock_timeout = '5s';
+      ALTER ROLE ${sessionLifecycleExecutorRole} SET idle_in_transaction_session_timeout = '15s';
+      ALTER ROLE ${sessionLifecycleExecutorRole} SET timezone = 'Pacific/Kiritimati';
+      ALTER ROLE ${sessionLifecycleExecutorRole} SET timezone = 'Pacific/Kiritimati';
     `);
   });
   console.log("[postgres-gate] disposable authority split prepared");
@@ -229,6 +240,7 @@ const TENANT_OWNED_TABLES = [
   "change_set_evidence_requests",
   "change_set_command_audit_events",
   "active_session_context_selections",
+  "active_session_context_selection_command_receipts",
   "active_context_issuance_rate_limits",
   "active_context_issuance_permits",
 ] as const;
@@ -667,7 +679,7 @@ async function verifyAtomicDdlRollback(migrator: pg.Client) {
         "SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations",
       )
     ).rows[0].count,
-    65,
+    66,
   );
 }
 
@@ -1618,7 +1630,7 @@ async function verify() {
     const migrationCount = await migrator.query(
       "SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations",
     );
-    assert.equal(migrationCount.rows[0].count, 65);
+    assert.equal(migrationCount.rows[0].count, 66);
     await verifyAtomicDdlRollback(migrator);
     await migrator.query(
       `INSERT INTO public.branches (id, name) VALUES
