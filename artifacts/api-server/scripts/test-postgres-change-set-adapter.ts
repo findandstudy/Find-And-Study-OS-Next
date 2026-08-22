@@ -11,10 +11,12 @@ import {
 import {
   executeCreateR1ChangeSetCommand,
   executeTransitionR1ChangeSetCommand,
+  type ChangeSetCommandAuditWriter,
   type ChangeSetCommandStore,
   type ChangeSetCommandTransaction,
   type ChangeSetCommandResult,
 } from "../src/lib/changeSetCommand.js";
+import { bindChangeSetRequestContext } from "../src/lib/changeSetRequestContext.js";
 import {
   fingerprintChangeSetEvidencePublicKey,
   issueChangeSetEvidenceEnvelope,
@@ -296,15 +298,32 @@ async function executeCanonicalCreateReplay(input: {
   store: PostgresChangeSetCommandStore;
   ids: readonly string[];
 }): Promise<ChangeSetCommandResult> {
-  return executeCreateR1ChangeSetCommand({
-    context: verifiedContext(),
-    command: createCommand,
-    dependencies: {
-      store: input.store,
-      now: () => NOW,
-      nextUuidV7: uuidFactory(input.ids),
+  const fixture = activeContextFixture();
+  const auditWriter: ChangeSetCommandAuditWriter = {
+    startAttempt: async () => ({
+      attemptId: "018f5000-0000-7000-8000-0000000000ff",
+      recordResult: async () => undefined,
+      recordReconciledResult: async () => undefined,
+      recordCommitOutcomeUnknown: async () => undefined,
+      recordUnexpectedError: async () => undefined,
+    }),
+  };
+  const binding = bindChangeSetRequestContext({
+    activeContextToken: fixture.token,
+    activeContextSigningSecret: activeContextSecret,
+    requestIdentity: {
+      authenticatedPrincipalId: ID.humanPrincipal,
+      tenantId: ID.tenant,
+      organizationId: null,
+      legacyBranchId: null,
     },
+    createStore: () => input.store,
+    createAuditWriter: () => auditWriter,
+    now: () => NOW,
+    nextUuidV7: uuidFactory(input.ids),
   });
+  if (!binding.ok) throw new Error(binding.error.reason);
+  return binding.gateway.executeCreate(createCommand);
 }
 
 function pauseAfterEvidenceLoad(input: {
@@ -738,7 +757,7 @@ async function seedFoundation() {
   });
 }
 
-function verifiedContext() {
+function activeContextFixture() {
   const claims: ActiveTenantContextClaims = {
     tokenVersion: 1,
     contextId: ID.context,
@@ -753,14 +772,19 @@ function verifiedContext() {
     issuedAt: NOW - 1_000,
     expiresAt: NOW + 10 * 60_000,
   };
+  const token = signActiveTenantContext(claims, activeContextSecret);
   const result = verifyActiveTenantContext(
-    signActiveTenantContext(claims, activeContextSecret),
+    token,
     activeContextSecret,
     NOW,
   );
   assert.equal(result.ok, true);
   if (!result.ok) throw new Error(result.reason);
-  return result.context;
+  return { token, context: result.context };
+}
+
+function verifiedContext() {
+  return activeContextFixture().context;
 }
 
 function uuidFactory(values: readonly string[]) {

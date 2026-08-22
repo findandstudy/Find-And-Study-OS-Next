@@ -40,6 +40,7 @@
     "test:user-management-policy": "tsx --test ./scripts/test-user-management-policy.ts",
     "test:session-lifetime": "tsx --test ./scripts/test-session-lifetime.ts",
     "test:active-tenant-context": "tsx --test ./scripts/test-active-tenant-context.ts",
+    "test:change-set-request-context": "tsx --test ./scripts/test-change-set-request-context.ts",
     "test:change-set-policy": "tsx --test ./scripts/test-change-set-policy.ts",
     "test:change-set-command": "tsx --test ./scripts/test-change-set-command.ts",
     "test:change-set-evidence-envelope": "tsx --test ./scripts/test-change-set-evidence-envelope.ts",

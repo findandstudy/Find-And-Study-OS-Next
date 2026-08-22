@@ -59,6 +59,7 @@ jobs:
       - name: Run G0 security and control-plane tests
         run: |
           pnpm --filter @workspace/api-server run test:change-set-command
+          pnpm --filter @workspace/api-server run test:change-set-request-context
           pnpm --filter @workspace/api-server run test:change-set-policy
           pnpm --filter @workspace/api-server run test:active-tenant-context
           pnpm --filter @workspace/api-server run test:security-regressions

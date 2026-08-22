@@ -4,13 +4,13 @@ import pg from "pg";
 
 import {
   signActiveTenantContext,
-  verifyActiveTenantContext,
+  type VerifiedActiveTenantContext,
 } from "../src/lib/activeTenantContext.js";
 import {
-  executeCreateR1ChangeSetCommand,
   hashChangeSetCommandIdempotencyKey,
   type ChangeSetCommandAuditStart,
 } from "../src/lib/changeSetCommand.js";
+import { bindChangeSetRequestContext } from "../src/lib/changeSetRequestContext.js";
 import { canonicalJson } from "../src/lib/jsonCanonical.js";
 import { PostgresChangeSetAuditWriter } from "../src/lib/postgresChangeSetAuditWriter.js";
 import { PostgresChangeSetCommandStore } from "../src/lib/postgresChangeSetCommandStore.js";
@@ -273,7 +273,7 @@ async function bootstrapAuditAuthority() {
   });
 }
 
-function verifiedContext() {
+function activeContextFixture() {
   const secret = crypto.randomBytes(48).toString("base64url");
   const token = signActiveTenantContext(
     {
@@ -292,9 +292,7 @@ function verifiedContext() {
     },
     secret,
   );
-  const verified = verifyActiveTenantContext(token, secret, NOW);
-  if (!verified.ok) throw new Error(verified.reason);
-  return verified.context;
+  return { token, secret };
 }
 
 async function loadAuditRows(attemptIds: readonly string[]) {
@@ -476,30 +474,50 @@ async function main() {
         };
       },
     });
-    const context = verifiedContext();
-    const replay = await executeCreateR1ChangeSetCommand({
-      context,
-      command: {
-        idempotencyKey: "adapter-create-0001",
-        changeType: "FEATURE_FLAG",
-        title: "Journey beta adapter verification",
-        purpose: "Prove the default-unwired PostgreSQL command adapter.",
-        targetScope: { type: "TENANT", organizationId: null, legacyBranchId: null },
-        proposedConfig: {
-          flagKey: "journey.beta",
-          enabled: true,
-          cohortPercent: 5,
-          reason: "Bounded adapter verification.",
+    const contextFixture = activeContextFixture();
+    const bindRequestGateway = (ids: readonly string[]) => {
+      let storeContext: VerifiedActiveTenantContext | undefined;
+      const binding = bindChangeSetRequestContext({
+        activeContextToken: contextFixture.token,
+        activeContextSigningSecret: contextFixture.secret,
+        requestIdentity: {
+          authenticatedPrincipalId: ID.principal,
+          tenantId: ID.tenant,
+          organizationId: null,
+          legacyBranchId: null,
         },
-      },
-      dependencies: {
-        store,
-        auditWriter,
+        createStore: (boundContext) => {
+          storeContext = boundContext;
+          return store;
+        },
+        createAuditWriter: (boundContext) => {
+          assert.equal(boundContext, storeContext);
+          return auditWriter;
+        },
         now: () => NOW,
-        nextUuidV7: uuidFactory([
-          "018f6000-0000-7000-8000-000000000101",
-          "018f6000-0000-7000-8000-000000000102",
-        ]),
+        nextUuidV7: uuidFactory(ids),
+      });
+      assert.equal(binding.ok, true);
+      if (!binding.ok) throw new Error(binding.error.reason);
+      if (!storeContext) throw new Error("request_context_factory_not_called");
+      return { gateway: binding.gateway, context: storeContext };
+    };
+    const requestBinding = bindRequestGateway([
+      "018f6000-0000-7000-8000-000000000101",
+      "018f6000-0000-7000-8000-000000000102",
+    ]);
+    const context = requestBinding.context;
+    const replay = await requestBinding.gateway.executeCreate({
+      idempotencyKey: "adapter-create-0001",
+      changeType: "FEATURE_FLAG",
+      title: "Journey beta adapter verification",
+      purpose: "Prove the default-unwired PostgreSQL command adapter.",
+      targetScope: { type: "TENANT", organizationId: null, legacyBranchId: null },
+      proposedConfig: {
+        flagKey: "journey.beta",
+        enabled: true,
+        cohortPercent: 5,
+        reason: "Bounded adapter verification.",
       },
     });
     assert.equal(replay.ok, true);
@@ -508,29 +526,20 @@ async function main() {
       assert.equal(replay.result.changeSetId, ID.changeSet);
     }
 
-    const rejected = await executeCreateR1ChangeSetCommand({
-      context,
-      command: {
-        idempotencyKey: "adapter-audit-reject-0001",
-        changeType: "FEATURE_FLAG",
-        title: "Second active proposal",
-        purpose: "Prove that business rollback leaves a terminal audit event.",
-        targetScope: { type: "TENANT", organizationId: null, legacyBranchId: null },
-        proposedConfig: {
-          flagKey: "journey.beta",
-          enabled: true,
-          cohortPercent: 10,
-          reason: "This proposal must be rejected.",
-        },
-      },
-      dependencies: {
-        store,
-        auditWriter,
-        now: () => NOW,
-        nextUuidV7: uuidFactory([
-          "018f6000-0000-7000-8000-000000000103",
-          "018f6000-0000-7000-8000-000000000104",
-        ]),
+    const rejected = await bindRequestGateway([
+      "018f6000-0000-7000-8000-000000000103",
+      "018f6000-0000-7000-8000-000000000104",
+    ]).gateway.executeCreate({
+      idempotencyKey: "adapter-audit-reject-0001",
+      changeType: "FEATURE_FLAG",
+      title: "Second active proposal",
+      purpose: "Prove that business rollback leaves a terminal audit event.",
+      targetScope: { type: "TENANT", organizationId: null, legacyBranchId: null },
+      proposedConfig: {
+        flagKey: "journey.beta",
+        enabled: true,
+        cohortPercent: 10,
+        reason: "This proposal must be rejected.",
       },
     });
     assert.deepEqual(rejected, {
@@ -642,34 +651,25 @@ async function main() {
     );
 
     cancellationArmed = true;
-    const cancelledCommand = executeCreateR1ChangeSetCommand({
-      context,
-      command: {
-        idempotencyKey: "audit-cancellation-command-0001",
-        changeType: "FEATURE_FLAG",
-        title: "Durable cancellation audit verification",
-        purpose: "Prove cancellation rollback leaves a terminal audit error.",
-        targetScope: {
-          type: "TENANT",
-          organizationId: null,
-          legacyBranchId: null,
-        },
-        proposedConfig: {
-          flagKey: "journey.beta",
-          enabled: true,
-          cohortPercent: 10,
-          reason: "This command is cancelled before its claim.",
-        },
+    const cancelledCommand = bindRequestGateway([
+      "018f6000-0000-7000-8000-000000000105",
+      "018f6000-0000-7000-8000-000000000106",
+      "018f6000-0000-7000-8000-000000000107",
+    ]).gateway.executeCreate({
+      idempotencyKey: "audit-cancellation-command-0001",
+      changeType: "FEATURE_FLAG",
+      title: "Durable cancellation audit verification",
+      purpose: "Prove cancellation rollback leaves a terminal audit error.",
+      targetScope: {
+        type: "TENANT",
+        organizationId: null,
+        legacyBranchId: null,
       },
-      dependencies: {
-        store,
-        auditWriter,
-        now: () => NOW,
-        nextUuidV7: uuidFactory([
-          "018f6000-0000-7000-8000-000000000105",
-          "018f6000-0000-7000-8000-000000000106",
-          "018f6000-0000-7000-8000-000000000107",
-        ]),
+      proposedConfig: {
+        flagKey: "journey.beta",
+        enabled: true,
+        cohortPercent: 10,
+        reason: "This command is cancelled before its claim.",
       },
     });
     const cancellationOutcome = cancelledCommand.then(
