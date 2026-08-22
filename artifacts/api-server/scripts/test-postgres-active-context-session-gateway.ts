@@ -651,6 +651,17 @@ async function main() {
         now: () => NOW,
       });
     const result = await issueGateway();
+    if (!result.ok) {
+      const debugState = await sessionRepository.withLockedCurrentSession(
+        {
+          sessionId: SID,
+          sessionFingerprint: fingerprint(SID),
+          observedAt: NOW,
+        },
+        async (state) => state,
+      );
+      console.error(`[gateway-debug-state] ${JSON.stringify(debugState)}`);
+    }
     assert.equal(result.ok, true, result.ok ? undefined : JSON.stringify(result));
     if (!result.ok) throw new Error(`gateway_denied_${result.reason}`);
     assert.equal(result.rateLimitPermitId.length, 36);
