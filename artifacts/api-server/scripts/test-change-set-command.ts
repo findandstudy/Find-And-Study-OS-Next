@@ -178,6 +178,7 @@ class MemoryStore implements ChangeSetCommandStore {
   ) {}
 
   async transaction<T>(
+    context: VerifiedActiveTenantContext,
     operation: (transaction: ChangeSetCommandTransaction) => Promise<T>,
   ): Promise<T> {
     const claims = new Map(
@@ -193,15 +194,12 @@ class MemoryStore implements ChangeSetCommandStore {
     const drafts = structuredClone(this.drafts);
     const consumedEvidenceIds = new Set(this.consumedEvidenceIds);
     const events: string[] = [];
-    let activeTenant: string | null = null;
+    const activeTenant = context.tenantId;
+    events.push("SET_TENANT");
     const requireTenant = (tenantId: string) => {
       if (activeTenant !== tenantId) throw new Error("tenant context missing");
     };
     const tx: ChangeSetCommandTransaction = {
-      setLocalTenant: async (tenantId) => {
-        activeTenant = tenantId;
-        events.push("SET_TENANT");
-      },
       loadAuthoritativeR1ConfigurationForUpdate: async ({
         tenantId,
         changeType,

@@ -41,8 +41,10 @@ read the authoritative configuration snapshot, then derive the next version on
 the server. The default-unwired PostgreSQL adapter now implements that contract
 for the bounded candidate path; it is not reachable from HTTP or a worker.
 
-The orchestrator always establishes transaction-local tenant context before
-state resolution or repository access. It authorizes the exact loaded scope,
+The command store accepts the exact process-branded verified context rather
+than a caller-selected tenant ID and establishes transaction-local tenant
+context internally before state resolution or repository access. The
+transaction surface has no public tenant setter. It authorizes the exact loaded scope,
 rejects impersonation, claims a hashed idempotency key, and commits the domain
 mutation and result projection in one transaction. A policy rejection after a
 claim throws an internal rollback signal, so a failed command cannot leave a
@@ -70,8 +72,13 @@ is enabled until a server-side step-up receipt verifier binds a single-use
 receipt to the principal, context, action, audience, and expiry.
 
 A verified context is immutable, process-local branded, and rechecked against
-its issued/expiry window at every command and capability evaluation. A copied,
-mutated, not-yet-valid, or expired context fails before transaction access.
+its issued/expiry window before pool access, after `BEGIN`, at every command and
+capability evaluation, and before every command RPC. A copied, mutated,
+not-yet-valid, or expired context fails before business access. Command claims,
+attempt and access receipts, drafts, approvals, evidence loads, and transition
+receipts must retain the same context, principal, membership, and policy
+identity where those fields apply; same-tenant identity substitution fails
+before the RPC call.
 
 ## Default-unwired PostgreSQL adapter candidate
 
@@ -81,8 +88,9 @@ R1 configuration snapshot and two versioned, fixed-search-path RPC façades:
 admission. The migration grants neither a shared application credential nor a
 new login role. Public execute and direct table access remain revoked.
 
-`postgresChangeSetCommandStore.ts` executes one command per transaction,
-establishes transaction-local tenant context, revalidates the active principal,
+`postgresChangeSetCommandStore.ts` executes one command per transaction. It
+requires the original verified context object, derives `app.tenant_id` only
+inside the store from that object, revalidates the active principal,
 membership, assignments and policy under locks, and exposes only the RPC
 operations required by the storage-agnostic orchestrator. It verifies persisted
 Ed25519 evidence again at consumption time and binds artifact count,
@@ -94,10 +102,12 @@ adapter contains a private signing key.
 The disposable PostgreSQL 16 harness supplies separate `NOLOGIN` function
 owners and separate least-privilege command-executor and evidence-issuer login
 roles. Login roles receive RPC execute only and no Control Plane table DML. The
-harness proves create, signed validation evidence admission, DRAFT to VALIDATED,
-canonical replay, transaction rollback, pool reuse/context cleanup, role
-separation and direct-access denial. These roles and grants are test bootstrap
-evidence, not a production role rollout.
+harness proves copied-context rejection, in-transaction expiry rejection,
+same-tenant actor substitution rejection, absence of a public tenant setter,
+create, signed validation evidence admission, DRAFT to VALIDATED, canonical
+replay, transaction rollback, pool reuse/context cleanup, role separation and
+direct-access denial. These roles and grants are test bootstrap evidence, not a
+production role rollout.
 
 ## Security boundary
 
@@ -111,8 +121,9 @@ impersonation state from a browser payload.
 The future route must execute this trust order:
 
 1. verify the signed active-tenant context before opening the mutation path;
-2. start one database transaction and set `SET LOCAL app.tenant_id` from that
-   verified context;
+2. pass that exact process-branded context to the command store; the store must
+   start one database transaction and set transaction-local `app.tenant_id`
+   internally from that context, with no route-visible tenant setter;
 3. under RLS, revalidate tenant, principal, membership, assignment, policy, and
    impersonation state;
 4. bind the request scope to the verified tenant and organization/branch;
@@ -272,8 +283,9 @@ re-verifies the stored chain head before appending, and fails closed if the
 start event cannot be persisted. The disposable harness gives it a dedicated
 EXECUTE-only login and a separate `NOLOGIN` function owner. It is still
 default-unwired and uses only an ephemeral CI key; production KMS/HSM custody,
-signed-context-to-DB binding, ambiguous-commit reconciliation, and the full
-race/failure matrix remain mandatory before any runtime route can use it.
+HTTP-to-branded-context and audit-writer context binding, ambiguous-commit
+reconciliation, and the full race/failure matrix remain mandatory before any
+runtime route can use it.
 
 Notification template variables must be declared whether referenced in the
 subject or body. Template variables that suggest passwords, secrets, tokens,
@@ -312,7 +324,8 @@ This foundation does not yet deliver:
   credential;
 - production command-executor/evidence-issuer role bootstrap and credentials;
 - production audit-key custody/rotation, incomplete-attempt reconciliation,
-  and signed active-context-to-audit-tenant binding;
+  HTTP-to-branded-context wiring, and signed active-context-to-audit-tenant
+  binding;
 - runtime adoption/backfill of the tenant/organization/legacy-branch map;
 - persistent environment grants for separated migrator and runtime application
   database roles;

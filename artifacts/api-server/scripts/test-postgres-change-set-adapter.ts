@@ -6,6 +6,7 @@ import {
   signActiveTenantContext,
   verifyActiveTenantContext,
   type ActiveTenantContextClaims,
+  type VerifiedActiveTenantContext,
 } from "../src/lib/activeTenantContext.js";
 import {
   executeCreateR1ChangeSetCommand,
@@ -521,11 +522,12 @@ async function main() {
   });
   try {
     const evidenceFailures: string[] = [];
+    let storeNow = NOW;
     const store = new PostgresChangeSetCommandStore(executorPool, {
       expectedRole: ROLE.commandExecutor,
       expectedEnvironmentId: "test-ci",
       expectedCellId: "cell-a",
-      now: () => NOW,
+      now: () => storeNow,
       resolveMutationAssurance: async () => ({
         impersonating: false,
         stepUpSatisfied: false,
@@ -534,6 +536,45 @@ async function main() {
       onEvidenceVerificationFailure: (reason) => evidenceFailures.push(reason),
     });
     const context = verifiedContext();
+    await mustFail(
+      () =>
+        store.transaction(
+          { ...context } as VerifiedActiveTenantContext,
+          async () => undefined,
+        ),
+      /transaction_context_unverified/,
+    );
+    await store.transaction(context, async (transaction) => {
+      assert.equal("setLocalTenant" in transaction, false);
+      await mustFail(
+        () =>
+          transaction.resolveActiveContextStateForUpdate({
+            ...context,
+          } as VerifiedActiveTenantContext),
+        /transaction_context_identity_mismatch/,
+      );
+      await mustFail(
+        () =>
+          transaction.insertCommandAttemptReceipt({
+            id: ID.rollbackProbe,
+            tenantId: ID.tenant,
+            contextId: ID.context,
+            actorPrincipalId: ID.evidencePrincipal,
+            actorMembershipId: ID.humanMembership,
+            commandReceiptId: ID.createCommand,
+            requestHash: "a".repeat(64),
+            outcome: "CONFLICT",
+            occurredAt: NOW,
+          }),
+        /transaction_context_identity_mismatch/,
+      );
+      storeNow = context.expiresAt + 1;
+      await mustFail(
+        () => transaction.loadChangeSetForUpdate(ID.tenant, ID.changeSet),
+        /transaction_context_expired/,
+      );
+      storeNow = NOW;
+    });
     const created = await executeCreateR1ChangeSetCommand({
       context,
       command: {
@@ -732,13 +773,18 @@ async function main() {
     assert.equal(replayed.ok, true);
     if (replayed.ok) assert.equal(replayed.replayed, true);
 
-    await store.transaction(async (tx) => {
-      await tx.setLocalTenant(ID.tenant);
+    await store.transaction(context, async () => {
       throw new Error("adapter_rollback_probe");
     }).then(
       () => assert.fail("rollback probe must fail"),
       (error: unknown) => assert.match(String(error), /adapter_rollback_probe/),
     );
+    storeNow = context.expiresAt + 1;
+    await mustFail(
+      () => store.transaction(context, async () => undefined),
+      /transaction_context_unverified/,
+    );
+    storeNow = NOW;
 
     for (const pool of [executorPool, issuerPool]) {
       const client = await pool.connect();

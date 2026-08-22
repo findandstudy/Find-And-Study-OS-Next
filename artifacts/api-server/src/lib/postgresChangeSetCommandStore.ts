@@ -1,6 +1,11 @@
 import crypto from "node:crypto";
 import type { Pool, PoolClient, QueryResultRow } from "pg";
 
+import {
+  isVerifiedActiveTenantContext,
+  type ResolvedActiveContextState,
+  type VerifiedActiveTenantContext,
+} from "./activeTenantContext";
 import type {
   AccessDecisionReceiptInsert,
   AuthoritativeR1Configuration,
@@ -21,10 +26,6 @@ import {
   type ChangeSetEvidenceTenantGrant,
   type ChangeSetEvidenceVerificationKey,
 } from "./changeSetEvidenceEnvelope";
-import type {
-  ResolvedActiveContextState,
-  VerifiedActiveTenantContext,
-} from "./activeTenantContext";
 import type { ChangeSetScope, ChangeSetState } from "./changeSetPolicy";
 
 const UUID_RE =
@@ -120,16 +121,54 @@ function normalizeScope(scope: ChangeSetScope) {
 class PostgresChangeSetCommandTransaction
   implements ChangeSetCommandTransaction
 {
-  private tenantId: string | null = null;
-
   constructor(
     private readonly client: PoolClient,
     private readonly options: Omit<PostgresChangeSetCommandStoreOptions, "pool">,
+    private readonly context: VerifiedActiveTenantContext,
   ) {}
 
   private requireTenant(tenantId: string) {
-    if (this.tenantId !== tenantId) {
+    if (this.context.tenantId !== tenantId) {
       throw new Error("change_set_transaction_tenant_mismatch");
+    }
+  }
+
+  private requireActiveContext() {
+    const now = this.options.now?.() ?? Date.now();
+    if (
+      !Number.isSafeInteger(now) ||
+      now < 0 ||
+      !isVerifiedActiveTenantContext(this.context, now)
+    ) {
+      throw new Error("change_set_transaction_context_expired");
+    }
+  }
+
+  private requireExactContext(context: VerifiedActiveTenantContext) {
+    this.requireActiveContext();
+    if (context !== this.context) {
+      throw new Error("change_set_transaction_context_identity_mismatch");
+    }
+  }
+
+  private requireBoundIdentity(input: {
+    contextId?: string;
+    principalId?: string;
+    membershipId?: string;
+    policyVersionId?: string;
+  }) {
+    this.requireActiveContext();
+    if (
+      (input.contextId !== undefined &&
+        input.contextId !== this.context.contextId) ||
+      (input.principalId !== undefined &&
+        input.principalId !== this.context.principalId) ||
+      (input.membershipId !== undefined &&
+        input.membershipId !== this.context.membershipId) ||
+      (input.policyVersionId !== undefined &&
+        input.policyVersionId !== this.context.policyVersionId)
+    ) {
+      throw new Error("change_set_transaction_context_identity_mismatch");
     }
   }
 
@@ -143,6 +182,7 @@ class PostgresChangeSetCommandTransaction
   }
 
   private async rpc<T>(name: string, values: readonly unknown[]): Promise<T> {
+    this.requireActiveContext();
     if (!/^[a-z][a-z0-9_]{2,63}$/.test(name)) {
       throw new Error("change_set_rpc_name_invalid");
     }
@@ -153,21 +193,6 @@ class PostgresChangeSetCommandTransaction
     );
     if (result.rowCount !== 1) throw new Error("change_set_rpc_cardinality");
     return rpcResult<T>(result.rows[0]?.result);
-  }
-
-  async setLocalTenant(tenantId: string): Promise<void> {
-    if (!UUID_RE.test(tenantId)) throw new Error("invalid_tenant_id");
-    if (this.tenantId !== null && this.tenantId !== tenantId) {
-      throw new Error("change_set_transaction_tenant_rebind");
-    }
-    const result = await this.client.query<{ tenant_id: string }>(
-      `SELECT set_config('app.tenant_id', $1, true) AS tenant_id`,
-      [tenantId],
-    );
-    if (result.rows[0]?.tenant_id !== tenantId) {
-      throw new Error("change_set_transaction_tenant_not_set");
-    }
-    this.tenantId = tenantId;
   }
 
   async loadAuthoritativeR1ConfigurationForUpdate(input: {
@@ -191,7 +216,7 @@ class PostgresChangeSetCommandTransaction
   async resolveActiveContextStateForUpdate(
     context: VerifiedActiveTenantContext,
   ): Promise<ResolvedActiveContextState> {
-    this.requireTenant(context.tenantId);
+    this.requireExactContext(context);
     return this.rpc<ResolvedActiveContextState>("resolve_active_context", [
       context.tenantId,
       context.principalId,
@@ -204,7 +229,7 @@ class PostgresChangeSetCommandTransaction
   async resolveMutationAssuranceForUpdate(
     context: VerifiedActiveTenantContext,
   ): Promise<MutationAssurance> {
-    this.requireTenant(context.tenantId);
+    this.requireExactContext(context);
     const now = this.options.now?.() ?? Date.now();
     if (!Number.isSafeInteger(now) || now < 0) {
       throw new Error("change_set_assurance_clock_invalid");
@@ -224,6 +249,11 @@ class PostgresChangeSetCommandTransaction
     claim: ChangeSetCommandClaim,
   ): Promise<ChangeSetCommandClaimResult> {
     this.requireTenant(claim.tenantId);
+    this.requireBoundIdentity({
+      contextId: claim.contextId,
+      principalId: claim.actorPrincipalId,
+      membershipId: claim.actorMembershipId,
+    });
     return this.rpc<ChangeSetCommandClaimResult>("claim_command", [
       JSON.stringify(claim),
     ]);
@@ -247,6 +277,7 @@ class PostgresChangeSetCommandTransaction
     toState: ChangeSetState;
   }): Promise<VerifiedTransitionEvidence | null> {
     this.requireTenant(input.tenantId);
+    this.requireBoundIdentity({ principalId: input.actorPrincipalId });
     const rows = await this.rpc<EvidenceRpcRow[]>("load_transition_evidence", [
       input.tenantId,
       input.changeSetId,
@@ -356,6 +387,12 @@ class PostgresChangeSetCommandTransaction
     input: AccessDecisionReceiptInsert,
   ): Promise<void> {
     this.requireTenant(input.tenantId);
+    this.requireBoundIdentity({
+      contextId: input.contextId,
+      principalId: input.actorPrincipalId,
+      membershipId: input.membershipId,
+      policyVersionId: input.policyVersionId,
+    });
     await this.rpc<boolean>("insert_access_decision", [JSON.stringify(input)]);
   }
 
@@ -363,6 +400,11 @@ class PostgresChangeSetCommandTransaction
     input: ChangeSetCommandAttemptReceiptInsert,
   ): Promise<void> {
     this.requireTenant(input.tenantId);
+    this.requireBoundIdentity({
+      contextId: input.contextId,
+      principalId: input.actorPrincipalId,
+      membershipId: input.actorMembershipId,
+    });
     await this.rpc<boolean>("insert_command_attempt", [JSON.stringify(input)]);
   }
 
@@ -388,11 +430,24 @@ class PostgresChangeSetCommandTransaction
     draft: Parameters<ChangeSetCommandTransaction["insertChangeSet"]>[0]["draft"];
   }): Promise<void> {
     this.requireTenant(input.draft.tenantId);
+    this.requireBoundIdentity({
+      principalId: input.draft.ownerPrincipalId,
+      membershipId: input.draft.ownerMembershipId,
+    });
+    this.requireBoundIdentity({
+      principalId: input.draft.makerPrincipalId,
+      membershipId: input.draft.makerMembershipId,
+    });
     await this.rpc<boolean>("insert_change_set", [JSON.stringify(input)]);
   }
 
   async insertApproval(input: ChangeSetApprovalInsert): Promise<void> {
     this.requireTenant(input.tenantId);
+    this.requireBoundIdentity({
+      principalId: input.checkerPrincipalId,
+      membershipId: input.checkerMembershipId,
+      policyVersionId: input.approvalPolicyVersionId,
+    });
     await this.rpc<boolean>("insert_approval", [JSON.stringify(input)]);
   }
 
@@ -400,6 +455,11 @@ class PostgresChangeSetCommandTransaction
     input: ChangeSetTransitionReceiptInsert,
   ): Promise<void> {
     this.requireTenant(input.tenantId);
+    this.requireBoundIdentity({
+      principalId: input.actorPrincipalId,
+      membershipId: input.actorMembershipId,
+      policyVersionId: input.policyVersionId,
+    });
     await this.rpc<boolean>("insert_transition_receipt", [
       JSON.stringify(input),
     ]);
@@ -426,9 +486,9 @@ class PostgresChangeSetCommandTransaction
     resultHash: string;
     completedAt: number;
   }): Promise<void> {
-    if (!this.tenantId) throw new Error("change_set_transaction_tenant_missing");
+    this.requireActiveContext();
     const completed = await this.rpc<boolean>("complete_command", [
-      this.tenantId,
+      this.context.tenantId,
       JSON.stringify(input),
     ]);
     if (!completed) throw new Error("change_set_command_completion_conflict");
@@ -455,8 +515,17 @@ export class PostgresChangeSetCommandStore implements ChangeSetCommandStore {
   }
 
   async transaction<T>(
+    context: VerifiedActiveTenantContext,
     operation: (transaction: ChangeSetCommandTransaction) => Promise<T>,
   ): Promise<T> {
+    const preflightNow = this.options.now?.() ?? Date.now();
+    if (
+      !Number.isSafeInteger(preflightNow) ||
+      preflightNow < 0 ||
+      !isVerifiedActiveTenantContext(context, preflightNow)
+    ) {
+      throw new Error("change_set_transaction_context_unverified");
+    }
     const client = await this.pool.connect();
     let transactionStarted = false;
     let releaseWithError: Error | undefined;
@@ -476,7 +545,26 @@ export class PostgresChangeSetCommandStore implements ChangeSetCommandStore {
       }
       await client.query("BEGIN");
       transactionStarted = true;
-      const tx = new PostgresChangeSetCommandTransaction(client, this.options);
+      const transactionNow = this.options.now?.() ?? Date.now();
+      if (
+        !Number.isSafeInteger(transactionNow) ||
+        transactionNow < 0 ||
+        !isVerifiedActiveTenantContext(context, transactionNow)
+      ) {
+        throw new Error("change_set_transaction_context_expired");
+      }
+      const tenant = await client.query<{ tenant_id: string }>(
+        `SELECT set_config('app.tenant_id', $1, true) AS tenant_id`,
+        [context.tenantId],
+      );
+      if (tenant.rows[0]?.tenant_id !== context.tenantId) {
+        throw new Error("change_set_transaction_tenant_not_set");
+      }
+      const tx = new PostgresChangeSetCommandTransaction(
+        client,
+        this.options,
+        context,
+      );
       const result = await operation(tx);
       await client.query("COMMIT");
       transactionStarted = false;

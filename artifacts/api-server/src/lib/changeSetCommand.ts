@@ -233,7 +233,6 @@ export type AccessDecisionReceiptInsert = {
 };
 
 export interface ChangeSetCommandTransaction {
-  setLocalTenant(tenantId: string): Promise<void>;
   loadAuthoritativeR1ConfigurationForUpdate(input: {
     tenantId: string;
     changeType: string;
@@ -305,6 +304,7 @@ export interface ChangeSetCommandTransaction {
 
 export interface ChangeSetCommandStore {
   transaction<T>(
+    context: VerifiedActiveTenantContext,
     operation: (transaction: ChangeSetCommandTransaction) => Promise<T>,
   ): Promise<T>;
 }
@@ -882,8 +882,7 @@ export async function executeCreateR1ChangeSetCommand(input: {
       idempotencyKey: input.command.idempotencyKey,
       requestHash,
     },
-    operation: () => input.dependencies.store.transaction(async (tx) => {
-      await tx.setLocalTenant(input.context.tenantId);
+    operation: () => input.dependencies.store.transaction(input.context, async (tx) => {
       const authorizationNow = freshCommandNow(input.dependencies);
       requireCurrentContext(input.context, authorizationNow);
       const resourceId =
@@ -1162,8 +1161,7 @@ export async function executeTransitionR1ChangeSetCommand(input: {
       idempotencyKey: input.command.idempotencyKey,
       requestHash,
     },
-    operation: () => input.dependencies.store.transaction(async (tx) => {
-      await tx.setLocalTenant(input.context.tenantId);
+    operation: () => input.dependencies.store.transaction(input.context, async (tx) => {
       const changeSet = await tx.loadChangeSetForUpdate(
         input.context.tenantId,
         input.command.changeSetId,
