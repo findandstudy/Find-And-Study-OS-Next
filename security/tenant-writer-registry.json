@@ -493,6 +493,22 @@
       "externalPilot": "quarantine"
     },
     {
+      "path": "artifacts/api-server/src/lib/postgresActiveContextSelectionConsumptionAttemptLedger.ts",
+      "ownership": "privileged_config",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Platform Security",
+      "externalPilot": "quarantine"
+    },
+    {
+      "path": "artifacts/api-server/src/lib/postgresActiveContextSelectionConsumptionRepository.ts",
+      "ownership": "privileged_config",
+      "enforcement": "quarantine_required",
+      "risk": "critical",
+      "owner": "Platform Security",
+      "externalPilot": "quarantine"
+    },
+    {
       "path": "artifacts/api-server/src/lib/postgresChangeSetAuditWriter.ts",
       "ownership": "privileged_config",
       "enforcement": "quarantine_required",
