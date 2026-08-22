@@ -58,6 +58,10 @@ const ID = {
   invalidAttempt: "018f6000-0000-7000-8000-00000000000a",
   invalidStart: "018f6000-0000-7000-8000-00000000000b",
   invalidTerminal: "018f6000-0000-7000-8000-00000000000c",
+  reconcileAttempt: "018f6000-0000-7000-8000-00000000000d",
+  reconcileStart: "018f6000-0000-7000-8000-00000000000e",
+  reconcilePending: "018f6000-0000-7000-8000-00000000000f",
+  reconcileTerminal: "018f6000-0000-7000-8000-000000000010",
 } as const;
 
 const NOW = Date.now();
@@ -279,6 +283,10 @@ async function main() {
         ID.raceAttempt,
         ID.raceStart,
         ID.raceTerminal,
+        ID.reconcileAttempt,
+        ID.reconcileStart,
+        ID.reconcilePending,
+        ID.reconcileTerminal,
       ]),
     });
     const store = new PostgresChangeSetCommandStore(executorPool, {
@@ -375,12 +383,22 @@ async function main() {
     assert.equal(race.filter((result) => result.status === "fulfilled").length, 1);
     assert.equal(race.filter((result) => result.status === "rejected").length, 1);
 
+    const reconciliationAttempt = await auditWriter.startAttempt({
+      ...start,
+      idempotencyKey: "audit-reconciliation-command-0001",
+      requestHash: "f".repeat(64),
+    });
+    assert.equal(reconciliationAttempt.attemptId, ID.reconcileAttempt);
+    await reconciliationAttempt.recordCommitOutcomeUnknown();
+    await reconciliationAttempt.recordReconciledResult(replay);
+
     const rows = await loadAuditRows([
       ID.successAttempt,
       ID.rejectAttempt,
       ID.raceAttempt,
+      ID.reconcileAttempt,
     ]);
-    assert.equal(rows.length, 6);
+    assert.equal(rows.length, 9);
     for (const row of rows) {
       assert.equal(row.eventHash, expectedEventHash(row));
       assert.match(String(row.idempotencyKeyFingerprint), /^[0-9a-f]{64}$/);
@@ -401,6 +419,35 @@ async function main() {
       [
         [1, "ATTEMPT_STARTED", "STARTED", null],
         [2, "TERMINAL", "REJECT", null],
+      ],
+    );
+    const reconciliationRows = rows.filter(
+      (row) => row.attemptId === ID.reconcileAttempt,
+    );
+    assert.deepEqual(
+      reconciliationRows.map((row) => [
+        row.sequence,
+        row.phase,
+        row.outcome,
+        row.reasonCode,
+        row.changeSetId,
+      ]),
+      [
+        [1, "ATTEMPT_STARTED", "STARTED", "REQUEST_ACCEPTED", null],
+        [
+          2,
+          "RECONCILIATION",
+          "PENDING",
+          "COMMIT_OUTCOME_UNKNOWN",
+          null,
+        ],
+        [
+          3,
+          "TERMINAL",
+          "SUCCESS",
+          "COMMAND_RECONCILED",
+          ID.changeSet,
+        ],
       ],
     );
 
@@ -493,7 +540,7 @@ async function main() {
     await Promise.all([executorPool.end(), auditPool.end()]);
   }
   console.log(
-    "[postgres-audit-gate] PASS: durable start/terminal chains, rollback survival, HMAC verification, tenant denial, role split, and concurrency",
+    "[postgres-audit-gate] PASS: durable start/terminal chains, commit reconciliation, rollback survival, HMAC verification, tenant denial, role split, and concurrency",
   );
 }
 

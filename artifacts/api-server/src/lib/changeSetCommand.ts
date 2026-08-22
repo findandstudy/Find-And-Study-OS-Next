@@ -323,7 +323,10 @@ export type ChangeSetCommandAuditStart = {
 };
 
 export interface ChangeSetCommandAuditAttempt {
+  readonly attemptId: string;
   recordResult(result: ChangeSetCommandResult): Promise<void>;
+  recordReconciledResult(result: ChangeSetCommandResult): Promise<void>;
+  recordCommitOutcomeUnknown(): Promise<void>;
   recordUnexpectedError(): Promise<void>;
 }
 
@@ -346,6 +349,31 @@ class RollbackCommand extends Error {
   }
 }
 
+export class ChangeSetCommitOutcomeUnknownError extends Error {
+  constructor() {
+    super("change_set_commit_outcome_unknown");
+    this.name = "ChangeSetCommitOutcomeUnknownError";
+  }
+}
+
+export class ChangeSetCommitReconciliationPendingError extends Error {
+  constructor(readonly attemptId: string | null) {
+    super("change_set_commit_reconciliation_pending");
+    this.name = "ChangeSetCommitReconciliationPendingError";
+  }
+}
+
+async function resolveRollbackCommand(
+  operation: () => Promise<ChangeSetCommandResult>,
+): Promise<ChangeSetCommandResult> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof RollbackCommand) return error.result;
+    throw error;
+  }
+}
+
 async function executeWithDurableAudit(input: {
   dependencies: ChangeSetCommandDependencies;
   audit: ChangeSetCommandAuditStart;
@@ -356,23 +384,66 @@ async function executeWithDurableAudit(input: {
     : null;
   let result: ChangeSetCommandResult;
   try {
-    result = await input.operation();
+    result = await resolveRollbackCommand(input.operation);
   } catch (error) {
-    if (error instanceof RollbackCommand) {
-      result = error.result;
-    } else {
-      if (attempt) {
+    if (error instanceof ChangeSetCommitOutcomeUnknownError) {
+      let reconciled: ChangeSetCommandResult;
+      try {
+        reconciled = await resolveRollbackCommand(input.operation);
+      } catch (retryError) {
         try {
-          await attempt.recordUnexpectedError();
+          await attempt?.recordCommitOutcomeUnknown();
+        } catch (auditError) {
+          throw new AggregateError(
+            [error, retryError, auditError],
+            "change_set_commit_reconciliation_and_audit_failed",
+          );
+        }
+        throw new ChangeSetCommitReconciliationPendingError(
+          attempt?.attemptId ?? null,
+        );
+      }
+      if (!reconciled.ok) {
+        try {
+          await attempt?.recordCommitOutcomeUnknown();
         } catch (auditError) {
           throw new AggregateError(
             [error, auditError],
-            "change_set_command_and_terminal_audit_failed",
+            "change_set_commit_reconciliation_and_audit_failed",
           );
         }
+        throw new ChangeSetCommitReconciliationPendingError(
+          attempt?.attemptId ?? null,
+        );
       }
-      throw error;
+      try {
+        await attempt?.recordReconciledResult(reconciled);
+      } catch (auditError) {
+        try {
+          await attempt?.recordCommitOutcomeUnknown();
+        } catch (pendingAuditError) {
+          throw new AggregateError(
+            [error, auditError, pendingAuditError],
+            "change_set_commit_reconciliation_audit_failed",
+          );
+        }
+        throw new ChangeSetCommitReconciliationPendingError(
+          attempt?.attemptId ?? null,
+        );
+      }
+      return reconciled;
     }
+    if (attempt) {
+      try {
+        await attempt.recordUnexpectedError();
+      } catch (auditError) {
+        throw new AggregateError(
+          [error, auditError],
+          "change_set_command_and_terminal_audit_failed",
+        );
+      }
+    }
+    throw error;
   }
   await attempt?.recordResult(result);
   return result;
@@ -389,7 +460,7 @@ function hashValue(value: unknown): string {
     .digest("hex");
 }
 
-function hashIdempotencyKey(value: string): string {
+export function hashChangeSetCommandIdempotencyKey(value: string): string {
   return crypto
     .createHash("sha256")
     .update(`fas-change-set-command-v1:${value}`, "utf8")
@@ -915,7 +986,9 @@ export async function executeCreateR1ChangeSetCommand(input: {
       const claim = await tx.claimCommand({
         id: commandReceiptId,
         tenantId: input.context.tenantId,
-        idempotencyKeyHash: hashIdempotencyKey(input.command.idempotencyKey),
+        idempotencyKeyHash: hashChangeSetCommandIdempotencyKey(
+          input.command.idempotencyKey,
+        ),
         requestHash,
         contextId: input.context.contextId,
         actorPrincipalId: input.context.principalId,
@@ -1213,7 +1286,9 @@ export async function executeTransitionR1ChangeSetCommand(input: {
       const claim = await tx.claimCommand({
         id: commandReceiptId,
         tenantId: input.context.tenantId,
-        idempotencyKeyHash: hashIdempotencyKey(input.command.idempotencyKey),
+        idempotencyKeyHash: hashChangeSetCommandIdempotencyKey(
+          input.command.idempotencyKey,
+        ),
         requestHash,
         contextId: input.context.contextId,
         actorPrincipalId: input.context.principalId,

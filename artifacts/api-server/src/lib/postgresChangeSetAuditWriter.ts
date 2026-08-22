@@ -1,11 +1,12 @@
 import crypto from "node:crypto";
 import type { Pool, PoolClient, QueryResultRow } from "pg";
 
-import type {
-  ChangeSetCommandAuditAttempt,
-  ChangeSetCommandAuditStart,
-  ChangeSetCommandAuditWriter,
-  ChangeSetCommandResult,
+import {
+  hashChangeSetCommandIdempotencyKey,
+  type ChangeSetCommandAuditAttempt,
+  type ChangeSetCommandAuditStart,
+  type ChangeSetCommandAuditWriter,
+  type ChangeSetCommandResult,
 } from "./changeSetCommand";
 import { canonicalJson } from "./jsonCanonical";
 
@@ -26,7 +27,9 @@ type AuditReason =
   | "IDEMPOTENCY_CONFLICT"
   | "COMMAND_IN_PROGRESS"
   | "INTERNAL_ERROR"
-  | "COMMAND_COMPLETED";
+  | "COMMAND_COMPLETED"
+  | "COMMAND_RECONCILED"
+  | "COMMIT_OUTCOME_UNKNOWN";
 
 type AuditEvent = {
   id: string;
@@ -41,8 +44,8 @@ type AuditEvent = {
   targetState: string | null;
   capability: string;
   policyVersionId: string;
-  phase: "ATTEMPT_STARTED" | "TERMINAL";
-  outcome: "STARTED" | AuditOutcome;
+  phase: "ATTEMPT_STARTED" | "RECONCILIATION" | "TERMINAL";
+  outcome: "STARTED" | "PENDING" | AuditOutcome;
   reasonCode: "REQUEST_ACCEPTED" | AuditReason;
   idempotencyKeyFingerprint: string;
   requestFingerprint: string;
@@ -161,7 +164,9 @@ function parseTail(value: unknown): AuditEvent | null {
     !IDENTIFIER_RE.test(value.capability) ||
     typeof value.policyVersionId !== "string" ||
     !UUID_RE.test(value.policyVersionId) ||
-    !["ATTEMPT_STARTED", "TERMINAL"].includes(String(value.phase)) ||
+    !["ATTEMPT_STARTED", "RECONCILIATION", "TERMINAL"].includes(
+      String(value.phase),
+    ) ||
     typeof value.outcome !== "string" ||
     typeof value.reasonCode !== "string" ||
     typeof value.idempotencyKeyFingerprint !== "string" ||
@@ -226,6 +231,17 @@ function terminalForResult(result: ChangeSetCommandResult): {
     return { changeSetId: null, outcome: "REJECT", reasonCode: "EVIDENCE_REJECTED" };
   }
   return { changeSetId: null, outcome: "REJECT", reasonCode: "MUTATION_REJECTED" };
+}
+
+function reconciledTerminalForResult(result: ChangeSetCommandResult): {
+  changeSetId: string | null;
+  outcome: AuditOutcome;
+  reasonCode: AuditReason;
+} {
+  const terminal = terminalForResult(result);
+  return terminal.outcome === "SUCCESS"
+    ? { ...terminal, reasonCode: "COMMAND_RECONCILED" }
+    : terminal;
 }
 
 export class PostgresChangeSetAuditWriter implements ChangeSetCommandAuditWriter {
@@ -359,7 +375,7 @@ export class PostgresChangeSetAuditWriter implements ChangeSetCommandAuditWriter
       idempotencyKeyFingerprint: hmac(
         this.fingerprintKey,
         "fas.change-set.command-audit.idempotency.v1",
-        input.idempotencyKey,
+        hashChangeSetCommandIdempotencyKey(input.idempotencyKey),
       ),
       requestFingerprint: hmac(
         this.fingerprintKey,
@@ -382,6 +398,31 @@ export class PostgresChangeSetAuditWriter implements ChangeSetCommandAuditWriter
       ]);
     });
 
+    const authenticTail = (tailValue: unknown) => {
+      const tail = parseTail(tailValue);
+      if (!tail) throw new Error("change_set_audit_tail_invalid");
+      const { eventHash: storedHash, ...tailWithoutHash } = tail;
+      const validStart =
+        tail.sequence === 1 && tail.phase === "ATTEMPT_STARTED";
+      const validPending =
+        tail.sequence === 2 &&
+        tail.phase === "RECONCILIATION" &&
+        tail.outcome === "PENDING" &&
+        tail.reasonCode === "COMMIT_OUTCOME_UNKNOWN";
+      if (
+        (!validStart && !validPending) ||
+        tail.attemptId !== event.attemptId ||
+        tail.tenantId !== event.tenantId ||
+        !secureHashEqual(
+          storedHash,
+          eventHash(this.fingerprintKey, tailWithoutHash),
+        )
+      ) {
+        throw new Error("change_set_audit_tail_authenticity_invalid");
+      }
+      return { tail, storedHash, tailWithoutHash };
+    };
+
     const recordTerminal = async (
       terminal: ReturnType<typeof terminalForResult>,
     ) => {
@@ -390,25 +431,11 @@ export class PostgresChangeSetAuditWriter implements ChangeSetCommandAuditWriter
           event.tenantId,
           event.attemptId,
         ]);
-        const tail = parseTail(tailValue);
-        if (!tail) throw new Error("change_set_audit_tail_invalid");
-        const { eventHash: storedHash, ...tailWithoutHash } = tail;
-        if (
-          tail.sequence !== 1 ||
-          tail.phase !== "ATTEMPT_STARTED" ||
-          tail.attemptId !== event.attemptId ||
-          tail.tenantId !== event.tenantId ||
-          !secureHashEqual(
-            storedHash,
-            eventHash(this.fingerprintKey, tailWithoutHash),
-          )
-        ) {
-          throw new Error("change_set_audit_tail_authenticity_invalid");
-        }
+        const { tail, storedHash, tailWithoutHash } = authenticTail(tailValue);
         const terminalEvent = this.buildEvent({
           ...tailWithoutHash,
           id: this.freshUuidV7(),
-          sequence: 2,
+          sequence: tail.sequence + 1,
           changeSetId: terminal.changeSetId,
           phase: "TERMINAL",
           outcome: terminal.outcome,
@@ -422,10 +449,40 @@ export class PostgresChangeSetAuditWriter implements ChangeSetCommandAuditWriter
       });
     };
 
+    const recordCommitOutcomeUnknown = async () => {
+      await this.transaction(event.tenantId, async (client) => {
+        const tailValue = await this.rpc<unknown>(client, "load_attempt_tail", [
+          event.tenantId,
+          event.attemptId,
+        ]);
+        const { tail, storedHash, tailWithoutHash } = authenticTail(tailValue);
+        if (tail.phase === "RECONCILIATION") return;
+        const pendingEvent = this.buildEvent({
+          ...tailWithoutHash,
+          id: this.freshUuidV7(),
+          sequence: 2,
+          changeSetId: null,
+          phase: "RECONCILIATION",
+          outcome: "PENDING",
+          reasonCode: "COMMIT_OUTCOME_UNKNOWN",
+          previousHash: storedHash,
+        });
+        await this.rpc<void>(client, "append_event", [
+          event.tenantId,
+          JSON.stringify(pendingEvent),
+        ]);
+      });
+    };
+
     return Object.freeze({
+      attemptId,
       recordResult: async (result: ChangeSetCommandResult) => {
         await recordTerminal(terminalForResult(result));
       },
+      recordReconciledResult: async (result: ChangeSetCommandResult) => {
+        await recordTerminal(reconciledTerminalForResult(result));
+      },
+      recordCommitOutcomeUnknown,
       recordUnexpectedError: async () => {
         await recordTerminal({
           changeSetId: null,

@@ -9,6 +9,8 @@ import {
   type VerifiedActiveTenantContext,
 } from "../src/lib/activeTenantContext.js";
 import {
+  ChangeSetCommitOutcomeUnknownError,
+  ChangeSetCommitReconciliationPendingError,
   executeCreateR1ChangeSetCommand,
   executeTransitionR1ChangeSetCommand,
   type AccessDecisionReceiptInsert,
@@ -469,6 +471,33 @@ class MemoryStore implements ChangeSetCommandStore {
     this.drafts = drafts;
     this.consumedEvidenceIds = consumedEvidenceIds;
     this.events.push(...events);
+    return result;
+  }
+}
+
+class CommitAcknowledgementLossStore extends MemoryStore {
+  transactionCalls = 0;
+
+  constructor(
+    stateResolver: (
+      context: VerifiedActiveTenantContext,
+    ) => ResolvedActiveContextState,
+    assurance: MutationAssurance,
+    private acknowledgementsToLose: number,
+  ) {
+    super(stateResolver, assurance);
+  }
+
+  override async transaction<T>(
+    context: VerifiedActiveTenantContext,
+    operation: (transaction: ChangeSetCommandTransaction) => Promise<T>,
+  ): Promise<T> {
+    this.transactionCalls += 1;
+    const result = await super.transaction(context, operation);
+    if (this.acknowledgementsToLose > 0) {
+      this.acknowledgementsToLose -= 1;
+      throw new ChangeSetCommitOutcomeUnknownError();
+    }
     return result;
   }
 }
@@ -1432,6 +1461,8 @@ test("legacy branch create and transition scopes stay closed until composite bin
 class MemoryAuditWriter implements ChangeSetCommandAuditWriter {
   starts: ChangeSetCommandAuditStart[] = [];
   results: ChangeSetCommandResult[] = [];
+  reconciledResults: ChangeSetCommandResult[] = [];
+  commitOutcomesUnknown = 0;
   unexpectedErrors = 0;
   failStart = false;
 
@@ -1441,8 +1472,15 @@ class MemoryAuditWriter implements ChangeSetCommandAuditWriter {
     if (this.failStart) throw new Error("audit_start_failed");
     this.starts.push(structuredClone(input));
     return {
+      attemptId: ID.makerContext,
       recordResult: async (result) => {
         this.results.push(structuredClone(result));
+      },
+      recordReconciledResult: async (result) => {
+        this.reconciledResults.push(structuredClone(result));
+      },
+      recordCommitOutcomeUnknown: async () => {
+        this.commitOutcomesUnknown += 1;
       },
       recordUnexpectedError: async () => {
         this.unexpectedErrors += 1;
@@ -1531,6 +1569,89 @@ test("durable audit records unexpected command errors and preserves the original
   assert.equal(auditWriter.starts.length, 1);
   assert.equal(auditWriter.unexpectedErrors, 1);
   assert.deepEqual(auditWriter.results, []);
+});
+
+test("ambiguous commit acknowledgement is resolved by one canonical idempotent replay", async () => {
+  const context = verifiedContext("maker");
+  const store = new CommitAcknowledgementLossStore(
+    (active) => resolvedState(active, ["control_plane.flag.create"]),
+    { impersonating: false, stepUpSatisfied: false, stepUpReceiptId: null },
+    1,
+  );
+  const auditWriter = new MemoryAuditWriter();
+  const result = await executeCreateR1ChangeSetCommand({
+    context,
+    command: createCommand("create:ambiguous-commit:0001"),
+    dependencies: {
+      store,
+      auditWriter,
+      nextUuidV7: idFactory(560),
+      now: () => NOW,
+    },
+  });
+
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.replayed, true);
+  assert.equal(store.transactionCalls, 2);
+  assert.equal(store.changes.size, 1);
+  assert.deepEqual(auditWriter.results, []);
+  assert.deepEqual(auditWriter.reconciledResults, [result]);
+  assert.equal(auditWriter.commitOutcomesUnknown, 0);
+  assert.equal(auditWriter.unexpectedErrors, 0);
+});
+
+test("unresolved ambiguous commit remains non-terminal and exposes its audit attempt", async () => {
+  const context = verifiedContext("maker");
+  const store = new CommitAcknowledgementLossStore(
+    (active) => resolvedState(active, ["control_plane.flag.create"]),
+    { impersonating: false, stepUpSatisfied: false, stepUpReceiptId: null },
+    2,
+  );
+  const auditWriter = new MemoryAuditWriter();
+
+  await assert.rejects(
+    executeCreateR1ChangeSetCommand({
+      context,
+      command: createCommand("create:ambiguous-pending:0001"),
+      dependencies: {
+        store,
+        auditWriter,
+        nextUuidV7: idFactory(580),
+        now: () => NOW,
+      },
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof ChangeSetCommitReconciliationPendingError);
+      assert.equal(error.attemptId, ID.makerContext);
+      return true;
+    },
+  );
+  assert.equal(store.transactionCalls, 2);
+  assert.equal(store.changes.size, 1);
+  assert.equal(auditWriter.commitOutcomesUnknown, 1);
+  assert.deepEqual(auditWriter.results, []);
+  assert.deepEqual(auditWriter.reconciledResults, []);
+  assert.equal(auditWriter.unexpectedErrors, 0);
+});
+
+test("0061 permits only typed pending and reconciled commit audit states", () => {
+  const migration = readFileSync(
+    new URL(
+      "../../../lib/db/drizzle/0061_change_set_commit_reconciliation.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(migration, /LOCK TABLE public\.change_set_command_audit_events IN ACCESS EXCLUSIVE MODE/);
+  assert.match(
+    migration,
+    /phase = 'RECONCILIATION'[\s\S]+outcome = 'PENDING'[\s\S]+reason_code = 'COMMIT_OUTCOME_UNKNOWN'/,
+  );
+  assert.match(
+    migration,
+    /reason_code IN \('COMMAND_COMPLETED', 'COMMAND_RECONCILED'\)/,
+  );
+  assert.doesNotMatch(migration, /GRANT EXECUTE|CREATE ROLE|CREATE USER/);
 });
 
 test("0060 durable audit adapter is tenant-bound, append-only, and default-unwired", () => {

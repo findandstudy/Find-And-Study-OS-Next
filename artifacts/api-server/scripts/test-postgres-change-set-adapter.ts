@@ -60,6 +60,7 @@ const ID = {
   createCommand: "018f5000-0000-7000-8000-00000000000b",
   createAccess: "018f5000-0000-7000-8000-00000000000c",
   changeSet: "018f5000-0000-7000-8000-00000000000d",
+  createReplayCommand: "018f5000-0000-7000-8000-000000000018",
   evidencePrincipal: "018f3000-0000-7000-8000-000000000211",
   evidenceGrant: "018f5000-0000-7000-8000-00000000000f",
   evidenceRequest: "018f5000-0000-7000-8000-000000000010",
@@ -68,6 +69,7 @@ const ID = {
   transitionAccess: "018f5000-0000-7000-8000-000000000013",
   transitionReceipt: "018f5000-0000-7000-8000-000000000014",
   rollbackProbe: "018f5000-0000-7000-8000-000000000015",
+  createReplayAccess: "018f5000-0000-7000-8000-000000000019",
 } as const;
 
 const NOW = Date.now();
@@ -484,6 +486,26 @@ function uuidFactory(values: readonly string[]) {
   };
 }
 
+function loseFirstCommitAcknowledgement(pool: pg.Pool): pg.Pool {
+  let loseAcknowledgement = true;
+  return {
+    connect: async () => {
+      const client = await pool.connect();
+      return {
+        query: async (text: string, values?: unknown[]) => {
+          const result = await client.query(text, values as never[] | undefined);
+          if (loseAcknowledgement && text === "COMMIT") {
+            loseAcknowledgement = false;
+            throw new Error("simulated_commit_acknowledgement_loss");
+          }
+          return result;
+        },
+        release: (error?: boolean | Error) => client.release(error),
+      } as unknown as pg.PoolClient;
+    },
+  } as unknown as pg.Pool;
+}
+
 function evidenceSigner(): ChangeSetEvidenceSigner {
   return {
     issuerId: evidenceIssuerId,
@@ -523,7 +545,7 @@ async function main() {
   try {
     const evidenceFailures: string[] = [];
     let storeNow = NOW;
-    const store = new PostgresChangeSetCommandStore(executorPool, {
+    const storeOptions = {
       expectedRole: ROLE.commandExecutor,
       expectedEnvironmentId: "test-ci",
       expectedCellId: "cell-a",
@@ -533,18 +555,23 @@ async function main() {
         stepUpSatisfied: false,
         stepUpReceiptId: null,
       }),
-      onEvidenceVerificationFailure: (reason) => evidenceFailures.push(reason),
-    });
+      onEvidenceVerificationFailure: (reason: string) =>
+        evidenceFailures.push(reason),
+    };
+    const contextTestStore = new PostgresChangeSetCommandStore(
+      executorPool,
+      storeOptions,
+    );
     const context = verifiedContext();
     await mustFail(
       () =>
-        store.transaction(
+        contextTestStore.transaction(
           { ...context } as VerifiedActiveTenantContext,
           async () => undefined,
         ),
       /transaction_context_unverified/,
     );
-    await store.transaction(context, async (transaction) => {
+    await contextTestStore.transaction(context, async (transaction) => {
       assert.equal("setLocalTenant" in transaction, false);
       await mustFail(
         () =>
@@ -575,6 +602,10 @@ async function main() {
       );
       storeNow = NOW;
     });
+    const store = new PostgresChangeSetCommandStore(
+      loseFirstCommitAcknowledgement(executorPool),
+      storeOptions,
+    );
     const created = await executeCreateR1ChangeSetCommand({
       context,
       command: {
@@ -588,12 +619,18 @@ async function main() {
       dependencies: {
         store,
         now: () => NOW,
-        nextUuidV7: uuidFactory([ID.createCommand, ID.createAccess, ID.changeSet]),
+        nextUuidV7: uuidFactory([
+          ID.createCommand,
+          ID.createAccess,
+          ID.changeSet,
+          ID.createReplayCommand,
+          ID.createReplayAccess,
+        ]),
       },
     });
     assert.deepEqual(created, {
       ok: true,
-      replayed: false,
+      replayed: true,
       result: {
         changeSetId: ID.changeSet,
         status: "DRAFT",
@@ -872,7 +909,7 @@ async function main() {
     await Promise.all([executorPool.end(), issuerPool.end()]);
   }
   console.log(
-    "[postgres-adapter-gate] PASS: EXECUTE-only roles, real command store, signed evidence, replay, rollback, and pool cleanup",
+    "[postgres-adapter-gate] PASS: EXECUTE-only roles, real command store, ambiguous-commit replay, signed evidence, rollback, and pool cleanup",
   );
 }
 

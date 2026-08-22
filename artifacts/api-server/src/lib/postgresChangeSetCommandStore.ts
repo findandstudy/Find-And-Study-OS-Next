@@ -6,6 +6,7 @@ import {
   type ResolvedActiveContextState,
   type VerifiedActiveTenantContext,
 } from "./activeTenantContext";
+import { ChangeSetCommitOutcomeUnknownError } from "./changeSetCommand";
 import type {
   AccessDecisionReceiptInsert,
   AuthoritativeR1Configuration,
@@ -566,8 +567,17 @@ export class PostgresChangeSetCommandStore implements ChangeSetCommandStore {
         context,
       );
       const result = await operation(tx);
-      await client.query("COMMIT");
-      transactionStarted = false;
+      try {
+        await client.query("COMMIT");
+        transactionStarted = false;
+      } catch (commitError) {
+        transactionStarted = false;
+        releaseWithError =
+          commitError instanceof Error
+            ? commitError
+            : new Error("change_set_commit_failed");
+        throw new ChangeSetCommitOutcomeUnknownError();
+      }
       return result;
     } catch (error) {
       const normalized =
