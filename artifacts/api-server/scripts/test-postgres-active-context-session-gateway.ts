@@ -651,7 +651,7 @@ async function main() {
         now: () => NOW,
       });
     const result = await issueGateway();
-    assert.equal(result.ok, true);
+    assert.equal(result.ok, true, result.ok ? undefined : JSON.stringify(result));
     if (!result.ok) throw new Error(`gateway_denied_${result.reason}`);
     assert.equal(result.rateLimitPermitId.length, 36);
 
