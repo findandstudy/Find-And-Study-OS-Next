@@ -404,6 +404,14 @@ IDs, request bodies, or free-form errors. This migration and adapter are still
 default-unwired and require a fresh PostgreSQL 16 grant/RLS/transition/race
 run before they can be considered an integration result.
 
+The pure `ActiveContextSelectionConsumptionRepairWorker` now claims a bounded
+pending attempt, reads a stored outcome only, reconciles by result hash, and
+never replays the business mutation. `NOT_FOUND`/`IN_PROGRESS` outcomes are
+rescheduled within a maximum attempt budget; malformed or exhausted outcomes
+escalate through a fixed error reason. The worker has no scheduler registration
+and no production credentials; a PostgreSQL repair-job queue and worker
+bootstrap remain a separate gate.
+
 Selection lifecycle CI does not authorize runtime wiring. Migration 0066 and
 the gateway candidate bind newly issued token version 2 to the exact
 `selectionId` plus `sessionGeneration`; legacy version-1 tokens remain
