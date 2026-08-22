@@ -605,7 +605,14 @@ test("gateway deadline failure discards the permit before resolver access", asyn
 });
 
 test("gateway remains absent from every application and route registration module", () => {
-  const sourceRoot = path.resolve("artifacts/api-server/src");
+  const sourceRoots = [
+    path.resolve("src"),
+    path.resolve("artifacts/api-server/src"),
+  ].filter((candidate) =>
+    fs.existsSync(path.join(candidate, "routes")),
+  );
+  assert.equal(sourceRoots.length, 1, "expected one API source root");
+  const sourceRoot = sourceRoots[0];
   const candidates = [
     path.join(sourceRoot, "app.ts"),
     path.join(sourceRoot, "index.ts"),
