@@ -390,8 +390,9 @@ This foundation does not yet deliver:
   credential;
 - production command-executor/evidence-issuer role bootstrap and credentials;
 - production evidence/audit/active-context KMS/HSM key custody and rotation,
-  authoritative active-context subject resolution, scheduled repair activation,
-  tenant-dispatch ownership/alerting, and HTTP authentication/session extraction;
+  a PostgreSQL authoritative active-context resolver adapter, scheduled repair
+  activation, tenant-dispatch ownership/alerting, and HTTP
+  authentication/session extraction;
 - runtime adoption/backfill of the tenant/organization/legacy-branch map;
 - persistent environment grants for separated migrator and runtime application
   database roles;
@@ -414,10 +415,10 @@ durable-audit, request-context-bound transaction, ambiguous-commit,
 query-cancellation, membership/policy revocation, evidence-key compromise,
 exact tenant-grant, global issuer revocation, CREATE write-boundary rollback,
 and scheduled receipt-only repair workflows described in
-`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on active-context-key-ring
-implementation head `5e6b9bf31ca7b9c6bbaab7863ededebad63bc9c8`
-(foundation run `32550545344`, adapter run `32550545491`, durable-audit and
-scheduled-repair run `32550545342`, and G0 Linux/Windows run `32550545348`).
+`CHANGE_SET_POSTGRES_INTEGRATION_GATE.md` are green on authoritative-issuance
+implementation head `d0c049fd2d14ba92b773913619ee4c6c3123ffb8`
+(foundation run `32551335015`, adapter run `32551335012`, durable-audit and
+scheduled-repair run `32551335113`, and G0 Linux/Windows run `32551335019`).
 The request binder proves exact tenant, principal, membership, organization,
 branch, policy, context-id, and expiry agreement. The v2 envelope additionally
 binds `kid`, Ed25519 algorithm, audience, environment/cell, issuer, token
@@ -426,15 +427,22 @@ version, not-before, expiry, and tenant scope. `ACTIVE` and bounded
 revoked, compromised, malformed, or tampered tokens fail closed. Signing
 material is represented only by an opaque KMS/HSM reference; CI uses an
 ephemeral process-memory key and production mode rejects that test reference.
+The authoritative issuance orchestrator accepts only authenticated principal
+plus server-branded tenant/organization/branch identity. Membership,
+assignment set, policy, context ID, and timestamps come from a locked repository,
+UUID source, and clock. Client field injection, inactive state, repository
+contract drift, resolver/signing timeout, and revoke-first execution fail before
+a token can escape.
 
-The next safe slice is a default-unwired authoritative issuance orchestrator.
-It must accept only authenticated principal plus server-branded tenant,
-organization, and branch identity; resolve current membership, assignment set,
-policy version, and tenant state from a repository; generate the context ID and
-timestamps server-side; and pass that immutable subject to the v2 issuer.
-Client-provided membership, assignment, policy, issuer, key, timestamps, or
-scope expansion must be impossible. Suspend/revoke/policy-rotation races and
-resolver timeout must fail before signing. No scheduler, HTTP route, Super
-Admin UI, or production credential may be connected before required checks,
-production role/bootstrap review, and independent approval exist. Publisher
-and configuration materialization adapters remain separate and default-off.
+The next safe slice is a default-unwired PostgreSQL implementation of that
+authoritative resolver. It must use a dedicated read/lock-only credential and a
+fixed-search-path facade or exact parameterized queries; set tenant context
+transaction-locally; lock tenant, principal, membership, current policy, and
+the exact assignment set in a documented order; and keep the lock until signer
+completion. Issuance-first and revoke/policy-rotation-first races, pool reuse,
+query cancellation, timeout, cross-tenant/branch lookup, duplicate membership,
+and connection loss must be proven on disposable PostgreSQL. No generic table
+DML, scheduler, HTTP route, Super Admin UI, or production credential may be
+connected before required checks, production role/bootstrap review, and
+independent approval exist. Publisher and configuration materialization
+adapters remain separate and default-off.

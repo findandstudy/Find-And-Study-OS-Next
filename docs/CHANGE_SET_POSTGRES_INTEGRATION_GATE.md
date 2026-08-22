@@ -213,10 +213,10 @@ valid completed receipt resumes the existing HMAC chain as
 terminal error plus explicit operational escalation. Invalid identity or
 result hashes fail closed. The scheduler entrypoint remains unwired.
 
-All checks passed on active-context-key-ring implementation head
-`5e6b9bf31ca7b9c6bbaab7863ededebad63bc9c8`: foundation run `32550545344`,
-command/evidence adapter run `32550545491`, durable-audit and scheduled-repair
-run `32550545342`, and G0 Linux/Windows run `32550545348`. The checks are not
+All checks passed on authoritative-active-context-issuance implementation head
+`d0c049fd2d14ba92b773913619ee4c6c3123ffb8`: foundation run `32551335015`,
+command/evidence adapter run `32551335012`, durable-audit and scheduled-repair
+run `32551335113`, and G0 Linux/Windows run `32551335019`. The checks are not
 yet required by a repository ruleset. Two earlier scheduled-reconciliation
 candidate runs correctly failed because the foundation harness retained the
 prior 62-migration denominator in its main and atomic-rollback assertions; both
@@ -241,8 +241,16 @@ fall back to the legacy HMAC verifier. Private signing material is not present
 in the key ring or token; only an opaque signer reference crosses the issuance
 boundary, and the process-memory test signer is denied in production mode.
 
-The adapter candidate still does not cover authoritative DB-backed issuance
-subject resolution, HTTP authentication/session extraction, direct
+The authoritative issuance orchestrator narrows its request to authenticated
+principal and server-branded tenant/organization/branch. Membership,
+assignment set, policy version, context ID, and timestamps are generated from
+the locked repository callback, UUID source, and clock. Exact runtime state,
+callback exactly-once, returned-token identity, resolver/signing budget,
+client-field injection, inactive/revoked state, and issuance-first/revoke-first
+ordering are covered without an HTTP route.
+
+The adapter candidate still does not cover a real PostgreSQL implementation of
+that locked resolver, HTTP authentication/session extraction, direct
 command-credential compromise, scheduled repair activation and alert delivery,
 production KMS/HSM key custody/rotation, or decision/step-up paths. Those gaps
 keep runtime wiring at NO-GO.
