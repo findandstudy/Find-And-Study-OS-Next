@@ -1,0 +1,73 @@
+{
+  "specVersion": 2,
+  "meta": {
+    "key": "multico",
+    "name": "Multico CRM — Live Mapped 2026-07-26",
+    "baseUrl": "https://www.multico.com.tr",
+    "panelUrl": "https://www.multico.com.tr/crm/",
+    "matches": ["multico"],
+    "experimental": true,
+    "resolution": "fallback",
+    "dryRunPolicy": "strict"
+  },
+  "auth": {
+    "loginUrl": "https://www.multico.com.tr/crm/login",
+    "loginSteps": [
+      {"action": "fill", "selector": "input[name=email], input[type=email]", "valueFrom": "profile.email"},
+      {"action": "fill", "selector": "input[name=password], input[type=password]", "valueFrom": "profile.passportNumber"},
+      {"action": "click", "selector": "button[type=submit], input[type=submit]", "requireUnique": true}
+    ],
+    "successUrlContains": "/crm/"
+  },
+  "steps": [
+    {"action": "navigate", "url": "https://www.multico.com.tr/crm/students/add"},
+    {"action": "fill", "selector": "input[name=name]", "valueFrom": "profile.firstName", "readback": {"source": "value", "comparison": "exact", "rejectAriaInvalid": true}},
+    {"action": "fill", "selector": "input[name=surname]", "valueFrom": "profile.lastName", "readback": {"source": "value", "comparison": "exact", "rejectAriaInvalid": true}},
+    {"action": "fill", "selector": "input[name=passport_number]", "valueFrom": "profile.passportNumber", "readback": {"source": "value", "comparison": "exact", "rejectAriaInvalid": true}},
+    {"action": "fill", "selector": "input[name=phone]", "valueFrom": "profile.phone", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+    {"action": "fill", "selector": "input[name=email]", "valueFrom": "profile.email", "readback": {"source": "value", "comparison": "exact", "rejectAriaInvalid": true}},
+    {"action": "fill", "selector": "input[name=mother_name]", "valueFrom": "profile.motherName", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+    {"action": "fill", "selector": "input[name=father_name]", "valueFrom": "profile.fatherName", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+    {"action": "fill", "selector": "input[name=dob]", "valueFrom": "profile.dateOfBirth", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+    {"action": "fill", "selector": "input[name=address]", "valueFrom": "profile.address", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+    {"action": "selectLabel", "selector": "select[name=residence_country]", "valueFrom": "profile.nationality", "readback": {"source": "selectedLabel", "comparison": "folded", "rejectAriaInvalid": true}},
+    {"action": "selectLabel", "selector": "select[name=nationality_id]", "valueFrom": "profile.nationality", "readback": {"source": "selectedLabel", "comparison": "folded", "rejectAriaInvalid": true}},
+    {"action": "fill", "selector": "input[name=school_name]", "valueFrom": "profile.schoolName", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+    {"action": "selectLabel", "selector": "select[name=graduate_year]", "valueFrom": "profile.graduationYear", "readback": {"source": "selectedLabel", "comparison": "trimmed", "rejectAriaInvalid": true}},
+    {"action": "fill", "selector": "input[name=schoolGPA]", "valueFrom": "profile.gpa", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+    {"action": "upload", "selector": "input[name=file_passport]", "slot": "passport", "proof": {"successSelector": "input[name=file_passport]", "localFileName": true}},
+    {"action": "upload", "selector": "input[name=file_diploma]", "slot": "diploma", "proof": {"successSelector": "input[name=file_diploma]", "localFileName": true}},
+    {"action": "upload", "selector": "input[name=file_transcript]", "slot": "transcript", "proof": {"successSelector": "input[name=file_transcript]", "localFileName": true}},
+    {"action": "click", "selector": "button[type=submit]", "requireUnique": true, "final": true}
+  ],
+  "profilePolicy": {
+    "defaults": [
+      {"field": "fatherName", "value": "-", "reason": "multico_legacy_parent_name_policy"},
+      {"field": "motherName", "value": "-", "reason": "multico_legacy_parent_name_policy"}
+    ],
+    "required": [
+      {"field": "firstName"}, {"field": "lastName"}, {"field": "passportNumber"},
+      {"field": "email"}, {"field": "phone"}, {"field": "dateOfBirth"},
+      {"field": "gender"}, {"field": "nationality"}, {"field": "address"},
+      {"field": "level"}, {"field": "programName"}, {"field": "schoolName"},
+      {"field": "graduationYear"}
+    ]
+  },
+  "documents": {
+    "slots": {
+      "passport": {"fileField": "passport", "target": "pdf", "required": true},
+      "diploma": {"fileField": "diploma", "target": "pdf", "required": true},
+      "transcript": {"fileField": "transcript", "target": "pdf", "required": true}
+    }
+  },
+  "success": {
+    "successText": "record has been created",
+    "alreadyExistsText": "already exists",
+    "programMissingText": "program not found"
+  },
+  "outcomes": [
+    {"outcome": "alreadyExists", "detect": {"conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "already.*exists", "caseInsensitive": true}]}, "detail": "Multico duplicate proof"},
+    {"outcome": "submitted", "detect": {"conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "record has been created|successfully created|başarıyla oluşturuldu", "caseInsensitive": true}]}, "detail": "Multico create proof"},
+    {"outcome": "failure", "detect": {"conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "error|validation|required", "caseInsensitive": true}]}, "detail": "Multico validation failure"}
+  ]
+}

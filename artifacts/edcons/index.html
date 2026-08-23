@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5" />
+    <title>Find And Study — Global Education Consultancy</title>
+    <meta name="description" content="Expert guidance for university admissions, visa processing, and scholarships worldwide. Trusted by 10,000+ students across 30+ countries." />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#2563eb" />
+    <script>
+      (function () {
+        try {
+          var mode = localStorage.getItem("edcons_theme") || "light";
+          var dark = mode === "dark" || (mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.classList.toggle("dark", dark);
+          document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        } catch (_) {}
+      })();
+    </script>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="canonical" href="https://findandstudy.com/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Find And Study — Global Education Consultancy" />
+    <meta property="og:description" content="Expert guidance for university admissions, visa processing, and scholarships worldwide. Trusted by 10,000+ students across 30+ countries." />
+    <meta property="og:image" content="__SITE_BASE_URL__/opengraph.jpg" />
+    <meta property="og:url" content="__SITE_BASE_URL__/" />
+    <meta property="og:site_name" content="Find And Study" />
+    <meta property="og:locale" content="en_US" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Find And Study — Global Education Consultancy" />
+    <meta name="twitter:description" content="Expert guidance for university admissions, visa processing, and scholarships worldwide." />
+    <meta name="twitter:image" content="__SITE_BASE_URL__/opengraph.jpg" />
+
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      window.onerror = function(msg, src, line, col, err) {
+        var d = document.getElementById('root');
+        if (d && !d.children.length) {
+          d.innerHTML = '<div style="padding:40px;font-family:sans-serif"><h2 style="color:red">App Error</h2><pre style="white-space:pre-wrap;max-width:800px">' +
+            msg + '\n\nSource: ' + src + ':' + line + ':' + col +
+            (err && err.stack ? '\n\nStack:\n' + err.stack : '') + '</pre></div>';
+        }
+      };
+      window.addEventListener('unhandledrejection', function(e) {
+        var d = document.getElementById('root');
+        if (d && !d.children.length) {
+          d.innerHTML = '<div style="padding:40px;font-family:sans-serif"><h2 style="color:red">App Error (Promise)</h2><pre style="white-space:pre-wrap;max-width:800px">' +
+            (e.reason && e.reason.stack ? e.reason.stack : String(e.reason)) + '</pre></div>';
+        }
+      });
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

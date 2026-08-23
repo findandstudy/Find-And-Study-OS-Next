@@ -1,0 +1,29 @@
+{
+  "name": "@workspace/portal-runner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test:fallback": "tsx --test ./scripts/test-fallback.ts",
+    "test:exclusions": "tsx --test ./scripts/test-exclusions.ts",
+    "test:portal-evidence": "tsx --test ./scripts/test-portal-evidence.ts",
+    "test:legacy-address-city": "tsx --test ./scripts/test-legacy-address-city.ts",
+    "test:queue-reconcile-policy": "tsx --test ./scripts/test-queue-reconcile-policy.ts"
+  },
+  "dependencies": {
+    "@workspace/db": "workspace:*",
+    "@workspace/doc-equivalence": "workspace:*",
+    "@workspace/object-storage": "workspace:*",
+    "@workspace/portal-adapters": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "pdf-lib": "^1.17.1",
+    "sharp": "^0.35.2"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "catalog:"
+  }
+}

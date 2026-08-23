@@ -1,0 +1,17 @@
+User-agent: *
+Allow: /
+Allow: /about
+Allow: /programs
+Allow: /blog
+Allow: /contact
+
+Disallow: /admin/
+Disallow: /staff/
+Disallow: /student/
+Disallow: /agent/
+Disallow: /login
+Disallow: /*/login
+Disallow: /sign/
+Disallow: /api/
+
+Sitemap: https://apply.findandstudy.com/sitemap.xml

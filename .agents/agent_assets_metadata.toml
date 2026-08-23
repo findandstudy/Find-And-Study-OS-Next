@@ -1,0 +1,14 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "mSFZeCCdhnkK6uyrNXahU"
+uri = "file://AUDIT_REPORT.md"
+type = "text"
+title = "EduConsult OS - Production Readiness Audit Report"
+
+[[outputs]]
+id = "TdMz-eMo2PpmSBci9Lv0I"
+uri = "file://docs/messages-architecture.md"
+type = "text"
+title = "Messages Modülü — Mimari Dokümantasyonu"

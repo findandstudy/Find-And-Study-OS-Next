@@ -1,0 +1,489 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1774892441789,
+      "tag": "0000_cultured_plazm",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1777244796677,
+      "tag": "0001_silly_patriot",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777664800000,
+      "tag": "0002_add_follow_ups_updated_by",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1777983400000,
+      "tag": "0003_drop_document_requirements",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1778100000000,
+      "tag": "0004_university_contracts",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778200000000,
+      "tag": "0005_university_contracts_assigned_users",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778300000000,
+      "tag": "0006_universities_assigned_staff",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1778400000000,
+      "tag": "0007_agency_assigned_staff",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1778500000000,
+      "tag": "0008_dynamic_stage_behaviors",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1778600000000,
+      "tag": "0009_soft_delete_consistency",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1778852662806,
+      "tag": "0010_staff_cards",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1779205500000,
+      "tag": "0011_pipeline_stage_actions",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1779624000000,
+      "tag": "0012_ai_extractors",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1780000000000,
+      "tag": "0013_api_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1780100000000,
+      "tag": "0014_finance_staff_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1780200000000,
+      "tag": "0015_ai_default_configs",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1780300000000,
+      "tag": "0016_portal_submissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1780400000000,
+      "tag": "0017_portal_automation_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1780500000000,
+      "tag": "0018_portal_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1780600000000,
+      "tag": "0019_portal_schema_align",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1780700000000,
+      "tag": "0020_ai_agent_bot_reply_count",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1780800000000,
+      "tag": "0021_multi_account_channel",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1780900000000,
+      "tag": "0022_portal_program_mapping_data",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1781000000000,
+      "tag": "0023_portal_multi_routing",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1781100000000,
+      "tag": "0024_portal_adapter_specs",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1781200000000,
+      "tag": "0025_portal_account_universities",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1781300000000,
+      "tag": "0026_program_fallback_supersession",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1781400000000,
+      "tag": "0027_submission_status_program_full",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1781500000000,
+      "tag": "0028_fallback_enabled",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1781600000000,
+      "tag": "0029_university_exclusions",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1781700000000,
+      "tag": "0030_submission_status_exclusive_region",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1781800000000,
+      "tag": "0031_application_main_link",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1781900000000,
+      "tag": "0032_adapter_key_on_submissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1782000000000,
+      "tag": "0033_student_education_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1782100000000,
+      "tag": "0034_altinbas_structured_address",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1782200000000,
+      "tag": "0035_task_completion_metrics",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1782300000000,
+      "tag": "0036_message_campaigns",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1782400000000,
+      "tag": "0037_spec_privileged_flag",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1782500000000,
+      "tag": "0038_adopt_runtime_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1782600000000,
+      "tag": "0039_portal_submission_terminal_statuses",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1782700000000,
+      "tag": "0040_adopt_runtime_columns_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1782800000000,
+      "tag": "0041_embed_ai_lanes",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1785900000000,
+      "tag": "0042_staff_scope_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1786000000000,
+      "tag": "0043_application_university_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1786174200000,
+      "tag": "0044_external_contact_blocking",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1786251600000,
+      "tag": "0045_contract_signing_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1786258800000,
+      "tag": "0046_contract_operations",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1786338000000,
+      "tag": "0047_multi_bot_communication_pipelines",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1786424400000,
+      "tag": "0048_application_lead_link",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1786500000000,
+      "tag": "0049_lifecycle_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1786802400000,
+      "tag": "0050_contact_type_classification",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1787047537000,
+      "tag": "0051_embed_widget_partner",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1787054400000,
+      "tag": "0052_conversation_language",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1787114400000,
+      "tag": "0053_authenticated_read_path_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1787288400000,
+      "tag": "0054_authorization_corridor_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1787292000000,
+      "tag": "0055_change_set_control_plane_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1787295600000,
+      "tag": "0056_change_set_command_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1787299200000,
+      "tag": "0057_authorization_control_plane_db_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1787302800000,
+      "tag": "0058_change_set_evidence_identity_audit_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1787306400000,
+      "tag": "0059_change_set_postgres_command_adapter",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1787310000000,
+      "tag": "0060_change_set_durable_audit_adapter",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1787313600000,
+      "tag": "0061_change_set_commit_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1787317200000,
+      "tag": "0062_change_set_scheduled_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1787320800000,
+      "tag": "0063_active_context_authoritative_resolver",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1787324400000,
+      "tag": "0064_active_context_session_gateway",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1787328000000,
+      "tag": "0065_active_context_selection_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1787331600000,
+      "tag": "0066_active_context_selection_binding",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1787335200000,
+      "tag": "0067_active_context_selection_consumption",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1787338800000,
+      "tag": "0068_active_context_selection_consumption_attempts",
+      "breakpoints": true
+    }
+  ]
+}

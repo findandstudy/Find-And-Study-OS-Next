@@ -1,0 +1,41 @@
+kind = "web"
+previewPath = "/"
+title = "Find And Study OS"
+version = "1.0.0"
+id = "artifacts/edcons"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+localPort = 25197
+name = "web"
+paths = ["/"]
+
+[services.development]
+run = "pnpm --filter @workspace/edcons run dev"
+
+[services.env]
+PORT = "25197"
+BASE_PATH = "/"
+
+[services.production]
+build = ["pnpm", "--filter", "@workspace/edcons", "run", "build"]
+publicDir = "artifacts/edcons/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[[services.production.headers]]
+path = "/index.html"
+[services.production.headers.values]
+"Cache-Control" = "no-cache, no-store, must-revalidate"
+
+[[services.production.headers]]
+path = "/assets/*"
+[services.production.headers.values]
+"Cache-Control" = "public, max-age=31536000, immutable"

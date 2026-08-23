@@ -1,0 +1,142 @@
+{
+  "specVersion": 2,
+  "meta": {
+    "key": "isik",
+    "name": "Işık University Salesforce Flow — Live Mapped 2026-07-26",
+    "baseUrl": "https://isikuniversity.my.site.com",
+    "panelUrl": "https://isikuniversity.my.site.com/agency/s/",
+    "matches": ["isik", "ışık"],
+    "experimental": true,
+    "resolution": "fallback",
+    "dryRunPolicy": "strict"
+  },
+  "auth": {
+    "loginUrl": "https://isikuniversity.my.site.com/agency/s/",
+    "loginSteps": [
+      {"action": "fill", "selector": "input[type=email], input[name*=email i], input[id*=email i], input[type=text]", "valueFrom": "profile.email"},
+      {"action": "fill", "selector": "input[type=password]", "valueFrom": "profile.passportNumber"},
+      {"action": "clickRole", "role": "button", "name": "Login", "exact": false}
+    ],
+    "successUrlContains": "/agency/s/"
+  },
+  "steps": [{"action": "navigate", "url": "https://isikuniversity.my.site.com/agency/s/application-form"}],
+  "workflow": {
+    "maxTransitions": 14,
+    "stableReads": 2,
+    "settleMs": 300,
+    "states": [
+      {
+        "id": "term",
+        "detect": {"conditions": [{"source": "selectorVisible", "selector": "input[name=eduhubPicklistOptions]", "operator": "exists"}]},
+        "steps": [
+          {"action": "clickCardByText", "text": "Fall 2026-2027", "containerHint": "label"},
+          {"action": "clickRole", "role": "button", "name": "Next", "exact": true}
+        ],
+        "transitions": [
+          {"to": "applicant", "conditions": [{"source": "selectorVisible", "selector": "input[name=Student_First_Name], input[name=First_Name]", "operator": "exists"}]},
+          {"to": "programs", "conditions": [{"source": "selectorVisible", "selector": "input[placeholder*='Search Program' i], input[placeholder*='keyword' i]", "operator": "exists"}]}
+        ],
+        "maxRetries": 2
+      },
+      {
+        "id": "applicant",
+        "detect": {"conditions": [{"source": "selectorVisible", "selector": "input[name=Student_First_Name], input[name=First_Name]", "operator": "exists"}]},
+        "steps": [
+          {"action": "fill", "selector": "input[name=Student_First_Name], input[name=First_Name]", "valueFrom": "profile.firstName"},
+          {"action": "fill", "selector": "input[name=Student_Last_Name], input[name=Last_Name]", "valueFrom": "profile.lastName"},
+          {"action": "fill", "selector": "input[name=Student_Passport_Number], input[name*=Passport i]", "valueFrom": "profile.passportNumber"},
+          {"action": "fill", "selector": "input[type=email], input[placeholder='you@example.com']", "valueFrom": "profile.email"},
+          {"action": "lookup", "ariaLabel": "Citizenship", "valueFrom": "profile.nationality"},
+          {"action": "clickRole", "role": "button", "name": "Next", "exact": true}
+        ],
+        "transitions": [{"to": "programs", "conditions": [{"source": "selectorVisible", "selector": "input[placeholder*='Search Program' i], input[placeholder*='keyword' i]", "operator": "exists"}]}],
+        "maxRetries": 2
+      },
+      {
+        "id": "programs",
+        "detect": {"conditions": [{"source": "selectorVisible", "selector": "input[placeholder*='Search Program' i], input[placeholder*='keyword' i]", "operator": "exists"}]},
+        "steps": [
+          {"action": "fill", "selector": "input[placeholder*='Search Program' i], input[placeholder*='keyword' i]", "valueFrom": "profile.programName"},
+          {"action": "clickCardByText", "textFrom": "profile.programName", "containerHint": "lightning-card, article, li"},
+          {"action": "clickRole", "role": "button", "name": "Selected Programs", "exact": false},
+          {"action": "clickRole", "role": "button", "name": "Save and Next", "exact": false}
+        ],
+        "transitions": [{"to": "personal", "conditions": [{"source": "selectorVisible", "selector": "select[name=Gender]", "operator": "exists"}]}],
+        "maxRetries": 2
+      },
+      {
+        "id": "personal",
+        "detect": {"conditions": [{"source": "selectorVisible", "selector": "select[name=Gender]", "operator": "exists"}]},
+        "steps": [
+          {"action": "fill", "selector": "input[name=First_Name]", "valueFrom": "profile.firstName"},
+          {"action": "fill", "selector": "input[name=Last_Name]", "valueFrom": "profile.lastName"},
+          {"action": "selectLabel", "selector": "select[name=Gender]", "valueFrom": "profile.gender"},
+          {"action": "selectLabel", "selector": "select[name=Citizenship]", "valueFrom": "profile.nationality"},
+          {"action": "selectLabel", "selector": "select[name=Country_of_Residence]", "valueFrom": "profile.nationality"},
+          {"action": "fill", "selector": "input[name*=Date_of_Birth i], input[name*=birth i]", "valueFrom": "profile.dateOfBirth"},
+          {"action": "fill", "selector": "input[name=MobilePhone_Text]", "valueFrom": "profile.phone"},
+          {"action": "fill", "selector": "input[name=Address]", "valueFrom": "profile.address"},
+          {"action": "fill", "selector": "input[name=City]", "valueFrom": "profile.addressCity"},
+          {"action": "clickRole", "role": "button", "name": "Next", "exact": true}
+        ],
+        "transitions": [{"to": "education", "conditions": [{"source": "selectorVisible", "selector": "select[name=Country_of_Secondary_School]", "operator": "exists"}]}],
+        "maxRetries": 2
+      },
+      {
+        "id": "education",
+        "detect": {"conditions": [{"source": "selectorVisible", "selector": "select[name=Country_of_Secondary_School]", "operator": "exists"}]},
+        "steps": [
+          {"action": "fill", "selector": "input[name=Name_of_Secondary_School]", "valueFrom": "profile.schoolName"},
+          {"action": "selectLabel", "selector": "select[name=Country_of_Secondary_School]", "valueFrom": "profile.nationality"},
+          {"action": "fill", "selector": "input[name=GPA_of_Secondary_School]", "valueFrom": "profile.gpa"},
+          {"action": "clickRole", "role": "button", "name": "Next", "exact": true}
+        ],
+        "transitions": [{"to": "documents", "conditions": [{"source": "selectorVisible", "selector": "input[type=file]", "operator": "exists"}]}],
+        "maxRetries": 2
+      },
+      {
+        "id": "documents",
+        "detect": {"conditions": [{"source": "selectorVisible", "selector": "input[type=file]", "operator": "exists"}]},
+        "steps": [
+          {"action": "upload", "selector": "input[type=file]", "slot": "diploma", "proof": {"responseUrlContains": "/sfsites/aura", "timeoutMs": 60000}},
+          {"action": "upload", "selector": "input[type=file]", "slot": "transcript", "proof": {"responseUrlContains": "/sfsites/aura", "timeoutMs": 60000}},
+          {"action": "upload", "selector": "input[type=file]", "slot": "passport", "proof": {"responseUrlContains": "/sfsites/aura", "timeoutMs": 60000}},
+          {"action": "clickRole", "role": "button", "name": "Next", "exact": true}
+        ],
+        "transitions": [{"to": "review", "conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "review and submit|not submitted yet|please review", "caseInsensitive": true}]}],
+        "maxRetries": 2
+      },
+      {
+        "id": "review",
+        "detect": {"conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "review and submit|not submitted yet|please review", "caseInsensitive": true}]},
+        "steps": [{"action": "clickRole", "role": "button", "name": "Submit", "exact": false, "final": true}],
+        "transitions": [],
+        "terminal": true,
+        "maxRetries": 0
+      }
+    ]
+  },
+  "profilePolicy": {
+    "defaults": [],
+    "required": [
+      {"field": "firstName"}, {"field": "lastName"}, {"field": "passportNumber"}, {"field": "email"},
+      {"field": "dateOfBirth"}, {"field": "gender"}, {"field": "nationality"}, {"field": "address"},
+      {"field": "addressCity"}, {"field": "phone"}, {"field": "level"}, {"field": "programName"},
+      {"field": "schoolName"}, {"field": "gpa"}
+    ]
+  },
+  "documents": {
+    "slots": {
+      "diploma": {"fileField": "diploma", "target": "pdf", "required": true},
+      "transcript": {"fileField": "transcript", "target": "pdf", "required": true},
+      "passport": {"fileField": "passport", "target": "pdf", "required": true}
+    }
+  },
+  "success": {"successText": "application number", "alreadyExistsText": "already exists", "programMissingText": "program not found"},
+  "outcomes": [
+    {"outcome": "alreadyExists", "detect": {"conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "already an application|already exists", "caseInsensitive": true}]}, "detail": "Işık duplicate proof"},
+    {"outcome": "submitted", "detect": {"conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "application number|success|submitted", "caseInsensitive": true}]}, "detail": "Işık submission proof"},
+    {"outcome": "programMissing", "detect": {"conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "program not found|no available programs", "caseInsensitive": true}]}, "detail": "Işık program missing"},
+    {"outcome": "failure", "detect": {"conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "error|validation|required", "caseInsensitive": true}]}, "detail": "Işık validation failure"}
+  ]
+}

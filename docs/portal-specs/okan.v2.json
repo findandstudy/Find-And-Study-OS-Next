@@ -1,0 +1,162 @@
+{
+  "specVersion": 2,
+  "meta": {
+    "key": "okan",
+    "name": "Istanbul Okan — Live Mapped 2026-07-26",
+    "baseUrl": "https://apply.okan.edu.tr",
+    "panelUrl": "https://apply.okan.edu.tr/Agency/Home",
+    "matches": ["okan"],
+    "experimental": true,
+    "resolution": "fallback",
+    "dryRunPolicy": "strict"
+  },
+  "auth": {
+    "loginUrl": "https://apply.okan.edu.tr/Agency/Login",
+    "loginSteps": [
+      {"action": "fill", "selector": "#agencyEmail", "valueFrom": "profile.email"},
+      {"action": "fill", "selector": "#agencyPassword", "valueFrom": "profile.passportNumber"},
+      {"action": "click", "selector": "#login", "requireUnique": true}
+    ],
+    "successUrlContains": "/Agency/"
+  },
+  "steps": [
+    {"action": "navigate", "url": "https://apply.okan.edu.tr/agency/ApplicationWizard"}
+  ],
+  "workflow": {
+    "maxTransitions": 10,
+    "stableReads": 2,
+    "settleMs": 200,
+    "states": [
+      {
+        "id": "term",
+        "detect": {"conditions": [{"source": "selectorText", "selector": "h3", "operator": "contains", "value": "Please Select the Term"}]},
+        "steps": [
+          {"action": "clickCardByText", "textFrom": "profile.intakeTerm", "containerHint": ".image-container"},
+          {"action": "clickRole", "role": "button", "name": "Next", "exact": true}
+        ],
+        "transitions": [{"to": "degree", "conditions": [{"source": "selectorText", "selector": "h3", "operator": "contains", "value": "Please Select the Degree"}]}],
+        "maxRetries": 2
+      },
+      {
+        "id": "degree",
+        "detect": {"conditions": [{"source": "selectorText", "selector": "h3", "operator": "contains", "value": "Please Select the Degree"}]},
+        "steps": [
+          {"action": "radio", "valueFrom": "profile.level", "map": {"Associate": ".image-container[data-value='1']", "Bachelor": ".image-container[data-value='2']", "Master": ".image-container[data-value='3']", "PhD": ".image-container[data-value='4']", "Doctorate": ".image-container[data-value='4']"}},
+          {"action": "clickRole", "role": "button", "name": "Next", "exact": true}
+        ],
+        "transitions": [{"to": "personal", "conditions": [{"source": "selectorVisible", "selector": "#firstName", "operator": "exists"}]}],
+        "maxRetries": 2
+      },
+      {
+        "id": "personal",
+        "detect": {"conditions": [{"source": "selectorVisible", "selector": "#firstName", "operator": "exists"}]},
+        "steps": [
+          {"action": "fill", "selector": "#firstName", "valueFrom": "profile.firstName", "readback": {"source": "value", "comparison": "exact", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#lastName", "valueFrom": "profile.lastName", "readback": {"source": "value", "comparison": "exact", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#passportNumber", "valueFrom": "profile.passportNumber", "readback": {"source": "value", "comparison": "exact", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#email", "valueFrom": "profile.email", "readback": {"source": "value", "comparison": "exact", "rejectAriaInvalid": true}},
+          {"action": "clickRole", "role": "button", "name": "Done", "exact": true}
+        ],
+        "transitions": [{"to": "application_type", "conditions": [{"source": "selectorVisible", "selector": ".image-container[data-value='1']", "operator": "exists"}]}],
+        "maxRetries": 1
+      },
+      {
+        "id": "application_type",
+        "detect": {"conditions": [{"source": "selectorVisible", "selector": ".image-container[data-value='1']", "operator": "exists"}]},
+        "steps": [
+          {"action": "click", "selector": ".image-container[data-value='1']", "requireUnique": true},
+          {"action": "clickRole", "role": "button", "name": "Next", "exact": true}
+        ],
+        "transitions": [{"to": "details", "conditions": [{"source": "selectorVisible", "selector": "#gender", "operator": "exists"}]}],
+        "maxRetries": 2
+      },
+      {
+        "id": "details",
+        "detect": {"conditions": [{"source": "selectorVisible", "selector": "#gender", "operator": "exists"}]},
+        "steps": [
+          {"action": "fill", "selector": "#birthdate", "valueFrom": "profile.dateOfBirth", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#address", "valueFrom": "profile.address", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#city", "valueFrom": "profile.addressCity", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#birthplace", "valueFrom": "profile.cityOfBirth", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#mothersName", "valueFrom": "profile.motherName", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#fathersName", "valueFrom": "profile.fatherName", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#familyPhoneNumber", "valueFrom": "profile.phone", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+          {"action": "clickRole", "role": "button", "name": "Next", "exact": true}
+        ],
+        "transitions": [{"to": "program", "conditions": [{"source": "selectorVisible", "selector": "#programKeyword", "operator": "exists"}]}],
+        "maxRetries": 2
+      },
+      {
+        "id": "program",
+        "detect": {"conditions": [{"source": "selectorVisible", "selector": "#programKeyword", "operator": "exists"}]},
+        "steps": [
+          {"action": "fill", "selector": "#programKeyword", "valueFrom": "profile.programName"},
+          {"action": "clickRole", "role": "button", "name": "Select", "exact": true},
+          {"action": "clickRole", "role": "button", "name": "Next", "exact": true}
+        ],
+        "transitions": [{"to": "education", "conditions": [{"source": "selectorVisible", "selector": "#secondarySchoolName", "operator": "exists"}]}],
+        "maxRetries": 2
+      },
+      {
+        "id": "education",
+        "detect": {"conditions": [{"source": "selectorVisible", "selector": "#secondarySchoolName", "operator": "exists"}]},
+        "steps": [
+          {"action": "fill", "selector": "#secondarySchoolName", "valueFrom": "profile.schoolName", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#graduationYearOfSecondarySchool", "valueFrom": "profile.graduationYear", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#cityOfSecondarySchool", "valueFrom": "profile.addressCity", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+          {"action": "clickRole", "role": "button", "name": "Next", "exact": true}
+        ],
+        "transitions": [{"to": "documents", "conditions": [{"source": "selectorVisible", "selector": "input[type=file]", "operator": "exists"}]}],
+        "maxRetries": 2
+      },
+      {
+        "id": "documents",
+        "detect": {"conditions": [{"source": "selectorVisible", "selector": "input[type=file]", "operator": "exists"}]},
+        "steps": [
+          {"action": "upload", "selector": "input[type=file]", "slot": "passport", "proof": {"successSelector": "button:has-text('Upload')", "localFileName": true}},
+          {"action": "upload", "selector": "input[type=file]", "slot": "transcript", "proof": {"successSelector": "button:has-text('Upload')", "localFileName": true}},
+          {"action": "clickRole", "role": "button", "name": "Next", "exact": true}
+        ],
+        "transitions": [{"to": "completed", "conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "Completed|Submit|Finish", "caseInsensitive": true}]}],
+        "maxRetries": 2
+      },
+      {
+        "id": "completed",
+        "detect": {"conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "Completed|Submit|Finish", "caseInsensitive": true}]},
+        "steps": [{"action": "clickRole", "role": "button", "name": "Submit", "exact": false, "final": true}],
+        "transitions": [],
+        "terminal": true,
+        "maxRetries": 0
+      }
+    ]
+  },
+  "profilePolicy": {
+    "defaults": [
+      {"field": "fatherName", "value": "-", "reason": "legacy_parent_name_policy"},
+      {"field": "motherName", "value": "-", "reason": "legacy_parent_name_policy"}
+    ],
+    "required": [
+      {"field": "firstName"}, {"field": "lastName"}, {"field": "passportNumber"},
+      {"field": "email"}, {"field": "dateOfBirth"}, {"field": "gender"},
+      {"field": "nationality"}, {"field": "address"}, {"field": "addressCity"},
+      {"field": "cityOfBirth"}, {"field": "phone"}, {"field": "level"},
+      {"field": "programName"}, {"field": "schoolName"}, {"field": "graduationYear"}
+    ]
+  },
+  "documents": {
+    "slots": {
+      "passport": {"fileField": "passport", "target": "pdf", "required": true},
+      "transcript": {"fileField": "transcript", "target": "pdf", "required": true}
+    }
+  },
+  "success": {
+    "successText": "application complete",
+    "alreadyExistsText": "already",
+    "programMissingText": "program not found"
+  },
+  "outcomes": [
+    {"outcome": "alreadyExists", "detect": {"conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "already|duplicate|zaten", "caseInsensitive": true}]}, "detail": "Okan duplicate proof"},
+    {"outcome": "submitted", "detect": {"conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "success|completed|received|thank you|tamamland", "caseInsensitive": true}]}, "detail": "Okan completion proof"},
+    {"outcome": "failure", "detect": {"conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "error|validation|required", "caseInsensitive": true}]}, "detail": "Okan validation failure"}
+  ]
+}

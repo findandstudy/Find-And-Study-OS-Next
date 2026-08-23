@@ -1,0 +1,273 @@
+{
+  "specVersion": 2,
+  "meta": {
+    "key": "united",
+    "name": "United Education — Live Mapped 2026-07-26",
+    "baseUrl": "https://partner.unitededucation.com",
+    "panelUrl": "https://partner.unitededucation.com/Manage/Index",
+    "matches": ["united education", "united"],
+    "experimental": true,
+    "resolution": "fallback",
+    "dryRunPolicy": "strict"
+  },
+  "auth": {
+    "loginUrl": "https://partner.unitededucation.com/",
+    "loginSteps": [
+      {
+        "action": "fill",
+        "selector": "input[name*=user i], input[placeholder*=user i], input[id*=user i], input[type=text]",
+        "valueFrom": "profile.email"
+      },
+      {
+        "action": "fill",
+        "selector": "input[type=password]",
+        "valueFrom": "profile.passportNumber"
+      },
+      {
+        "action": "clickRole",
+        "role": "button",
+        "name": "Sign In",
+        "exact": false
+      }
+    ],
+    "successUrlContains": "/Manage"
+  },
+  "steps": [
+    {
+      "action": "navigate",
+      "url": "https://partner.unitededucation.com/Manage/newapplication"
+    }
+  ],
+  "workflow": {
+    "maxTransitions": 12,
+    "stableReads": 2,
+    "settleMs": 250,
+    "states": [
+      {
+        "id": "term",
+        "detect": {
+          "conditions": [
+            {
+              "source": "selectorVisible",
+              "selector": "input[name=radio_buttons_2]",
+              "operator": "exists"
+            }
+          ]
+        },
+        "steps": [
+          {
+            "action": "click",
+            "selector": "input[name=radio_buttons_2]",
+            "requireUnique": true
+          },
+          {
+            "action": "clickRole",
+            "role": "button",
+            "name": "Continue",
+            "exact": true
+          }
+        ],
+        "transitions": [
+          {
+            "to": "degree",
+            "conditions": [
+              {
+                "source": "selectorVisible",
+                "selector": "label.form-check-image",
+                "operator": "exists"
+              }
+            ]
+          }
+        ],
+        "maxRetries": 2
+      },
+      {
+        "id": "degree",
+        "detect": {
+          "conditions": [
+            {
+              "source": "selectorVisible",
+              "selector": "label.form-check-image",
+              "operator": "exists"
+            }
+          ]
+        },
+        "steps": [
+          {
+            "action": "clickCardByText",
+            "textFrom": "profile.level",
+            "containerHint": "label.form-check-image"
+          },
+          {
+            "action": "clickRole",
+            "role": "button",
+            "name": "Continue",
+            "exact": true
+          }
+        ],
+        "transitions": [
+          {
+            "to": "program",
+            "conditions": [
+              {
+                "source": "selectorVisible",
+                "selector": "div.single-table",
+                "operator": "exists"
+              }
+            ]
+          }
+        ],
+        "maxRetries": 2
+      },
+      {
+        "id": "program",
+        "detect": {
+          "conditions": [
+            {
+              "source": "selectorVisible",
+              "selector": "div.single-table",
+              "operator": "exists"
+            }
+          ]
+        },
+        "steps": [
+          {
+            "action": "selectLabel",
+            "selector": "#selectuniversity",
+            "valueFrom": "profile.universityName",
+            "readback": {
+              "source": "selectedLabel",
+              "comparison": "folded",
+              "rejectAriaInvalid": true
+            }
+          },
+          {
+            "action": "clickCardByText",
+            "textFrom": "profile.programName",
+            "containerHint": "div.single-table"
+          },
+          {
+            "action": "assert",
+            "condition": {
+              "source": "selectorText",
+              "selector": "body",
+              "operator": "matches",
+              "value": "Selected Majors\\s*\\([1-9][0-9]*\\)"
+            },
+            "message": "United program selection counter did not increase"
+          },
+          {
+            "action": "clickRole",
+            "role": "button",
+            "name": "Continue",
+            "exact": true
+          }
+        ],
+        "transitions": [
+          {
+            "to": "personal",
+            "conditions": [
+              {
+                "source": "selectorVisible",
+                "selector": "#firstname",
+                "operator": "exists"
+              }
+            ]
+          }
+        ],
+        "maxRetries": 2
+      },
+      {
+        "id": "personal",
+        "detect": {
+          "conditions": [
+            {
+              "source": "selectorVisible",
+              "selector": "#firstname",
+              "operator": "exists"
+            }
+          ]
+        },
+        "steps": [
+          {"action": "fill", "selector": "#firstname", "valueFrom": "profile.firstName", "readback": {"source": "value", "comparison": "exact", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#lastname", "valueFrom": "profile.lastName", "readback": {"source": "value", "comparison": "exact", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#passport", "valueFrom": "profile.passportNumber", "readback": {"source": "value", "comparison": "exact", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#dateInput", "valueFrom": "profile.dateOfBirth", "transform": {"type": "toDMY"}, "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#fathername", "valueFrom": "profile.fatherName", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#mothername", "valueFrom": "profile.motherName", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#SecondarySchoolName", "valueFrom": "profile.schoolName", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#phone11", "valueFrom": "profile.phone", "readback": {"source": "value", "comparison": "trimmed", "rejectAriaInvalid": true}},
+          {"action": "fill", "selector": "#emailaddress", "valueFrom": "profile.email", "readback": {"source": "value", "comparison": "exact", "rejectAriaInvalid": true}},
+          {"action": "selectLabel", "selector": "#gender", "valueFrom": "profile.gender", "readback": {"source": "selectedLabel", "comparison": "folded", "rejectAriaInvalid": true}},
+          {"action": "selectLabel", "selector": "#ContentPlaceHolder1_DropDownList4", "valueFrom": "profile.nationality", "readback": {"source": "selectedLabel", "comparison": "folded", "rejectAriaInvalid": true}},
+          {"action": "selectLabel", "selector": "#ContentPlaceHolder1_DropDownList5", "valueFrom": "profile.nationality", "readback": {"source": "selectedLabel", "comparison": "folded", "rejectAriaInvalid": true}},
+          {"action": "selectLabel", "selector": "#school", "valueFrom": "profile.nationality", "readback": {"source": "selectedLabel", "comparison": "folded", "rejectAriaInvalid": true}},
+          {"action": "clickRole", "role": "button", "name": "Continue", "exact": true}
+        ],
+        "transitions": [
+          {
+            "to": "documents",
+            "conditions": [
+              {
+                "source": "selectorVisible",
+                "selector": "#pass, #cer, #cerb, #cerp, #trans, #transb, #transp",
+                "operator": "exists"
+              }
+            ]
+          }
+        ],
+        "maxRetries": 1
+      },
+      {
+        "id": "documents",
+        "detect": {
+          "conditions": [
+            {
+              "source": "selectorVisible",
+              "selector": "#pass, #cer, #cerb, #cerp, #trans, #transb, #transp",
+              "operator": "exists"
+            }
+          ]
+        },
+        "steps": [
+          {"action": "upload", "selector": "#pass", "slot": "passport", "proof": {"responseUrlContains": "/Manage/uploadfilesone", "timeoutMs": 60000}},
+          {"action": "upload", "selector": "#cerb, #cer, #cerp", "slot": "diploma", "proof": {"responseUrlContains": "/Manage/uploadfilesone", "timeoutMs": 60000}},
+          {"action": "upload", "selector": "#transb, #trans, #transp", "slot": "transcript", "proof": {"responseUrlContains": "/Manage/uploadfilesone", "timeoutMs": 60000}}
+        ],
+        "transitions": [],
+        "terminal": true,
+        "maxRetries": 0
+      }
+    ]
+  },
+  "profilePolicy": {
+    "defaults": [],
+    "required": [
+      {"field": "firstName"}, {"field": "lastName"}, {"field": "passportNumber"},
+      {"field": "email"}, {"field": "dateOfBirth"}, {"field": "gender"},
+      {"field": "fatherName"}, {"field": "motherName"}, {"field": "nationality"},
+      {"field": "phone"}, {"field": "level"}, {"field": "programName"},
+      {"field": "universityName"}, {"field": "schoolName"}
+    ]
+  },
+  "documents": {
+    "slots": {
+      "passport": {"fileField": "passport", "target": "pdf", "required": true},
+      "diploma": {"fileField": "diploma", "target": "pdf", "required": true},
+      "transcript": {"fileField": "transcript", "target": "pdf", "required": true},
+      "photo": {"fileField": "photo", "target": "jpg", "required": false}
+    }
+  },
+  "success": {
+    "successText": "Application created successfully",
+    "successSelector": "#appid",
+    "alreadyExistsText": "already exists",
+    "programMissingText": "Selected Majors (0)"
+  },
+  "outcomes": [
+    {"outcome": "alreadyExists", "detect": {"conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "already.*(?:application|exists)", "caseInsensitive": true}]}, "detail": "United duplicate proof"},
+    {"outcome": "submitted", "detect": {"conditions": [{"source": "selectorValue", "selector": "#appid", "operator": "notEmpty"}]}, "detail": "United application id proof"},
+    {"outcome": "programMissing", "detect": {"conditions": [{"source": "selectorText", "selector": "body", "operator": "contains", "value": "Selected Majors (0)"}]}, "detail": "United program counter remained zero"},
+    {"outcome": "failure", "detect": {"conditions": [{"source": "selectorText", "selector": "body", "operator": "matches", "value": "error|validation|required", "caseInsensitive": true}]}, "detail": "United validation failure"}
+  ]
+}

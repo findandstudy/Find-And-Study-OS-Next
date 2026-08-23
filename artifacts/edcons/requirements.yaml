@@ -1,0 +1,20 @@
+packages:
+  "framer-motion": "For page transitions and smooth micro-interactions"
+  "recharts": "For staff dashboard analytics and finance charts"
+  "date-fns": "For human-readable date formatting"
+  "react-hook-form": "For robust form state management"
+  "@hookform/resolvers": "For integrating Zod validation with forms"
+  "zod": "For schema validation on forms"
+  "react-helmet": "For dynamic SEO title and meta tag management"
+
+images:
+  - path: "artifacts/edcons/public/images/hero-bg.png"
+    description: "Abstract modern professional background for an education business, subtle deep navy and blue gradients, soft light leaks, premium corporate feel"
+    aspect_ratio: "16:9"
+  - path: "artifacts/edcons/public/images/auth-bg.png"
+    description: "Elegant architectural shot of a modern university campus with glass windows, tinted dark blue, suitable for a login page background"
+    aspect_ratio: "16:9"
+
+notes:
+  - Expects Replit Auth for session management (/api/auth/me)
+  - Uses @workspace/api-client-react for all API queries and mutations

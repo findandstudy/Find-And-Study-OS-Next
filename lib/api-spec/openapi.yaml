@@ -1,0 +1,6831 @@
+openapi: 3.1.0
+info:
+  title: Api
+  version: 0.1.0
+  description: Education Consultancy Operating System API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: auth
+    description: Authentication and session
+  - name: users
+    description: User management
+  - name: leads
+    description: CRM lead management
+  - name: students
+    description: Student profiles
+  - name: agents
+    description: Agent profiles
+  - name: applications
+    description: Application management
+  - name: documents
+    description: Document management
+  - name: universities
+    description: University and program catalog
+  - name: finance
+    description: Invoices and commissions
+  - name: content
+    description: CMS content (blog, pages, announcements)
+  - name: settings
+    description: System settings
+  - name: audit
+    description: Audit log
+  - name: inbox
+    description: Inbox conversations (multi-channel messaging)
+  - name: ai
+    description: AI-powered features
+  - name: portal-automation
+    description: University portal submission automation
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  # AUTH
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  # USERS
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: List all users
+      parameters:
+        - name: role
+          in: query
+          schema:
+            type: string
+        - name: roles
+          in: query
+          description: Comma-separated role names.
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsersListResponse"
+    post:
+      operationId: createUser
+      tags: [users]
+      summary: Create a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserBody"
+      responses:
+        "201":
+          description: Created user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+
+  /users/{id}:
+    get:
+      operationId: getUser
+      tags: [users]
+      summary: Get user by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: User
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateUser
+      tags: [users]
+      summary: Update user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserBody"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+    delete:
+      operationId: deleteUser
+      tags: [users]
+      summary: Delete user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  # LEADS
+  /leads:
+    get:
+      operationId: listLeads
+      tags: [leads]
+      summary: List leads
+      parameters:
+        - name: season
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: assignedTo
+          in: query
+          schema:
+            type: integer
+        - name: source
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of leads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeadsListResponse"
+    post:
+      operationId: createLead
+      tags: [leads]
+      summary: Create a lead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLeadBody"
+      responses:
+        "201":
+          description: Created lead
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lead"
+
+  /leads/{id}:
+    get:
+      operationId: getLead
+      tags: [leads]
+      summary: Get lead by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Lead
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lead"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateLead
+      tags: [leads]
+      summary: Update lead
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLeadBody"
+      responses:
+        "200":
+          description: Updated lead
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lead"
+    delete:
+      operationId: deleteLead
+      tags: [leads]
+      summary: Delete lead
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /leads/{id}/convert:
+    post:
+      operationId: convertLead
+      tags: [leads]
+      summary: Convert lead to student
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Converted to student
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Student"
+
+  /leads/{id}/notes:
+    get:
+      operationId: getLeadNotes
+      tags: [leads]
+      summary: Get lead notes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Notes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Note"
+    post:
+      operationId: addLeadNote
+      tags: [leads]
+      summary: Add note to lead
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateNoteBody"
+      responses:
+        "201":
+          description: Note created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Note"
+
+  # PUBLIC LEAD FORM (no auth)
+  /public/lead:
+    post:
+      operationId: submitPublicLead
+      tags: [leads]
+      summary: Submit public inquiry form (no auth)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublicLeadBody"
+      responses:
+        "201":
+          description: Lead submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  # STUDENTS
+  /students:
+    get:
+      operationId: listStudents
+      tags: [students]
+      summary: List students
+      parameters:
+        - name: season
+          in: query
+          schema:
+            type: string
+        - name: agentId
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of students
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentsListResponse"
+    post:
+      operationId: createStudent
+      tags: [students]
+      summary: Create student
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStudentBody"
+      responses:
+        "201":
+          description: Created student
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Student"
+
+  /students/{id}:
+    get:
+      operationId: getStudent
+      tags: [students]
+      summary: Get student by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Student
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Student"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateStudent
+      tags: [students]
+      summary: Update student
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateStudentBody"
+      responses:
+        "200":
+          description: Updated student
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Student"
+
+  /students/{id}/portal-readiness:
+    get:
+      operationId: getStudentPortalReadiness
+      tags: [students]
+      summary: Soft portal-compatibility readiness for a student (never blocks submission)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: portal
+          in: query
+          required: false
+          schema:
+            type: string
+            default: sit
+      responses:
+        "200":
+          description: Readiness computation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalReadiness"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /students/{id}/education:
+    get:
+      operationId: getStudentEducation
+      tags: [students]
+      summary: List a student's education records (active set, ordered)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Education records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentEducationResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: putStudentEducation
+      tags: [students]
+      summary: Replace a student's education records (replace-set, soft-delete old)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutStudentEducationBody"
+      responses:
+        "200":
+          description: New active education records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentEducationResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /students/me:
+    get:
+      operationId: getMyStudentProfile
+      tags: [students]
+      summary: Get own student profile (student role)
+      responses:
+        "200":
+          description: Student profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Student"
+
+  # AGENTS
+  /agents:
+    get:
+      operationId: listAgents
+      tags: [agents]
+      summary: List agents
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of agents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentsListResponse"
+    post:
+      operationId: createAgent
+      tags: [agents]
+      summary: Create agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentBody"
+      responses:
+        "201":
+          description: Created agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+
+  /agents/{id}:
+    get:
+      operationId: getAgent
+      tags: [agents]
+      summary: Get agent by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+    patch:
+      operationId: updateAgent
+      tags: [agents]
+      summary: Update agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAgentBody"
+      responses:
+        "200":
+          description: Updated agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+
+  /agents/me:
+    get:
+      operationId: getMyAgentProfile
+      tags: [agents]
+      summary: Get own agent profile (agent role)
+      responses:
+        "200":
+          description: Agent profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+
+  # APPLICATIONS
+  /applications:
+    get:
+      operationId: listApplications
+      tags: [applications]
+      summary: List applications
+      parameters:
+        - name: season
+          in: query
+          schema:
+            type: string
+        - name: studentId
+          in: query
+          schema:
+            type: integer
+        - name: agentId
+          in: query
+          schema:
+            type: integer
+        - name: stage
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of applications
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationsListResponse"
+    post:
+      operationId: createApplication
+      tags: [applications]
+      summary: Create application
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApplicationBody"
+      responses:
+        "201":
+          description: Created application
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+
+  /applications/{id}:
+    get:
+      operationId: getApplication
+      tags: [applications]
+      summary: Get application by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Application
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateApplication
+      tags: [applications]
+      summary: Update application
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateApplicationBody"
+      responses:
+        "200":
+          description: Updated application
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+    delete:
+      operationId: deleteApplication
+      tags: [applications]
+      summary: Delete application
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /applications/{id}/notes:
+    get:
+      operationId: getApplicationNotes
+      tags: [applications]
+      summary: Get application notes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Notes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Note"
+    post:
+      operationId: addApplicationNote
+      tags: [applications]
+      summary: Add note to application
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateNoteBody"
+      responses:
+        "201":
+          description: Note created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Note"
+
+  # DOCUMENTS
+  /documents:
+    get:
+      operationId: listDocuments
+      tags: [documents]
+      summary: List documents
+      parameters:
+        - name: studentId
+          in: query
+          schema:
+            type: integer
+        - name: applicationId
+          in: query
+          schema:
+            type: integer
+        - name: type
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of documents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Document"
+    post:
+      operationId: createDocument
+      tags: [documents]
+      summary: Create document record (metadata only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDocumentBody"
+      responses:
+        "201":
+          description: Created document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+
+  /documents/{id}:
+    get:
+      operationId: getDocument
+      tags: [documents]
+      summary: Get document by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+    patch:
+      operationId: updateDocument
+      tags: [documents]
+      summary: Update document
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDocumentBody"
+      responses:
+        "200":
+          description: Updated document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+    delete:
+      operationId: deleteDocument
+      tags: [documents]
+      summary: Delete document
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /documents/{id}/extract:
+    post:
+      operationId: extractDocument
+      tags: [documents]
+      summary: Run AI extraction on a document
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Extraction result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentExtraction"
+
+  # UNIVERSITIES & PROGRAMS
+  /universities:
+    get:
+      operationId: listUniversities
+      tags: [universities]
+      summary: List universities
+      parameters:
+        - name: country
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of universities
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UniversitiesListResponse"
+    post:
+      operationId: createUniversity
+      tags: [universities]
+      summary: Create university
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUniversityBody"
+      responses:
+        "201":
+          description: Created university
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/University"
+
+  /universities/{id}:
+    get:
+      operationId: getUniversity
+      tags: [universities]
+      summary: Get university by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: University
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/University"
+    patch:
+      operationId: updateUniversity
+      tags: [universities]
+      summary: Update university
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUniversityBody"
+      responses:
+        "200":
+          description: Updated university
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/University"
+    delete:
+      operationId: deleteUniversity
+      tags: [universities]
+      summary: Delete university
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /programs:
+    get:
+      operationId: listPrograms
+      tags: [universities]
+      summary: List programs
+      parameters:
+        - name: universityId
+          in: query
+          schema:
+            type: integer
+        - name: country
+          in: query
+          schema:
+            type: string
+        - name: language
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of programs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgramsListResponse"
+    post:
+      operationId: createProgram
+      tags: [universities]
+      summary: Create program
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProgramBody"
+      responses:
+        "201":
+          description: Created program
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Program"
+
+  /programs/{id}:
+    get:
+      operationId: getProgram
+      tags: [universities]
+      summary: Get program by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Program
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Program"
+    patch:
+      operationId: updateProgram
+      tags: [universities]
+      summary: Update program
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProgramBody"
+      responses:
+        "200":
+          description: Updated program
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Program"
+    delete:
+      operationId: deleteProgram
+      tags: [universities]
+      summary: Delete program
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  # FINANCE
+  /invoices:
+    get:
+      operationId: listInvoices
+      tags: [finance]
+      summary: List invoices
+      parameters:
+        - name: studentId
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of invoices
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoicesListResponse"
+    post:
+      operationId: createInvoice
+      tags: [finance]
+      summary: Create invoice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInvoiceBody"
+      responses:
+        "201":
+          description: Created invoice
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+
+  /invoices/{id}:
+    get:
+      operationId: getInvoice
+      tags: [finance]
+      summary: Get invoice by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Invoice
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+    patch:
+      operationId: updateInvoice
+      tags: [finance]
+      summary: Update invoice
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateInvoiceBody"
+      responses:
+        "200":
+          description: Updated invoice
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+
+  /commissions:
+    get:
+      operationId: listCommissions
+      tags: [finance]
+      summary: List commissions
+      parameters:
+        - name: agentId
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: season
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Commission list with summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Commission"
+                  summary:
+                    type: object
+                  meta:
+                    type: object
+    post:
+      operationId: createCommission
+      tags: [finance]
+      summary: Create commission record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCommissionBody"
+      responses:
+        "201":
+          description: Created commission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Commission"
+
+  /commissions/{id}:
+    get:
+      operationId: getCommission
+      tags: [finance]
+      summary: Get commission by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Commission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Commission"
+    patch:
+      operationId: updateCommission
+      tags: [finance]
+      summary: Update commission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCommissionBody"
+      responses:
+        "200":
+          description: Updated commission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Commission"
+    delete:
+      operationId: deleteCommission
+      tags: [finance]
+      summary: Delete commission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /service-fees:
+    get:
+      operationId: listServiceFees
+      tags: [finance]
+      summary: List service fees
+      parameters:
+        - name: studentId
+          in: query
+          schema:
+            type: integer
+        - name: agentId
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: season
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Service fee list with summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ServiceFee"
+                  summary:
+                    type: object
+                  meta:
+                    type: object
+    post:
+      operationId: createServiceFee
+      tags: [finance]
+      summary: Create service fee record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateServiceFeeBody"
+      responses:
+        "201":
+          description: Created service fee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceFee"
+
+  /service-fees/{id}:
+    patch:
+      operationId: updateServiceFee
+      tags: [finance]
+      summary: Update service fee
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateServiceFeeBody"
+      responses:
+        "200":
+          description: Updated service fee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceFee"
+    delete:
+      operationId: deleteServiceFee
+      tags: [finance]
+      summary: Delete service fee
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /finance/summary:
+    get:
+      operationId: getFinanceSummary
+      tags: [finance]
+      summary: Finance dashboard summary
+      parameters:
+        - name: season
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Finance summary
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # CONTENT / CMS
+  /blog:
+    get:
+      operationId: listBlogPosts
+      tags: [content]
+      summary: List blog posts
+      parameters:
+        - name: locale
+          in: query
+          schema:
+            type: string
+        - name: published
+          in: query
+          schema:
+            type: boolean
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of blog posts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlogPostsListResponse"
+    post:
+      operationId: createBlogPost
+      tags: [content]
+      summary: Create blog post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBlogPostBody"
+      responses:
+        "201":
+          description: Created blog post
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlogPost"
+
+  /blog/{slug}:
+    get:
+      operationId: getBlogPost
+      tags: [content]
+      summary: Get blog post by slug
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: locale
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Blog post
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlogPost"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateBlogPost
+      tags: [content]
+      summary: Update blog post
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBlogPostBody"
+      responses:
+        "200":
+          description: Updated blog post
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlogPost"
+    delete:
+      operationId: deleteBlogPost
+      tags: [content]
+      summary: Delete blog post
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /announcements:
+    get:
+      operationId: listAnnouncements
+      tags: [content]
+      summary: List announcements
+      parameters:
+        - name: audience
+          in: query
+          schema:
+            type: string
+        - name: active
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: List of announcements
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Announcement"
+    post:
+      operationId: createAnnouncement
+      tags: [content]
+      summary: Create announcement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAnnouncementBody"
+      responses:
+        "201":
+          description: Created announcement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Announcement"
+
+  /announcements/{id}:
+    patch:
+      operationId: updateAnnouncement
+      tags: [content]
+      summary: Update announcement
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAnnouncementBody"
+      responses:
+        "200":
+          description: Updated announcement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Announcement"
+    delete:
+      operationId: deleteAnnouncement
+      tags: [content]
+      summary: Delete announcement
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  # SETTINGS
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get all settings
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+    patch:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSettingsBody"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+
+  # AUDIT LOG
+  /audit:
+    get:
+      operationId: listAuditLogs
+      tags: [audit]
+      summary: List audit log entries
+      parameters:
+        - name: userId
+          in: query
+          schema:
+            type: integer
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: resource
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Audit logs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogsListResponse"
+
+  # DASHBOARD STATS
+  /stats/overview:
+    get:
+      operationId: getOverviewStats
+      tags: [settings]
+      summary: Get dashboard overview stats
+      parameters:
+        - name: season
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OverviewStats"
+
+  /stats/kommo-summary:
+    get:
+      operationId: getKommoSummary
+      tags: [settings]
+      summary: Get Kommo-style CRM summary metrics
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: staffId, in: query, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: Kommo summary metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KommoSummary"
+
+  /v1/activity/view:
+    post:
+      operationId: recordEntityView
+      tags: [activity]
+      summary: Record an entity view event (5-min dedup)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordEntityViewBody"
+      responses:
+        "201":
+          description: View recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordEntityViewResponse"
+        "200":
+          description: Deduplicated (already recorded in last 5 min)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordEntityViewResponse"
+
+  /v1/activity/summary:
+    get:
+      operationId: getActivitySummary
+      tags: [activity]
+      summary: Get entity view counts + session durations for a time range
+      parameters:
+        - name: range
+          in: query
+          schema:
+            type: string
+            enum: [daily, weekly, monthly, yearly]
+            default: daily
+        - name: staffId
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: Activity summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivitySummary"
+
+  /university-contracts:
+    get:
+      operationId: listUniversityContracts
+      tags: [universities]
+      summary: List university contracts (admin)
+      parameters:
+        - { name: country, in: query, schema: { type: string } }
+        - { name: universityId, in: query, schema: { type: integer } }
+        - { name: year, in: query, schema: { type: integer } }
+        - { name: status, in: query, schema: { type: string, enum: [active, expiring_soon, expired, no_dates] } }
+        - { name: search, in: query, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, default: 25, maximum: 100 } }
+      responses:
+        "200":
+          description: Page of contracts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/UniversityContract" }
+                  page: { type: integer }
+                  pageSize: { type: integer }
+                  hasMore: { type: boolean }
+                required: [data, page, pageSize, hasMore]
+    post:
+      operationId: createUniversityContract
+      tags: [universities]
+      summary: Create university contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UniversityContractWriteBody" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/UniversityContract" }
+                required: [data]
+
+  /university-contracts/{id}:
+    get:
+      operationId: getUniversityContract
+      tags: [universities]
+      summary: Get university contract by ID
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Contract
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/UniversityContract" }
+                required: [data]
+    patch:
+      operationId: updateUniversityContract
+      tags: [universities]
+      summary: Update university contract
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UniversityContractWriteBody" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/UniversityContract" }
+                required: [data]
+    delete:
+      operationId: deleteUniversityContract
+      tags: [universities]
+      summary: Soft-delete university contract (move to trash)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+
+  /university-contracts/{id}/file:
+    get:
+      operationId: downloadUniversityContractFile
+      tags: [universities]
+      summary: Download stored contract file
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Binary contract file (PDF or DOCX)
+          content:
+            application/pdf: { schema: { type: string, format: binary } }
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema: { type: string, format: binary }
+        "404": { description: No file attached or contract not found }
+
+  # INBOX
+  /inbox/conversations/{id}:
+    get:
+      operationId: getInboxConversationDetail
+      tags: [inbox]
+      summary: Get inbox conversation detail with linked lead/student/agent, stage and AI summary
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Conversation detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboxConversationDetailResponse"
+        "400":
+          description: Invalid id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inbox/conversations/{id}/summarize:
+    post:
+      operationId: summarizeInboxConversation
+      tags: [inbox, ai]
+      summary: Generate (or return cached) AI summary for a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Summary generated or returned from cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SummarizeInboxConversationResponse"
+        "400":
+          description: No messages to summarize
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limited (Retry-After header included)
+          headers:
+            Retry-After:
+              schema:
+                type: string
+              description: Seconds to wait before retrying
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: AI service not configured or upstream failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inbox/ai-agent/config:
+    get:
+      operationId: getAiAgentConfig
+      tags: [inbox, ai]
+      summary: Read the AI intake agent configuration (admin only)
+      responses:
+        "200":
+          description: Current AI agent config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiAgentConfigResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateAiAgentConfig
+      tags: [inbox, ai]
+      summary: Update the AI intake agent configuration (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AiAgentConfigUpdate"
+      responses:
+        "200":
+          description: Updated AI agent config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiAgentConfigResponse"
+        "400":
+          description: Invalid config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inbox/ai-agent/test:
+    post:
+      operationId: testAiAgent
+      tags: [inbox, ai]
+      summary: Run the AI intake brain against a sample message without sending (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AiAgentTestRequest"
+      responses:
+        "200":
+          description: Test run result (no message sent)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiAgentTestResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Test run failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inbox/knowledge-sources/program-scope:
+    get:
+      operationId: getKnowledgeSourceProgramScope
+      tags: [inbox, ai]
+      summary: Read the program_scope knowledge source (admin only)
+      responses:
+        "200":
+          description: Current program_scope knowledge source
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeSourceProgramScopeResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateKnowledgeSourceProgramScope
+      tags: [inbox, ai]
+      summary: Update the program_scope knowledge source (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeSourceProgramScopeUpdate"
+      responses:
+        "200":
+          description: Updated program_scope knowledge source
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeSourceProgramScopeResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inbox/conversations/{id}/notes:
+    post:
+      operationId: addInboxConversationNote
+      tags: [inbox]
+      summary: Add an internal note to the lead/student linked to a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddInboxConversationNoteBody"
+      responses:
+        "201":
+          description: Note created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddInboxConversationNoteResponse"
+        "400":
+          description: Conversation is not linked to a lead or student
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inbox/conversations/{id}/lead-suggestion:
+    get:
+      operationId: getInboxLeadSuggestion
+      tags: [inbox, ai]
+      summary: Get AI-prefilled lead suggestion for an unmatched conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Suggestion data (may be empty if AI fails)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboxLeadSuggestionResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inbox/conversations/{id}/create-lead:
+    post:
+      operationId: createLeadFromConversation
+      tags: [inbox]
+      summary: Create a new lead from an unmatched conversation with duplicate protection
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLeadFromConversationBody"
+      responses:
+        "201":
+          description: Lead created and conversation linked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateLeadFromConversationResponse"
+        "400":
+          description: Invalid body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Duplicate lead exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeadExistsConflict"
+
+  /inbox/conversations/{id}/tasks:
+    post:
+      operationId: addInboxConversationTask
+      tags: [inbox]
+      summary: Add a follow-up task to the lead/student linked to a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddInboxConversationTaskBody"
+      responses:
+        "201":
+          description: Follow-up task created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddInboxConversationTaskResponse"
+        "400":
+          description: Conversation is not linked to a lead or student, or invalid body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # PORTAL AUTOMATION
+  /applications/{appId}/portal-submissions:
+    post:
+      operationId: enqueuePortalSubmission
+      tags: [portal-automation]
+      summary: Enqueue a portal submission for an application
+      parameters:
+        - name: appId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnqueuePortalSubmissionBody"
+      responses:
+        "201":
+          description: Submission queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalSubmission"
+        "404":
+          description: Application not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Confirm required for real mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portal-automation/submit:
+    post:
+      operationId: manualSubmitPortal
+      tags: [portal-automation]
+      summary: Manually queue one or many applications for portal submission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualSubmitBody"
+      responses:
+        "200":
+          description: Nothing newly queued (all skipped)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManualSubmitResult"
+        "201":
+          description: One or more submissions queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManualSubmitResult"
+        "400":
+          description: Application has no matching active portal university (single)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Application not found or deleted (single)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Confirm required for real mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many submissions, rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portal-automation/apply-to-all:
+    post:
+      operationId: applyToAllUniversities
+      tags: [portal-automation]
+      summary: Fan-out one application to all active portal universities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyToAllBody"
+      responses:
+        "200":
+          description: Processed, nothing newly queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyToAllResult"
+        "201":
+          description: One or more submissions queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyToAllResult"
+        "404":
+          description: Application not found or deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Confirm required for real mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many submissions, rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portal-automation/eligible-applications:
+    get:
+      operationId: getEligibleApplications
+      tags: [portal-automation]
+      summary: List applications eligible for manual portal submission
+      parameters:
+        - name: stage
+          in: query
+          schema: { type: string }
+        - name: universityKey
+          in: query
+          schema: { type: string }
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: Paginated list of eligible applications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EligibleApplication"
+                  total: { type: integer }
+                  page: { type: integer }
+                  limit: { type: integer }
+                  totalPages: { type: integer }
+                required: [data, total, page, limit, totalPages]
+
+  /portal-submissions:
+    get:
+      operationId: getPortalSubmissions
+      tags: [portal-automation]
+      summary: List portal submissions (paginated)
+      parameters:
+        - name: applicationId
+          in: query
+          schema: { type: integer }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [queued, running, submitted, already_exists, program_missing, failed, canceled]
+        - name: mode
+          in: query
+          schema:
+            type: string
+            enum: [dry, real]
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: Paginated list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PortalSubmission"
+                  total: { type: integer }
+                  page: { type: integer }
+                  limit: { type: integer }
+                  totalPages: { type: integer }
+                required: [data, total, page, limit, totalPages]
+
+  /portal-submissions/{id}:
+    get:
+      operationId: getPortalSubmission
+      tags: [portal-automation]
+      summary: Get a single portal submission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Portal submission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalSubmission"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portal-submissions/{id}/retry:
+    post:
+      operationId: retryPortalSubmission
+      tags: [portal-automation]
+      summary: Retry a failed or canceled portal submission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Retried
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                required: [ok]
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Not retryable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portal-submissions/{id}/ai-diagnose:
+    post:
+      operationId: diagnosePortalSubmissionWithAi
+      tags: [portal-automation]
+      summary: Create a review-only AI diagnosis for a failed portal submission
+      description: >
+        Uses PII-safe failure evidence and creates an approval-queue proposal.
+        This endpoint never retries a submission or mutates a university portal,
+        application code, or an active adapter spec.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Diagnosis created or an identical diagnosis reused
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  guardian:
+                    type: object
+                    additionalProperties: true
+                required: [guardian]
+        "404":
+          description: Submission not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Guardian inactive, diagnosis in progress, or outcome not diagnosable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Daily Guardian run limit reached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portal-submissions/{id}/cancel:
+    post:
+      operationId: cancelPortalSubmission
+      tags: [portal-automation]
+      summary: Cancel a queued or running portal submission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Canceled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                required: [ok]
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Not cancelable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /university-portals:
+    get:
+      operationId: getUniversityPortals
+      tags: [portal-automation]
+      summary: List configured university portals with credential status
+      responses:
+        "200":
+          description: List of university portals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UniversityPortal"
+
+  /university-portals/{portalKey}/credentials:
+    put:
+      operationId: setPortalCredentials
+      tags: [portal-automation]
+      summary: Upsert encrypted credentials for a university portal (admin only)
+      parameters:
+        - name: portalKey
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetPortalCredentialsBody"
+      responses:
+        "200":
+          description: Credentials saved (plaintext never returned)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "404":
+          description: Portal university not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deletePortalCredentials
+      tags: [portal-automation]
+      summary: Soft-delete stored credentials for a university portal (admin only)
+      parameters:
+        - name: portalKey
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Credentials deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "404":
+          description: No active credentials found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portal-automation/universities/{key}/program-options:
+    get:
+      operationId: getPortalProgramOptions
+      tags: [portal-automation]
+      summary: Live portal program options (cached, TTL 24h) for the program mapping editor (admin only)
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+        - name: level
+          in: query
+          required: false
+          schema: { type: string }
+        - name: refresh
+          in: query
+          required: false
+          description: Set to 1 to force a live refetch, bypassing the cache.
+          schema: { type: integer, enum: [0, 1] }
+      responses:
+        "200":
+          description: Program options (served from cache or freshly fetched)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalProgramOptionsResponse"
+        "404":
+          description: University or adapter not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Live portal fetch failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portal-automation/universities/{key}/mapping:
+    get:
+      operationId: getPortalProgramMapping
+      tags: [portal-automation]
+      summary: CRM→portal program mapping for a university (admin only)
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Program mapping data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalProgramMapping"
+        "404":
+          description: University not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updatePortalProgramMapping
+      tags: [portal-automation]
+      summary: Replace the program_overrides mapping for a university (admin only)
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePortalProgramMappingBody"
+      responses:
+        "200":
+          description: Updated program mapping
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalProgramMapping"
+        "404":
+          description: University not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portal-automation/multi-portals:
+    get:
+      operationId: listMultiPortals
+      tags: [portal-automation]
+      summary: List multi-portal companies and their member universities (admin only)
+      responses:
+        "200":
+          description: Multi-portal companies with members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MultiPortalListResponse"
+
+  /portal-automation/multi-portals/{key}/members:
+    put:
+      operationId: setMultiPortalMembers
+      tags: [portal-automation]
+      summary: Replace the member university list for a multi-portal company (admin only)
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetMultiPortalMembersBody"
+      responses:
+        "200":
+          description: Updated member list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MultiPortalMembersResponse"
+        "400":
+          description: Not a multi-portal company or invalid member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Portal or member university not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: A member is already assigned to another multi-portal company
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portal-automation/adapter-specs:
+    get:
+      operationId: listAdapterSpecs
+      tags: [portal-automation]
+      summary: List declarative adapter specs, one entry per key (admin only)
+      responses:
+        "200":
+          description: Adapter spec summaries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdapterSpecListResponse"
+    post:
+      operationId: upsertAdapterSpec
+      tags: [portal-automation]
+      summary: Create a new adapter spec version, optionally enabling it (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertAdapterSpecBody"
+      responses:
+        "201":
+          description: New adapter spec version created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpsertAdapterSpecResponse"
+        "400":
+          description: Invalid spec
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdapterSpecValidationResponse"
+        "403":
+          description: jsHook upload forbidden for the current role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portal-automation/adapter-specs/validate:
+    post:
+      operationId: validateAdapterSpec
+      tags: [portal-automation]
+      summary: Validate an adapter spec without persisting it (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidateAdapterSpecBody"
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdapterSpecValidationResponse"
+
+  /portal-automation/adapter-specs/{key}/versions:
+    get:
+      operationId: listAdapterSpecVersions
+      tags: [portal-automation]
+      summary: List the full version history for an adapter spec key (admin only)
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Version history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdapterSpecVersionsResponse"
+
+  /portal-automation/adapter-specs/{key}:
+    patch:
+      operationId: patchAdapterSpec
+      tags: [portal-automation]
+      summary: Enable, disable, rollback, or approve jsHook for an adapter spec (admin only)
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchAdapterSpecBody"
+      responses:
+        "200":
+          description: Updated enabled state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatchAdapterSpecResponse"
+        "403":
+          description: jsHook approval forbidden for the current role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Spec key or version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portal-program-fallbacks:
+    get:
+      operationId: listProgramFallbacks
+      tags: [portal-automation]
+      summary: List program fallback rules (optionally filtered by university)
+      parameters:
+        - name: universityKey
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: List of fallback rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProgramFallback"
+    post:
+      operationId: createProgramFallback
+      tags: [portal-automation]
+      summary: Create a program fallback rule (one per university+source program)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProgramFallbackBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgramFallback"
+        "409":
+          description: A rule already exists for this university+source program
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portal-program-fallbacks/{id}:
+    patch:
+      operationId: updateProgramFallback
+      tags: [portal-automation]
+      summary: Update a program fallback rule (order, autoSubmit, enabled)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProgramFallbackBody"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgramFallback"
+        "404":
+          description: Rule not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteProgramFallback
+      tags: [portal-automation]
+      summary: Soft-delete a program fallback rule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "404":
+          description: Rule not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portal-automation/university-exclusions/nationality-suggestions:
+    get:
+      operationId: listExclusionNationalitySuggestions
+      tags: [portal-automation]
+      summary: Distinct student nationalities (autocomplete source for exclusions)
+      responses:
+        "200":
+          description: Distinct nationality strings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }
+
+  /portal-automation/university-exclusions:
+    get:
+      operationId: listUniversityExclusions
+      tags: [portal-automation]
+      summary: List exclusive-region exclusions (optionally filtered by university)
+      parameters:
+        - name: universityKey
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: List of exclusion rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UniversityExclusion"
+    post:
+      operationId: createUniversityExclusion
+      tags: [portal-automation]
+      summary: Create an exclusion rule (one per university+nationality)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUniversityExclusionBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UniversityExclusion"
+        "409":
+          description: An exclusion for this nationality already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portal-automation/university-exclusions/{id}:
+    patch:
+      operationId: updateUniversityExclusion
+      tags: [portal-automation]
+      summary: Update an exclusion rule (nationality, agency, note, enabled)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUniversityExclusionBody"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UniversityExclusion"
+        "404":
+          description: Rule not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: An exclusion for this nationality already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteUniversityExclusion
+      tags: [portal-automation]
+      summary: Soft-delete an exclusion rule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "404":
+          description: Rule not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    AdapterSpecSummary:
+      type: object
+      required:
+        - key
+        - name
+        - latestVersion
+        - enabledVersion
+        - versionCount
+        - source
+        - jsHookApproved
+        - privilegedApproved
+        - hasJsHook
+        - privileged
+        - updatedAt
+      properties:
+        key: { type: string }
+        name: { type: string }
+        latestVersion: { type: integer }
+        enabledVersion:
+          type: integer
+          nullable: true
+        versionCount: { type: integer }
+        source:
+          type: string
+          enum: [builtin, uploaded]
+        jsHookApproved: { type: boolean }
+        privilegedApproved: { type: boolean }
+        hasJsHook: { type: boolean }
+        privileged: { type: boolean }
+        updatedAt: { type: string, format: date-time }
+    AdapterSpecListResponse:
+      type: object
+      required: [specs]
+      properties:
+        specs:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdapterSpecSummary"
+    AdapterSpecVersion:
+      type: object
+      required:
+        - version
+        - name
+        - enabled
+        - source
+        - jsHookApproved
+        - privilegedApproved
+        - hasJsHook
+        - privileged
+        - createdBy
+        - createdAt
+        - updatedAt
+      properties:
+        version: { type: integer }
+        name: { type: string }
+        enabled: { type: boolean }
+        source:
+          type: string
+          enum: [builtin, uploaded]
+        jsHookApproved: { type: boolean }
+        privilegedApproved: { type: boolean }
+        hasJsHook: { type: boolean }
+        privileged: { type: boolean }
+        createdBy:
+          type: integer
+          nullable: true
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AdapterSpecVersionsResponse:
+      type: object
+      required: [key, versions]
+      properties:
+        key: { type: string }
+        versions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdapterSpecVersion"
+    AdapterSpecIssue:
+      type: object
+      required: [path, message]
+      properties:
+        path: { type: string }
+        message: { type: string }
+    ValidateAdapterSpecBody:
+      type: object
+      required: [spec]
+      properties:
+        spec:
+          type: object
+          additionalProperties: true
+    AdapterSpecValidationResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        key: { type: string }
+        name: { type: string }
+        hasJsHook: { type: boolean }
+        privileged: { type: boolean }
+        error: { type: string }
+        message: { type: string }
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdapterSpecIssue"
+    UpsertAdapterSpecBody:
+      type: object
+      required: [spec]
+      properties:
+        spec:
+          type: object
+          additionalProperties: true
+        enable: { type: boolean }
+        approveJsHook: { type: boolean }
+        approvePrivileged: { type: boolean }
+    UpsertAdapterSpecResponse:
+      type: object
+      required: [key, version, enabled, jsHookApproved, privilegedApproved, hasJsHook]
+      properties:
+        key: { type: string }
+        version: { type: integer }
+        enabled: { type: boolean }
+        jsHookApproved: { type: boolean }
+        privilegedApproved: { type: boolean }
+        hasJsHook: { type: boolean }
+    PatchAdapterSpecBody:
+      type: object
+      properties:
+        enableVersion: { type: integer }
+        disable: { type: boolean }
+        rollbackTo: { type: integer }
+        jsHookApproved: { type: boolean }
+        privilegedApproved: { type: boolean }
+    PatchAdapterSpecResponse:
+      type: object
+      required: [key, enabledVersion, jsHookApproved, privilegedApproved]
+      properties:
+        key: { type: string }
+        enabledVersion:
+          type: integer
+          nullable: true
+        jsHookApproved: { type: boolean }
+        privilegedApproved: { type: boolean }
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required:
+        - success
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    ProgramFallbackProgram:
+      type: object
+      properties:
+        id: { type: integer }
+        name:
+          type: string
+          nullable: true
+      required: [id, name]
+
+    ProgramFallback:
+      type: object
+      properties:
+        id: { type: integer }
+        universityKey: { type: string }
+        sourceProgramId: { type: integer }
+        sourceProgramName:
+          type: string
+          nullable: true
+        fallbackProgramIds:
+          type: array
+          items: { type: integer }
+        fallbackPrograms:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProgramFallbackProgram"
+        autoSubmit: { type: boolean }
+        enabled: { type: boolean }
+        createdAt:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          nullable: true
+      required:
+        - id
+        - universityKey
+        - sourceProgramId
+        - fallbackProgramIds
+        - fallbackPrograms
+        - autoSubmit
+        - enabled
+
+    CreateProgramFallbackBody:
+      type: object
+      properties:
+        universityKey: { type: string }
+        sourceProgramId: { type: integer }
+        fallbackProgramIds:
+          type: array
+          items: { type: integer }
+        autoSubmit: { type: boolean }
+        enabled: { type: boolean }
+      required: [universityKey, sourceProgramId]
+
+    UpdateProgramFallbackBody:
+      type: object
+      properties:
+        fallbackProgramIds:
+          type: array
+          items: { type: integer }
+        autoSubmit: { type: boolean }
+        enabled: { type: boolean }
+
+    UniversityExclusion:
+      type: object
+      properties:
+        id: { type: integer }
+        universityKey: { type: string }
+        nationality: { type: string }
+        agencyName:
+          type: string
+          nullable: true
+        note:
+          type: string
+          nullable: true
+        enabled: { type: boolean }
+        createdAt:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          nullable: true
+      required:
+        - id
+        - universityKey
+        - nationality
+        - enabled
+
+    CreateUniversityExclusionBody:
+      type: object
+      properties:
+        universityKey: { type: string }
+        nationality: { type: string }
+        agencyName: { type: string }
+        note: { type: string }
+        enabled: { type: boolean }
+      required: [universityKey, nationality]
+
+    UpdateUniversityExclusionBody:
+      type: object
+      properties:
+        nationality: { type: string }
+        agencyName:
+          type: string
+          nullable: true
+        note:
+          type: string
+          nullable: true
+        enabled: { type: boolean }
+
+    MultiPortalMember:
+      type: object
+      properties:
+        universityKey:
+          type: string
+        universityName:
+          type: string
+        adapterKey:
+          type: string
+      required:
+        - universityKey
+        - universityName
+        - adapterKey
+
+    MultiPortalCompany:
+      type: object
+      properties:
+        universityKey:
+          type: string
+        universityName:
+          type: string
+        adapterKey:
+          type: string
+        isActive:
+          type: boolean
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/MultiPortalMember"
+      required:
+        - universityKey
+        - universityName
+        - adapterKey
+        - isActive
+        - members
+
+    MultiPortalListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/MultiPortalCompany"
+      required:
+        - data
+
+    SetMultiPortalMembersBody:
+      type: object
+      properties:
+        universityKeys:
+          type: array
+          items:
+            type: string
+      required:
+        - universityKeys
+
+    MultiPortalMembersResponse:
+      type: object
+      properties:
+        portalKey:
+          type: string
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/MultiPortalMember"
+      required:
+        - portalKey
+        - members
+
+    PaginationMeta:
+      type: object
+      properties:
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        totalPages:
+          type: integer
+      required:
+        - total
+        - page
+        - limit
+        - totalPages
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+        replitId:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        firstName:
+          type: ["string", "null"]
+        lastName:
+          type: ["string", "null"]
+        role:
+          type: string
+        avatarUrl:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        language:
+          type: string
+        isActive:
+          type: boolean
+        emailVerified:
+          type: boolean
+        agentStaffPermissions:
+          type: ["array", "null"]
+          items:
+            type: string
+        branchId:
+          type: ["integer", "null"]
+        branchName:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - role
+        - language
+        - isActive
+        - emailVerified
+        - createdAt
+
+    CreateUserBody:
+      type: object
+      properties:
+        email:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        role:
+          type: string
+        phone:
+          type: ["string", "null"]
+        language:
+          type: string
+        branchId:
+          type: ["integer", "null"]
+      required:
+        - email
+        - firstName
+        - lastName
+        - role
+        - language
+
+    UpdateUserBody:
+      type: object
+      properties:
+        email:
+          type: ["string", "null"]
+        firstName:
+          type: ["string", "null"]
+        lastName:
+          type: ["string", "null"]
+        role:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        language:
+          type: ["string", "null"]
+        isActive:
+          type: ["boolean", "null"]
+        branchId:
+          type: ["integer", "null"]
+
+    UsersListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserProfile"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+      required:
+        - data
+        - meta
+
+    Lead:
+      type: object
+      properties:
+        id:
+          type: integer
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        nationality:
+          type: ["string", "null"]
+        country:
+          type: ["string", "null"]
+        source:
+          type: ["string", "null"]
+        status:
+          type: string
+        assignedToId:
+          type: ["integer", "null"]
+        interestedProgram:
+          type: ["string", "null"]
+        interestedUniversity:
+          type: ["string", "null"]
+        interestedCountry:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        estimatedValue:
+          type: ["number", "null"]
+        convertedStudentId:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - firstName
+        - lastName
+        - status
+        - createdAt
+        - updatedAt
+
+    CreateLeadBody:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        nationality:
+          type: ["string", "null"]
+        country:
+          type: ["string", "null"]
+        source:
+          type: ["string", "null"]
+        status:
+          type: string
+        assignedToId:
+          type: ["integer", "null"]
+        interestedProgram:
+          type: ["string", "null"]
+        interestedUniversity:
+          type: ["string", "null"]
+        interestedCountry:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        estimatedValue:
+          type: ["number", "null"]
+      required:
+        - firstName
+        - lastName
+        - status
+
+    UpdateLeadBody:
+      type: object
+      properties:
+        firstName:
+          type: ["string", "null"]
+        lastName:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        nationality:
+          type: ["string", "null"]
+        country:
+          type: ["string", "null"]
+        source:
+          type: ["string", "null"]
+        status:
+          type: ["string", "null"]
+        assignedToId:
+          type: ["integer", "null"]
+        interestedProgram:
+          type: ["string", "null"]
+        interestedUniversity:
+          type: ["string", "null"]
+        interestedCountry:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        estimatedValue:
+          type: ["number", "null"]
+
+    PublicLeadBody:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: ["string", "null"]
+        nationality:
+          type: ["string", "null"]
+        interestedProgram:
+          type: ["string", "null"]
+        interestedUniversity:
+          type: ["string", "null"]
+        interestedCountry:
+          type: ["string", "null"]
+        message:
+          type: ["string", "null"]
+      required:
+        - firstName
+        - lastName
+        - email
+
+    LeadsListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Lead"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+      required:
+        - data
+        - meta
+
+    Note:
+      type: object
+      properties:
+        id:
+          type: integer
+        content:
+          type: string
+        authorId:
+          type: integer
+        authorName:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - content
+        - authorId
+        - createdAt
+
+    CreateNoteBody:
+      type: object
+      properties:
+        content:
+          type: string
+      required:
+        - content
+
+    Student:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: ["integer", "null"]
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        dateOfBirth:
+          type: ["string", "null"]
+        nationality:
+          type: ["string", "null"]
+        passportNumber:
+          type: ["string", "null"]
+        passportIssueDate:
+          type: ["string", "null"]
+        passportExpiry:
+          type: ["string", "null"]
+        motherName:
+          type: ["string", "null"]
+        fatherName:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        status:
+          type: string
+        agentId:
+          type: ["integer", "null"]
+        highSchool:
+          type: ["string", "null"]
+        graduationYear:
+          type: ["integer", "null"]
+        gpa:
+          type: ["string", "null"]
+        languageScore:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        transferStudent:
+          type: boolean
+        hasTcId:
+          type: boolean
+        hasBlueCard:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - firstName
+        - lastName
+        - status
+        - createdAt
+        - updatedAt
+
+    StudentEducationRecord:
+      type: object
+      properties:
+        id:
+          type: integer
+        studentId:
+          type: integer
+        level:
+          type: string
+          enum: [high_school, bachelor, master]
+        institution:
+          type: ["string", "null"]
+        program:
+          type: ["string", "null"]
+        graduationYear:
+          type: ["integer", "null"]
+        gpa:
+          type: ["string", "null"]
+        gpaRaw:
+          type: ["string", "null"]
+        gpaScale:
+          type: ["integer", "null"]
+        languageScore:
+          type: ["string", "null"]
+        sortOrder:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - studentId
+        - level
+        - sortOrder
+
+    StudentEducationRecordInput:
+      type: object
+      properties:
+        level:
+          type: string
+          enum: [high_school, bachelor, master]
+        institution:
+          type: ["string", "null"]
+        program:
+          type: ["string", "null"]
+        graduationYear:
+          type: ["integer", "null"]
+        gpa:
+          type: ["string", "null"]
+        gpaRaw:
+          type: ["string", "null"]
+        gpaScale:
+          type: ["integer", "null"]
+        languageScore:
+          type: ["string", "null"]
+      required:
+        - level
+
+    PortalReadinessIncompatibility:
+      type: object
+      properties:
+        field:
+          type: string
+        reason:
+          type: string
+      required:
+        - field
+        - reason
+
+    PortalReadiness:
+      type: object
+      properties:
+        applicable:
+          type: boolean
+          description: True when at least one current student application dynamically routes through this portal.
+        supported:
+          type: boolean
+          description: True when the portal has a readiness field specification.
+        ready:
+          type: boolean
+        portal:
+          type: string
+        level:
+          type: ["string", "null"]
+          enum: [high_school, bachelor, master, null]
+        missing:
+          type: array
+          items:
+            type: string
+        incompatible:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalReadinessIncompatibility"
+        skipped:
+          type: array
+          items:
+            type: string
+        applicationIds:
+          type: array
+          items:
+            type: integer
+      required:
+        - applicable
+        - supported
+        - ready
+        - portal
+        - missing
+        - incompatible
+        - skipped
+        - applicationIds
+
+    StudentEducationResponse:
+      type: object
+      properties:
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/StudentEducationRecord"
+      required:
+        - records
+
+    PutStudentEducationBody:
+      type: object
+      properties:
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/StudentEducationRecordInput"
+      required:
+        - records
+
+    CreateStudentBody:
+      type: object
+      properties:
+        userId:
+          type: ["integer", "null"]
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: ["string", "null"]
+          format: email
+        phone:
+          type: ["string", "null"]
+        dateOfBirth:
+          type: ["string", "null"]
+        gender:
+          type: ["string", "null"]
+        nationality:
+          type: ["string", "null"]
+        passportNumber:
+          type: ["string", "null"]
+        passportIssueDate:
+          type: ["string", "null"]
+        passportExpiry:
+          type: ["string", "null"]
+        motherName:
+          type: ["string", "null"]
+        fatherName:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        cityOfBirth:
+          type: ["string", "null"]
+        addressCity:
+          type: ["string", "null"]
+        postalCode:
+          type: ["string", "null"]
+        needsVisaSupport:
+          type: ["boolean", "null"]
+        status:
+          type: string
+        agentId:
+          type: ["integer", "null"]
+        highSchool:
+          type: ["string", "null"]
+        universityBachelor:
+          type: ["string", "null"]
+        universityMaster:
+          type: ["string", "null"]
+        graduationYear:
+          type: ["integer", "null"]
+        gpa:
+          type: ["string", "null"]
+        languageScore:
+          type: ["string", "null"]
+        interestedLevel:
+          type: ["string", "null"]
+        season:
+          type: ["string", "null"]
+        educationRecords:
+          type: array
+          items:
+            $ref: "#/components/schemas/StudentEducationRecordInput"
+        notes:
+          type: ["string", "null"]
+        sourceLeadId:
+          type: ["integer", "null"]
+          description: Existing accessible lead whose branch, owner, and origin are inherited by the new student.
+      required:
+        - firstName
+        - lastName
+        - status
+
+    UpdateStudentBody:
+      type: object
+      properties:
+        firstName:
+          type: ["string", "null"]
+        lastName:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        dateOfBirth:
+          type: ["string", "null"]
+        nationality:
+          type: ["string", "null"]
+        passportNumber:
+          type: ["string", "null"]
+        passportIssueDate:
+          type: ["string", "null"]
+        passportExpiry:
+          type: ["string", "null"]
+        motherName:
+          type: ["string", "null"]
+        fatherName:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        status:
+          type: ["string", "null"]
+        agentId:
+          type: ["integer", "null"]
+        highSchool:
+          type: ["string", "null"]
+        graduationYear:
+          type: ["integer", "null"]
+        gpa:
+          type: ["string", "null"]
+        languageScore:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        transferStudent:
+          type: boolean
+        hasTcId:
+          type: boolean
+        hasBlueCard:
+          type: boolean
+
+    StudentsListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Student"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+      required:
+        - data
+        - meta
+
+    Agent:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: ["integer", "null"]
+        companyName:
+          type: ["string", "null"]
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        country:
+          type: ["string", "null"]
+        commissionRate:
+          type: ["number", "null"]
+        status:
+          type: string
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - firstName
+        - lastName
+        - status
+        - createdAt
+        - updatedAt
+
+    CreateAgentBody:
+      type: object
+      properties:
+        userId:
+          type: ["integer", "null"]
+        companyName:
+          type: ["string", "null"]
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        country:
+          type: ["string", "null"]
+        commissionRate:
+          type: ["number", "null"]
+        status:
+          type: string
+        notes:
+          type: ["string", "null"]
+      required:
+        - firstName
+        - lastName
+        - status
+
+    UpdateAgentBody:
+      type: object
+      properties:
+        companyName:
+          type: ["string", "null"]
+        firstName:
+          type: ["string", "null"]
+        lastName:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        country:
+          type: ["string", "null"]
+        commissionRate:
+          type: ["number", "null"]
+        status:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+
+    AgentsListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+      required:
+        - data
+        - meta
+
+    Application:
+      type: object
+      properties:
+        id:
+          type: integer
+        studentId:
+          type: integer
+        programId:
+          type: ["integer", "null"]
+        universityId:
+          type: ["integer", "null"]
+        agentId:
+          type: ["integer", "null"]
+        stage:
+          type: string
+        intake:
+          type: ["string", "null"]
+        level:
+          type: ["string", "null"]
+        instructionLanguage:
+          type: ["string", "null"]
+        deadline:
+          type: ["string", "null"]
+        programName:
+          type: ["string", "null"]
+        universityName:
+          type: ["string", "null"]
+        universityApplicationId:
+          type: ["string", "null"]
+          maxLength: 128
+          description: Current university-assigned application identifier. Historical portal-run references are stored separately.
+        country:
+          type: ["string", "null"]
+        tuitionFee:
+          type: ["number", "null"]
+        scholarship:
+          type: ["number", "null"]
+        notes:
+          type: ["string", "null"]
+        createdSource:
+          type: ["string", "null"]
+          description: "Who created the application: student | staff | automation. Null is treated as student."
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - studentId
+        - stage
+        - createdAt
+        - updatedAt
+
+    CreateApplicationBody:
+      type: object
+      properties:
+        studentId:
+          type: integer
+        programId:
+          type: ["integer", "null"]
+        universityId:
+          type: ["integer", "null"]
+        agentId:
+          type: ["integer", "null"]
+        stage:
+          type: string
+        intake:
+          type: ["string", "null"]
+        level:
+          type: ["string", "null"]
+        instructionLanguage:
+          type: ["string", "null"]
+        deadline:
+          type: ["string", "null"]
+        programName:
+          type: ["string", "null"]
+        universityName:
+          type: ["string", "null"]
+        country:
+          type: ["string", "null"]
+        tuitionFee:
+          type: ["number", "null"]
+        scholarship:
+          type: ["number", "null"]
+        notes:
+          type: ["string", "null"]
+      required:
+        - studentId
+        - stage
+
+    UpdateApplicationBody:
+      type: object
+      properties:
+        programId:
+          type: ["integer", "null"]
+        universityId:
+          type: ["integer", "null"]
+        agentId:
+          type: ["integer", "null"]
+        stage:
+          type: ["string", "null"]
+        intake:
+          type: ["string", "null"]
+        level:
+          type: ["string", "null"]
+        instructionLanguage:
+          type: ["string", "null"]
+        deadline:
+          type: ["string", "null"]
+        programName:
+          type: ["string", "null"]
+        universityName:
+          type: ["string", "null"]
+        universityApplicationId:
+          type: ["string", "null"]
+          maxLength: 128
+        country:
+          type: ["string", "null"]
+        tuitionFee:
+          type: ["number", "null"]
+        scholarship:
+          type: ["number", "null"]
+        notes:
+          type: ["string", "null"]
+
+    ApplicationsListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Application"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+      required:
+        - data
+        - meta
+
+    Document:
+      type: object
+      properties:
+        id:
+          type: integer
+        studentId:
+          type: ["integer", "null"]
+        applicationId:
+          type: ["integer", "null"]
+        name:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        fileKey:
+          type: ["string", "null"]
+        fileUrl:
+          type: ["string", "null"]
+        mimeType:
+          type: ["string", "null"]
+        sizeBytes:
+          type: ["integer", "null"]
+        extractedData:
+          type: ["string", "null"]
+        confidenceScore:
+          type: ["number", "null"]
+        reviewedBy:
+          type: ["integer", "null"]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - type
+        - status
+        - createdAt
+        - updatedAt
+
+    CreateDocumentBody:
+      type: object
+      properties:
+        studentId:
+          type: ["integer", "null"]
+        applicationId:
+          type: ["integer", "null"]
+        name:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        fileKey:
+          type: ["string", "null"]
+        fileUrl:
+          type: ["string", "null"]
+        mimeType:
+          type: ["string", "null"]
+        sizeBytes:
+          type: ["integer", "null"]
+        notes:
+          type: ["string", "null"]
+      required:
+        - name
+        - type
+        - status
+
+    UpdateDocumentBody:
+      type: object
+      properties:
+        name:
+          type: ["string", "null"]
+        type:
+          type: ["string", "null"]
+        status:
+          type: ["string", "null"]
+        fileKey:
+          type: ["string", "null"]
+        fileUrl:
+          type: ["string", "null"]
+        extractedData:
+          type: ["string", "null"]
+        confidenceScore:
+          type: ["number", "null"]
+        reviewedBy:
+          type: ["integer", "null"]
+        notes:
+          type: ["string", "null"]
+
+    DocumentExtraction:
+      type: object
+      properties:
+        documentId:
+          type: integer
+        extractedFields:
+          type: object
+          additionalProperties: true
+        confidenceScore:
+          type: number
+        rawText:
+          type: ["string", "null"]
+        docType:
+          type: ["string", "null"]
+      required:
+        - documentId
+        - extractedFields
+        - confidenceScore
+
+    University:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        country:
+          type: string
+        city:
+          type: ["string", "null"]
+        website:
+          type: ["string", "null"]
+        logoUrl:
+          type: ["string", "null"]
+        description:
+          type: ["string", "null"]
+        ranking:
+          type: ["integer", "null"]
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - country
+        - isActive
+        - createdAt
+
+    CreateUniversityBody:
+      type: object
+      properties:
+        name:
+          type: string
+        country:
+          type: string
+        city:
+          type: ["string", "null"]
+        website:
+          type: ["string", "null"]
+        logoUrl:
+          type: ["string", "null"]
+        description:
+          type: ["string", "null"]
+        ranking:
+          type: ["integer", "null"]
+        isActive:
+          type: boolean
+      required:
+        - name
+        - country
+        - isActive
+
+    UpdateUniversityBody:
+      type: object
+      properties:
+        name:
+          type: ["string", "null"]
+        country:
+          type: ["string", "null"]
+        city:
+          type: ["string", "null"]
+        website:
+          type: ["string", "null"]
+        logoUrl:
+          type: ["string", "null"]
+        description:
+          type: ["string", "null"]
+        ranking:
+          type: ["integer", "null"]
+        isActive:
+          type: ["boolean", "null"]
+
+    UniversitiesListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/University"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+      required:
+        - data
+        - meta
+
+    Program:
+      type: object
+      properties:
+        id:
+          type: integer
+        universityId:
+          type: integer
+        name:
+          type: string
+        degree:
+          type: ["string", "null"]
+        field:
+          type: ["string", "null"]
+        language:
+          type: ["string", "null"]
+        duration:
+          type: ["string", "null"]
+        tuitionFee:
+          type: ["number", "null"]
+        currency:
+          type: ["string", "null"]
+        scholarship:
+          type: ["number", "null"]
+        intakes:
+          type: ["string", "null"]
+        requirements:
+          type: ["string", "null"]
+        commissionRate:
+          type: ["number", "null"]
+        applicationFee:
+          type: ["number", "null"]
+        advancedFee:
+          type: ["number", "null"]
+        depositFee:
+          type: ["number", "null"]
+        serviceFeeAmount:
+          type: ["number", "null"]
+        discountedFee:
+          type: ["number", "null"]
+        languageFee:
+          type: ["number", "null"]
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - universityId
+        - name
+        - isActive
+        - createdAt
+
+    CreateProgramBody:
+      type: object
+      properties:
+        universityId:
+          type: integer
+        name:
+          type: string
+        degree:
+          type: ["string", "null"]
+        field:
+          type: ["string", "null"]
+        language:
+          type: ["string", "null"]
+        duration:
+          type: ["string", "null"]
+        tuitionFee:
+          type: ["number", "null"]
+        currency:
+          type: ["string", "null"]
+        scholarship:
+          type: ["number", "null"]
+        intakes:
+          type: ["string", "null"]
+        requirements:
+          type: ["string", "null"]
+        commissionRate:
+          type: ["number", "null"]
+        applicationFee:
+          type: ["number", "null"]
+        advancedFee:
+          type: ["number", "null"]
+        depositFee:
+          type: ["number", "null"]
+        serviceFeeAmount:
+          type: ["number", "null"]
+        discountedFee:
+          type: ["number", "null"]
+        languageFee:
+          type: ["number", "null"]
+        isActive:
+          type: boolean
+      required:
+        - universityId
+        - name
+        - isActive
+
+    UpdateProgramBody:
+      type: object
+      properties:
+        name:
+          type: ["string", "null"]
+        degree:
+          type: ["string", "null"]
+        field:
+          type: ["string", "null"]
+        language:
+          type: ["string", "null"]
+        duration:
+          type: ["string", "null"]
+        tuitionFee:
+          type: ["number", "null"]
+        currency:
+          type: ["string", "null"]
+        scholarship:
+          type: ["number", "null"]
+        intakes:
+          type: ["string", "null"]
+        requirements:
+          type: ["string", "null"]
+        commissionRate:
+          type: ["number", "null"]
+        applicationFee:
+          type: ["number", "null"]
+        advancedFee:
+          type: ["number", "null"]
+        depositFee:
+          type: ["number", "null"]
+        serviceFeeAmount:
+          type: ["number", "null"]
+        discountedFee:
+          type: ["number", "null"]
+        languageFee:
+          type: ["number", "null"]
+        isActive:
+          type: ["boolean", "null"]
+
+    ProgramsListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Program"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+      required:
+        - data
+        - meta
+
+    Invoice:
+      type: object
+      properties:
+        id:
+          type: integer
+        invoiceNumber:
+          type: string
+        studentId:
+          type: integer
+        applicationId:
+          type: ["integer", "null"]
+        amount:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+        dueDate:
+          type: ["string", "null"]
+        paidAt:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - invoiceNumber
+        - studentId
+        - amount
+        - currency
+        - status
+        - createdAt
+        - updatedAt
+
+    CreateInvoiceBody:
+      type: object
+      properties:
+        studentId:
+          type: integer
+        applicationId:
+          type: ["integer", "null"]
+        amount:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+        dueDate:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+      required:
+        - studentId
+        - amount
+        - currency
+        - status
+
+    UpdateInvoiceBody:
+      type: object
+      properties:
+        amount:
+          type: ["number", "null"]
+        currency:
+          type: ["string", "null"]
+        status:
+          type: ["string", "null"]
+        dueDate:
+          type: ["string", "null"]
+        paidAt:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+
+    InvoicesListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Invoice"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+      required:
+        - data
+        - meta
+
+    Commission:
+      type: object
+      properties:
+        id:
+          type: integer
+        applicationId:
+          type: ["integer", "null"]
+        studentId:
+          type: ["integer", "null"]
+        agentId:
+          type: ["integer", "null"]
+        studentName:
+          type: ["string", "null"]
+        universityName:
+          type: ["string", "null"]
+        programName:
+          type: ["string", "null"]
+        isStateUniversity:
+          type: ["boolean", "null"]
+        season:
+          type: string
+        currency:
+          type: string
+        programFee:
+          type: ["string", "null"]
+        universityCommissionRate:
+          type: ["string", "null"]
+        universityCommissionAmount:
+          type: ["string", "null"]
+        universityCollected:
+          type: ["string", "null"]
+        agentCommissionRate:
+          type: ["string", "null"]
+        agentCommissionAmount:
+          type: ["string", "null"]
+        agentPaid:
+          type: ["string", "null"]
+        status:
+          type: string
+        confirmedAt:
+          type: ["string", "null"]
+        offsetAmount:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - season
+        - currency
+        - status
+        - createdAt
+
+    CreateCommissionBody:
+      type: object
+      properties:
+        applicationId:
+          type: ["integer", "null"]
+        studentId:
+          type: ["integer", "null"]
+        agentId:
+          type: ["integer", "null"]
+        studentName:
+          type: ["string", "null"]
+        universityName:
+          type: ["string", "null"]
+        programName:
+          type: ["string", "null"]
+        isStateUniversity:
+          type: ["boolean", "null"]
+        season:
+          type: string
+        currency:
+          type: string
+        programFee:
+          type: ["number", "null"]
+        universityCommissionRate:
+          type: ["number", "null"]
+        universityCommissionAmount:
+          type: ["number", "null"]
+        agentCommissionRate:
+          type: ["number", "null"]
+        agentCommissionAmount:
+          type: ["number", "null"]
+        status:
+          type: string
+        notes:
+          type: ["string", "null"]
+
+    UpdateCommissionBody:
+      type: object
+      properties:
+        status:
+          type: ["string", "null"]
+        season:
+          type: ["string", "null"]
+        studentName:
+          type: ["string", "null"]
+        universityName:
+          type: ["string", "null"]
+        programName:
+          type: ["string", "null"]
+        isStateUniversity:
+          type: ["boolean", "null"]
+        programFee:
+          type: ["number", "null"]
+        universityCommissionRate:
+          type: ["number", "null"]
+        universityCommissionAmount:
+          type: ["number", "null"]
+        universityCollected:
+          type: ["number", "null"]
+        agentCommissionRate:
+          type: ["number", "null"]
+        agentCommissionAmount:
+          type: ["number", "null"]
+        agentPaid:
+          type: ["number", "null"]
+        offsetAmount:
+          type: ["number", "null"]
+        notes:
+          type: ["string", "null"]
+
+    ServiceFee:
+      type: object
+      properties:
+        id:
+          type: integer
+        applicationId:
+          type: ["integer", "null"]
+        studentId:
+          type: ["integer", "null"]
+        agentId:
+          type: ["integer", "null"]
+        studentName:
+          type: ["string", "null"]
+        universityName:
+          type: ["string", "null"]
+        isStateUniversity:
+          type: ["boolean", "null"]
+        payerType:
+          type: string
+        season:
+          type: string
+        currency:
+          type: string
+        totalAmount:
+          type: string
+        firstInstallmentAmount:
+          type: ["string", "null"]
+        firstInstallmentPaidAt:
+          type: ["string", "null"]
+        secondInstallmentAmount:
+          type: ["string", "null"]
+        secondInstallmentPaidAt:
+          type: ["string", "null"]
+        status:
+          type: string
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - payerType
+        - season
+        - currency
+        - totalAmount
+        - status
+        - createdAt
+
+    CreateServiceFeeBody:
+      type: object
+      properties:
+        applicationId:
+          type: ["integer", "null"]
+        studentId:
+          type: ["integer", "null"]
+        agentId:
+          type: ["integer", "null"]
+        studentName:
+          type: ["string", "null"]
+        universityName:
+          type: ["string", "null"]
+        isStateUniversity:
+          type: ["boolean", "null"]
+        payerType:
+          type: string
+        season:
+          type: string
+        currency:
+          type: string
+        totalAmount:
+          type: number
+        notes:
+          type: ["string", "null"]
+      required:
+        - totalAmount
+
+    UpdateServiceFeeBody:
+      type: object
+      properties:
+        status:
+          type: ["string", "null"]
+        season:
+          type: ["string", "null"]
+        totalAmount:
+          type: ["number", "null"]
+        payerType:
+          type: ["string", "null"]
+        studentName:
+          type: ["string", "null"]
+        universityName:
+          type: ["string", "null"]
+        isStateUniversity:
+          type: ["boolean", "null"]
+        firstInstallmentAmount:
+          type: ["number", "null"]
+        firstInstallmentPaidAt:
+          type: ["string", "null"]
+        secondInstallmentAmount:
+          type: ["number", "null"]
+        secondInstallmentPaidAt:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+
+    BlogPost:
+      type: object
+      properties:
+        id:
+          type: integer
+        slug:
+          type: string
+        title:
+          type: string
+        excerpt:
+          type: ["string", "null"]
+        content:
+          type: ["string", "null"]
+        locale:
+          type: string
+        published:
+          type: boolean
+        authorId:
+          type: ["integer", "null"]
+        featuredImageUrl:
+          type: ["string", "null"]
+        metaTitle:
+          type: ["string", "null"]
+        metaDescription:
+          type: ["string", "null"]
+        tags:
+          type: ["string", "null"]
+        publishedAt:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - slug
+        - title
+        - locale
+        - published
+        - createdAt
+        - updatedAt
+
+    CreateBlogPostBody:
+      type: object
+      properties:
+        slug:
+          type: string
+        title:
+          type: string
+        excerpt:
+          type: ["string", "null"]
+        content:
+          type: ["string", "null"]
+        locale:
+          type: string
+        published:
+          type: boolean
+        featuredImageUrl:
+          type: ["string", "null"]
+        metaTitle:
+          type: ["string", "null"]
+        metaDescription:
+          type: ["string", "null"]
+        tags:
+          type: ["string", "null"]
+        publishedAt:
+          type: ["string", "null"]
+      required:
+        - slug
+        - title
+        - locale
+        - published
+
+    UpdateBlogPostBody:
+      type: object
+      properties:
+        title:
+          type: ["string", "null"]
+        excerpt:
+          type: ["string", "null"]
+        content:
+          type: ["string", "null"]
+        locale:
+          type: ["string", "null"]
+        published:
+          type: ["boolean", "null"]
+        featuredImageUrl:
+          type: ["string", "null"]
+        metaTitle:
+          type: ["string", "null"]
+        metaDescription:
+          type: ["string", "null"]
+        tags:
+          type: ["string", "null"]
+        publishedAt:
+          type: ["string", "null"]
+
+    BlogPostsListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/BlogPost"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+      required:
+        - data
+        - meta
+
+    Announcement:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        content:
+          type: string
+        audience:
+          type: string
+        isActive:
+          type: boolean
+        expiresAt:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - content
+        - audience
+        - isActive
+        - createdAt
+
+    CreateAnnouncementBody:
+      type: object
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+        audience:
+          type: string
+        isActive:
+          type: boolean
+        expiresAt:
+          type: ["string", "null"]
+      required:
+        - title
+        - content
+        - audience
+        - isActive
+
+    UpdateAnnouncementBody:
+      type: object
+      properties:
+        title:
+          type: ["string", "null"]
+        content:
+          type: ["string", "null"]
+        audience:
+          type: ["string", "null"]
+        isActive:
+          type: ["boolean", "null"]
+        expiresAt:
+          type: ["string", "null"]
+
+    Settings:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyName:
+          type: ["string", "null"]
+        companyEmail:
+          type: ["string", "null"]
+        companyPhone:
+          type: ["string", "null"]
+        companyAddress:
+          type: ["string", "null"]
+        defaultLanguage:
+          type: string
+        supportedLanguages:
+          type: string
+        smtpHost:
+          type: ["string", "null"]
+        smtpPort:
+          type: ["integer", "null"]
+        smtpUser:
+          type: ["string", "null"]
+        smtpFromEmail:
+          type: ["string", "null"]
+        whatsappEnabled:
+          type: boolean
+        n8nWebhookUrl:
+          type: ["string", "null"]
+        googleSheetsId:
+          type: ["string", "null"]
+        metaLeadEnabled:
+          type: boolean
+        logoUrl:
+          type: ["string", "null"]
+        faviconUrl:
+          type: ["string", "null"]
+        seoDefaultTitle:
+          type: ["string", "null"]
+        seoDefaultDescription:
+          type: ["string", "null"]
+      required:
+        - id
+        - defaultLanguage
+        - supportedLanguages
+        - whatsappEnabled
+        - metaLeadEnabled
+
+    UpdateSettingsBody:
+      type: object
+      properties:
+        companyName:
+          type: ["string", "null"]
+        companyEmail:
+          type: ["string", "null"]
+        companyPhone:
+          type: ["string", "null"]
+        companyAddress:
+          type: ["string", "null"]
+        defaultLanguage:
+          type: ["string", "null"]
+        supportedLanguages:
+          type: ["string", "null"]
+        smtpHost:
+          type: ["string", "null"]
+        smtpPort:
+          type: ["integer", "null"]
+        smtpUser:
+          type: ["string", "null"]
+        smtpFromEmail:
+          type: ["string", "null"]
+        whatsappEnabled:
+          type: ["boolean", "null"]
+        n8nWebhookUrl:
+          type: ["string", "null"]
+        googleSheetsId:
+          type: ["string", "null"]
+        metaLeadEnabled:
+          type: ["boolean", "null"]
+        logoUrl:
+          type: ["string", "null"]
+        faviconUrl:
+          type: ["string", "null"]
+        seoDefaultTitle:
+          type: ["string", "null"]
+        seoDefaultDescription:
+          type: ["string", "null"]
+
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: ["integer", "null"]
+        action:
+          type: string
+        resource:
+          type: string
+        resourceId:
+          type: ["integer", "null"]
+        changes:
+          type: ["string", "null"]
+        ipAddress:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - action
+        - resource
+        - createdAt
+
+    AuditLogsListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditLog"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+      required:
+        - data
+        - meta
+
+    UniversityContract:
+      type: object
+      properties:
+        id: { type: integer }
+        universityId: { type: integer }
+        destinationId: { type: integer, nullable: true }
+        country: { type: string }
+        year: { type: integer, nullable: true }
+        effectiveDate: { type: string, format: date-time, nullable: true }
+        expiryDate: { type: string, format: date-time, nullable: true }
+        fileObjectKey: { type: string, nullable: true }
+        fileName: { type: string, nullable: true }
+        fileMime: { type: string, nullable: true }
+        fileSize: { type: integer, nullable: true }
+        notes: { type: string, nullable: true }
+        uploadedByUserId: { type: integer, nullable: true }
+        assignedUserIds:
+          type: array
+          items: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        status:
+          type: string
+          enum: [active, expiring_soon, expired, no_dates]
+        universityName: { type: string, nullable: true }
+        universityCity: { type: string, nullable: true }
+        universityLogoUrl: { type: string, nullable: true }
+        destinationName: { type: string, nullable: true }
+        destinationCountry: { type: string, nullable: true }
+        destinationFlagEmoji: { type: string, nullable: true }
+      required: [id, universityId, country, status]
+
+    UniversityContractWriteBody:
+      type: object
+      properties:
+        universityId: { type: integer }
+        destinationId: { type: integer, nullable: true }
+        year: { type: integer, nullable: true }
+        effectiveDate: { type: string, format: date, nullable: true }
+        expiryDate: { type: string, format: date, nullable: true }
+        notes: { type: string, nullable: true }
+        fileObjectKey:
+          type: string
+          nullable: true
+          description: "Must match /objects/<uploadId>"
+        fileName: { type: string, nullable: true }
+        fileMime:
+          type: string
+          nullable: true
+          description: "PDF or DOCX MIME only"
+        fileSize: { type: integer, nullable: true }
+        assignedUserIds:
+          type: array
+          items: { type: integer }
+          description: "Active staff that should also receive expiry warnings"
+      required: [universityId]
+
+    OverviewStats:
+      type: object
+      properties:
+        totalLeads:
+          type: integer
+        totalStudents:
+          type: integer
+        totalApplications:
+          type: integer
+        totalAgents:
+          type: integer
+        activeApplications:
+          type: integer
+        pendingDocuments:
+          type: integer
+        totalRevenue:
+          type: number
+        pendingCommissions:
+          type: number
+      required:
+        - totalLeads
+        - totalStudents
+        - totalApplications
+        - totalAgents
+        - activeApplications
+        - pendingDocuments
+        - totalRevenue
+        - pendingCommissions
+
+    InboxAssignedUser:
+      type: object
+      properties:
+        id:
+          type: integer
+        firstName:
+          type: ["string", "null"]
+        lastName:
+          type: ["string", "null"]
+        avatarUrl:
+          type: ["string", "null"]
+      required:
+        - id
+
+    InboxChannelAccountSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        displayName:
+          type: string
+        externalAccountId:
+          type: ["string", "null"]
+        isDefault:
+          type: boolean
+      required:
+        - id
+        - displayName
+        - isDefault
+
+    InboxConversation:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+        title:
+          type: ["string", "null"]
+        createdById:
+          type: ["integer", "null"]
+        isArchived:
+          type: boolean
+        lastMessageAt:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        lastMessagePreview:
+          type: ["string", "null"]
+        metadata:
+          type: ["object", "null"]
+          additionalProperties: true
+        channel:
+          type: string
+        channelAccountId:
+          type: ["integer", "null"]
+        channelAccount:
+          anyOf:
+            - $ref: "#/components/schemas/InboxChannelAccountSummary"
+            - type: "null"
+        externalContactId:
+          type: ["integer", "null"]
+        externalThreadId:
+          type: ["string", "null"]
+        assignedToId:
+          type: ["integer", "null"]
+        status:
+          type: string
+        unmatched:
+          type: boolean
+        lastInboundAt:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        botEnabled:
+          type: boolean
+        needsHuman:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        assignedTo:
+          anyOf:
+            - $ref: "#/components/schemas/InboxAssignedUser"
+            - type: "null"
+      required:
+        - id
+        - type
+        - isArchived
+        - channel
+        - status
+        - unmatched
+        - createdAt
+        - updatedAt
+
+    InboxMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        conversationId:
+          type: integer
+        senderId:
+          type: ["integer", "null"]
+        content:
+          type: string
+        channel:
+          type: string
+        status:
+          type: string
+        direction:
+          type: string
+        externalMessageId:
+          type: ["string", "null"]
+        failedReason:
+          type: ["string", "null"]
+        sentAt:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        replyToId:
+          type: ["integer", "null"]
+        metadata:
+          type: ["object", "null"]
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - conversationId
+        - content
+        - channel
+        - status
+        - direction
+        - createdAt
+
+    InboxExternalContact:
+      type: object
+      properties:
+        id:
+          type: integer
+        channel:
+          type: string
+        externalId:
+          type: string
+        displayName:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        phoneE164:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        leadId:
+          type: ["integer", "null"]
+        studentId:
+          type: ["integer", "null"]
+        agentId:
+          type: ["integer", "null"]
+        isBlocked:
+          type: boolean
+        blockedAt:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        metadata:
+          type: ["object", "null"]
+          additionalProperties: true
+        firstSeenAt:
+          type: string
+          format: date-time
+        lastSeenAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - channel
+        - externalId
+        - firstSeenAt
+        - lastSeenAt
+        - createdAt
+        - updatedAt
+        - isBlocked
+
+    InboxLeadSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        motherName:
+          type: ["string", "null"]
+        fatherName:
+          type: ["string", "null"]
+        status:
+          type: string
+        interestedProgram:
+          type: ["string", "null"]
+        interestedUniversity:
+          type: ["string", "null"]
+        interestedCountry:
+          type: ["string", "null"]
+        interestedLevel:
+          type: ["string", "null"]
+        estimatedValue:
+          type: ["string", "null"]
+        source:
+          type: ["string", "null"]
+        originType:
+          type: string
+        originDisplayName:
+          type: ["string", "null"]
+        agentId:
+          type: ["integer", "null"]
+        assignedToId:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        convertedStudentId:
+          type: ["integer", "null"]
+      required:
+        - id
+        - firstName
+        - lastName
+        - status
+        - originType
+        - createdAt
+
+    InboxStudentSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        motherName:
+          type: ["string", "null"]
+        fatherName:
+          type: ["string", "null"]
+        status:
+          type: string
+        agentId:
+          type: ["integer", "null"]
+        assignedToId:
+          type: ["integer", "null"]
+        interestedLevel:
+          type: ["string", "null"]
+        originType:
+          type: string
+        originDisplayName:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - firstName
+        - lastName
+        - status
+        - originType
+        - createdAt
+
+    InboxAgentSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        firstName:
+          type: string
+        lastName:
+          type: string
+        companyName:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        status:
+          type: string
+        entityType:
+          type: string
+      required:
+        - id
+        - firstName
+        - lastName
+        - status
+        - entityType
+
+    InboxPipelineStageSummary:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        color:
+          type: ["string", "null"]
+        variant:
+          type: ["string", "null"]
+        icon:
+          type: ["string", "null"]
+      required:
+        - key
+        - label
+
+    ConversationAiSummary:
+      type: object
+      properties:
+        content:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+        messageCount:
+          type: integer
+        model:
+          type: string
+        generatedByUserId:
+          type: integer
+      required:
+        - content
+        - generatedAt
+        - messageCount
+        - model
+        - generatedByUserId
+
+    EscalationKeywords:
+      type: object
+      properties:
+        contract:
+          type: array
+          items:
+            type: string
+        payment:
+          type: array
+          items:
+            type: string
+        commission:
+          type: array
+          items:
+            type: string
+        partner:
+          type: array
+          items:
+            type: string
+        human_request:
+          type: array
+          items:
+            type: string
+        visa_documents:
+          type: array
+          items:
+            type: string
+        supplier:
+          type: array
+          items:
+            type: string
+      required:
+        - contract
+        - payment
+        - commission
+        - partner
+        - human_request
+        - visa_documents
+        - supplier
+
+    AiAgentHandoffMessages:
+      type: object
+      additionalProperties: false
+      properties:
+        tr: { type: string }
+        en: { type: string }
+        ar: { type: string }
+        fa: { type: string }
+        fr: { type: string }
+        es: { type: string }
+        ru: { type: string }
+        zh: { type: string }
+        hi: { type: string }
+        id: { type: string }
+      required: [tr, en, ar, fa, fr, es, ru, zh, hi, id]
+
+    AiAgentConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        externalAutoReplyEnabled:
+          type: boolean
+          description: >-
+            Explicit Super Admin approval gate for automatic AI delivery to
+            customer-facing channels. Older stored configs default to false.
+        defaultOnForNew:
+          type: boolean
+        model:
+          type: string
+        temperature:
+          type: number
+        maxConsecutiveReplies:
+          type: integer
+        handoffMessage:
+          type: string
+        handoffMessages:
+          $ref: "#/components/schemas/AiAgentHandoffMessages"
+        languages:
+          type: array
+          items:
+            type: string
+            enum: [tr, en, ar, fa, fr, es, ru, zh, hi, id]
+        escalationKeywords:
+          $ref: "#/components/schemas/EscalationKeywords"
+        knowledgeBase:
+          type: string
+        programScope:
+          $ref: "#/components/schemas/ProgramScope"
+        scheduleEnabled:
+          type: boolean
+        timezone:
+          type: string
+        schedule:
+          $ref: "#/components/schemas/AiAgentWeeklySchedule"
+      required:
+        - enabled
+        - externalAutoReplyEnabled
+        - defaultOnForNew
+        - model
+        - temperature
+        - maxConsecutiveReplies
+        - handoffMessage
+        - handoffMessages
+        - languages
+        - escalationKeywords
+        - knowledgeBase
+        - programScope
+        - scheduleEnabled
+        - timezone
+        - schedule
+
+    AiAgentScheduleDay:
+      type: object
+      description: >-
+        One weekday's working window ("HH:mm" local times in the config
+        timezone). end < start means the window runs past midnight into the
+        next day and is owned by the day it starts on.
+      properties:
+        enabled:
+          type: boolean
+        start:
+          type: string
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+        end:
+          type: string
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+      required:
+        - enabled
+        - start
+        - end
+
+    AiAgentWeeklySchedule:
+      type: object
+      properties:
+        mon:
+          $ref: "#/components/schemas/AiAgentScheduleDay"
+        tue:
+          $ref: "#/components/schemas/AiAgentScheduleDay"
+        wed:
+          $ref: "#/components/schemas/AiAgentScheduleDay"
+        thu:
+          $ref: "#/components/schemas/AiAgentScheduleDay"
+        fri:
+          $ref: "#/components/schemas/AiAgentScheduleDay"
+        sat:
+          $ref: "#/components/schemas/AiAgentScheduleDay"
+        sun:
+          $ref: "#/components/schemas/AiAgentScheduleDay"
+      required:
+        - mon
+        - tue
+        - wed
+        - thu
+        - fri
+        - sat
+        - sun
+
+    ProgramScope:
+      type: object
+      description: >-
+        Country / university-type scope for the live searchPrograms tool
+        (FAZ 1). "all" means no restriction on that axis.
+      properties:
+        enabled:
+          type: boolean
+        countries:
+          oneOf:
+            - type: array
+              items:
+                type: string
+            - type: string
+              enum: [all]
+        universityTypes:
+          oneOf:
+            - type: array
+              items:
+                type: string
+            - type: string
+              enum: [all]
+      required:
+        - enabled
+        - countries
+        - universityTypes
+
+    KnowledgeSourceProgramScope:
+      type: object
+      properties:
+        isActive:
+          type: boolean
+        scope:
+          $ref: "#/components/schemas/ProgramScope"
+        lastSyncedAt:
+          type: ["string", "null"]
+          format: date-time
+      required:
+        - isActive
+        - scope
+        - lastSyncedAt
+
+    KnowledgeSourceProgramScopeResponse:
+      type: object
+      properties:
+        source:
+          $ref: "#/components/schemas/KnowledgeSourceProgramScope"
+      required:
+        - source
+
+    KnowledgeSourceProgramScopeUpdate:
+      type: object
+      properties:
+        isActive:
+          type: boolean
+        scope:
+          $ref: "#/components/schemas/ProgramScope"
+      required:
+        - isActive
+        - scope
+
+    AiAgentConfigResponse:
+      type: object
+      properties:
+        config:
+          $ref: "#/components/schemas/AiAgentConfig"
+      required:
+        - config
+
+    AiAgentConfigUpdate:
+      type: object
+      description: Partial update of the AI agent config; all fields optional.
+      properties:
+        enabled:
+          type: boolean
+        externalAutoReplyEnabled:
+          type: boolean
+          description: >-
+            Explicit Super Admin approval gate for automatic AI delivery to
+            customer-facing channels.
+        defaultOnForNew:
+          type: boolean
+        model:
+          type: string
+        temperature:
+          type: number
+        maxConsecutiveReplies:
+          type: integer
+        handoffMessage:
+          type: string
+        languages:
+          type: array
+          items:
+            type: string
+            enum: [tr, en, ar, fa, fr, es, ru, zh, hi, id]
+        escalationKeywords:
+          $ref: "#/components/schemas/EscalationKeywords"
+        knowledgeBase:
+          type: string
+        scheduleEnabled:
+          type: boolean
+        timezone:
+          type: string
+        schedule:
+          $ref: "#/components/schemas/AiAgentWeeklySchedule"
+
+    AiAgentTestRequest:
+      type: object
+      properties:
+        message:
+          type: string
+        language:
+          type: string
+          enum: [tr, en, ar, fa, fr, es, ru, zh, hi, id]
+        history:
+          type: array
+          items:
+            type: object
+            properties:
+              direction:
+                type: string
+                enum: [inbound, outbound]
+              content:
+                type: string
+            required:
+              - direction
+              - content
+      required:
+        - message
+
+    AiAgentTestResult:
+      type: object
+      properties:
+        reply:
+          type: ["string", "null"]
+        language:
+          type: string
+          enum: [tr, en, ar, fa, fr, es, ru, zh, hi, id]
+        escalation:
+          type: object
+          properties:
+            escalated:
+              type: boolean
+            topic:
+              type: ["string", "null"]
+              enum: [contract, payment, commission, partner, human_request, visa_documents, supplier, null]
+          required:
+            - escalated
+            - topic
+        model:
+          type: string
+      required:
+        - reply
+        - language
+        - escalation
+        - model
+
+    AiAgentTestResponse:
+      type: object
+      properties:
+        result:
+          $ref: "#/components/schemas/AiAgentTestResult"
+      required:
+        - result
+
+    InboxConversationNote:
+      type: object
+      properties:
+        id:
+          type: integer
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        resourceType:
+          type: string
+          enum: [lead, student]
+        resourceId:
+          type: integer
+      required:
+        - id
+        - content
+        - createdAt
+        - resourceType
+        - resourceId
+
+    FollowUp:
+      type: object
+      properties:
+        id:
+          type: integer
+        leadId:
+          type: ["integer", "null"]
+        studentId:
+          type: ["integer", "null"]
+        resourceType:
+          type: string
+        title:
+          type: string
+        scheduledAt:
+          type: string
+          format: date-time
+        completed:
+          type: boolean
+        completedAt:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        assignedToId:
+          type: ["integer", "null"]
+        notes:
+          type: ["string", "null"]
+        createdById:
+          type: ["integer", "null"]
+        updatedById:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - resourceType
+        - title
+        - scheduledAt
+        - completed
+        - createdAt
+        - updatedAt
+
+    InboxConversationDetailResponse:
+      type: object
+      properties:
+        conversation:
+          $ref: "#/components/schemas/InboxConversation"
+        externalContact:
+          anyOf:
+            - $ref: "#/components/schemas/InboxExternalContact"
+            - type: "null"
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/InboxMessage"
+        withinWindow:
+          type: boolean
+        lead:
+          anyOf:
+            - $ref: "#/components/schemas/InboxLeadSummary"
+            - type: "null"
+        student:
+          anyOf:
+            - $ref: "#/components/schemas/InboxStudentSummary"
+            - type: "null"
+        agent:
+          anyOf:
+            - $ref: "#/components/schemas/InboxAgentSummary"
+            - type: "null"
+        stage:
+          anyOf:
+            - $ref: "#/components/schemas/InboxPipelineStageSummary"
+            - type: "null"
+        aiSummary:
+          anyOf:
+            - $ref: "#/components/schemas/ConversationAiSummary"
+            - type: "null"
+      required:
+        - conversation
+        - messages
+        - withinWindow
+
+    SummarizeInboxConversationResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/ConversationAiSummary"
+        fromCache:
+          type: boolean
+      required:
+        - data
+        - fromCache
+
+    AddInboxConversationNoteBody:
+      type: object
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 2000
+      required:
+        - content
+
+    AddInboxConversationNoteResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/InboxConversationNote"
+      required:
+        - data
+
+    AddInboxConversationTaskBody:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 500
+        scheduledAt:
+          type: string
+          format: date-time
+        assignedToId:
+          type: integer
+          minimum: 1
+        notes:
+          type: string
+          maxLength: 2000
+      required:
+        - title
+        - scheduledAt
+
+    KommoSummary:
+      type: object
+      properties:
+        avgReplyTime: { type: integer, description: "Average reply time in seconds (0 if no data)" }
+        medianReplyTime: { type: integer, description: "Median reply time in seconds (0 if no data)" }
+        longestAwaiting: { type: integer, description: "Longest currently unanswered customer turn in seconds" }
+        awaitingReplyCount: { type: integer, description: "Open conversations currently awaiting a human reply" }
+        replySamples: { type: integer, description: "Customer turns with a sender-attributed human reply in the selected period" }
+        activeLeads: { type: integer }
+        wonLeads: { type: integer }
+        lostLeads: { type: integer }
+        incomingMessages: { type: integer }
+        outgoingMessages: { type: integer }
+        channels:
+          type: array
+          description: "Per-channel message breakdown over the same date range as incoming/outgoing totals"
+          items:
+            type: object
+            properties:
+              channel: { type: string }
+              incoming: { type: integer }
+              outgoing: { type: integer }
+              connected: { type: boolean }
+            required: [channel, incoming, outgoing, connected]
+        tasks:
+          type: object
+          properties:
+            created: { type: integer, description: "Tasks created in the selected period" }
+            completed: { type: integer, description: "Tasks completed in the selected period" }
+            open: { type: integer, description: "Tasks currently open" }
+            overdue: { type: integer, description: "Open tasks currently overdue" }
+            completionRate: { type: integer, minimum: 0, maximum: 100, description: "Percent of tasks due in the selected period that were completed" }
+            onTimeRate: { type: integer, minimum: 0, maximum: 100, description: "Percent of completed due tasks finished on time" }
+          required: [created, completed, open, overdue, completionRate, onTimeRate]
+        followUps:
+          type: object
+          properties:
+            scheduled: { type: integer, description: "Follow-ups scheduled in the selected period" }
+            completed: { type: integer, description: "Follow-ups completed in the selected period" }
+            pending: { type: integer, description: "Follow-ups currently pending" }
+            overdue: { type: integer, description: "Pending follow-ups currently overdue" }
+            completionRate: { type: integer, minimum: 0, maximum: 100, description: "Percent of follow-ups scheduled in the selected period that were completed" }
+            onTimeRate: { type: integer, minimum: 0, maximum: 100, description: "Percent of completed follow-ups finished by their scheduled time" }
+          required: [scheduled, completed, pending, overdue, completionRate, onTimeRate]
+      required: [avgReplyTime, medianReplyTime, longestAwaiting, awaitingReplyCount, replySamples, activeLeads, wonLeads, lostLeads, incomingMessages, outgoingMessages, channels, tasks, followUps]
+
+    RecordEntityViewBody:
+      type: object
+      properties:
+        entityType:
+          type: string
+          enum: [lead, student, application, message_thread]
+        entityId:
+          type: integer
+          minimum: 1
+      required: [entityType, entityId]
+
+    RecordEntityViewResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        deduplicated: { type: boolean }
+      required: [ok, deduplicated]
+
+    ActivitySummary:
+      type: object
+      properties:
+        range:
+          type: string
+          enum: [daily, weekly, monthly, yearly]
+        leadsViewed: { type: integer }
+        studentsViewed: { type: integer }
+        applicationsViewed: { type: integer }
+        messagesViewed: { type: integer }
+        activeDurationSeconds: { type: integer }
+        idleDurationSeconds: { type: integer }
+        totalDurationSeconds: { type: integer }
+      required: [range, leadsViewed, studentsViewed, applicationsViewed, messagesViewed, activeDurationSeconds, idleDurationSeconds, totalDurationSeconds]
+
+    AddInboxConversationTaskResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/FollowUp"
+      required:
+        - data
+
+    InboxLeadSuggestionData:
+      type: object
+      properties:
+        phone:
+          type: ["string", "null"]
+        displayName:
+          type: ["string", "null"]
+        fullName:
+          type: ["string", "null"]
+        fullNameLowConfidence:
+          type: boolean
+        email:
+          type: ["string", "null"]
+        emailLowConfidence:
+          type: boolean
+
+    InboxLeadSuggestionResponse:
+      type: object
+      properties:
+        suggestion:
+          $ref: "#/components/schemas/InboxLeadSuggestionData"
+      required:
+        - suggestion
+
+    CreateLeadFromConversationBody:
+      type: object
+      properties:
+        fullName:
+          type: string
+          minLength: 1
+          maxLength: 200
+        email:
+          type: ["string", "null"]
+          format: email
+        phone:
+          type: ["string", "null"]
+          maxLength: 50
+      required:
+        - fullName
+
+    CreateLeadFromConversationResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        leadId:
+          type: integer
+      required:
+        - ok
+        - leadId
+
+    LeadExistsConflict:
+      type: object
+      properties:
+        error:
+          type: string
+          enum: [LEAD_EXISTS]
+        candidate:
+          type: object
+          properties:
+            id:
+              type: integer
+            firstName:
+              type: string
+            lastName:
+              type: string
+            email:
+              type: ["string", "null"]
+            phone:
+              type: ["string", "null"]
+            status:
+              type: string
+          required:
+            - id
+            - firstName
+            - lastName
+            - status
+      required:
+        - error
+        - candidate
+
+    PortalSubmission:
+      type: object
+      properties:
+        id: { type: integer }
+        applicationId: { type: integer }
+        studentId: { type: integer }
+        universityKey: { type: string }
+        universityName: { type: string }
+        mode:
+          type: string
+          enum: [dry, real]
+        status:
+          type: string
+          enum: [queued, running, submitted, already_exists, program_missing, failed, canceled]
+        externalRef: { type: string, nullable: true }
+        resultJson: { type: object, nullable: true }
+        screenshotUrls: { type: array, items: { type: string }, nullable: true }
+        error: { type: string, nullable: true }
+        attempts: { type: integer }
+        maxAttempts: { type: integer }
+        lockedAt: { type: string, format: date-time, nullable: true }
+        lockedBy: { type: string, nullable: true }
+        enqueuedBy: { type: integer, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        deletedAt: { type: string, format: date-time, nullable: true }
+      required: [id, applicationId, studentId, universityKey, universityName, mode, status, attempts, maxAttempts, createdAt, updatedAt]
+
+    EnqueuePortalSubmissionBody:
+      type: object
+      properties:
+        universityKey: { type: string, minLength: 1 }
+        mode:
+          type: string
+          enum: [dry, real]
+        confirm: { type: boolean }
+      required: [universityKey, mode]
+
+    ManualSubmitBody:
+      type: object
+      properties:
+        applicationIds:
+          type: array
+          items: { type: integer }
+          minItems: 1
+          maxItems: 100
+        mode:
+          type: string
+          enum: [dry, real]
+        confirm: { type: boolean }
+      required: [applicationIds, mode]
+
+    ManualSubmitResult:
+      type: object
+      properties:
+        queued:
+          type: array
+          items:
+            type: object
+            properties:
+              applicationId: { type: integer }
+              submissionId: { type: integer }
+              universityKey: { type: string }
+            required: [applicationId, submissionId, universityKey]
+        skipped:
+          type: array
+          items:
+            type: object
+            properties:
+              applicationId: { type: integer }
+              reason:
+                type: string
+                enum: [NOT_FOUND, NO_PORTAL, ALREADY_QUEUED]
+              submissionId: { type: integer }
+            required: [applicationId, reason]
+      required: [queued, skipped]
+
+    ApplyToAllBody:
+      type: object
+      properties:
+        applicationId: { type: integer }
+        mode:
+          type: string
+          enum: [dry, real]
+        confirm: { type: boolean }
+      required: [applicationId, mode]
+
+    ApplyToAllItem:
+      type: object
+      properties:
+        universityKey: { type: string }
+        universityName: { type: string }
+        outcome:
+          type: string
+          enum: [queued, excluded, no-program, duplicate, failed]
+        message: { type: string }
+        applicationId: { type: integer }
+        submissionId: { type: integer }
+        programName: { type: string }
+        confidence: { type: number }
+      required: [universityKey, universityName, outcome]
+
+    ApplyToAllResult:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [dry, real]
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApplyToAllItem"
+        counts:
+          type: object
+          properties:
+            queued: { type: integer }
+            excluded: { type: integer }
+            noProgram: { type: integer }
+            duplicate: { type: integer }
+            failed: { type: integer }
+          required: [queued, excluded, noProgram, duplicate, failed]
+      required: [mode, results, counts]
+
+    EligibleApplication:
+      type: object
+      properties:
+        id: { type: integer }
+        stage: { type: string }
+        universityName: { type: string, nullable: true }
+        studentFirstName: { type: string }
+        studentLastName: { type: string }
+        studentEmail: { type: string, nullable: true }
+        portalUniversityKey: { type: string }
+        portalUniversityName: { type: string }
+      required: [id, stage, studentFirstName, studentLastName, portalUniversityKey, portalUniversityName]
+
+    UniversityPortal:
+      type: object
+      properties:
+        key: { type: string }
+        label: { type: string }
+        hasCredentials: { type: boolean }
+      required: [key, label, hasCredentials]
+
+    SetPortalCredentialsBody:
+      type: object
+      properties:
+        username: { type: string, minLength: 1 }
+        password: { type: string, minLength: 1 }
+        extra:
+          type: object
+          additionalProperties: true
+          nullable: true
+      required: [username, password]
+
+    OkResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+      required: [ok]
+
+    PortalProgramOption:
+      type: object
+      properties:
+        v: { type: string }
+        t: { type: string }
+      required: [v, t]
+
+    PortalProgramOptionsResponse:
+      type: object
+      properties:
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalProgramOption"
+        cached: { type: boolean }
+        stale: { type: boolean }
+        fetchedAt: { type: string, format: date-time, nullable: true }
+      required: [options, cached, stale]
+
+    PortalProgramMapping:
+      type: object
+      properties:
+        universityKey: { type: string }
+        programOverrides:
+          type: object
+          additionalProperties: { type: string }
+        synonyms:
+          type: array
+          items:
+            type: array
+            items: { type: string }
+        countryOverrides:
+          type: object
+          additionalProperties: { type: string }
+        updatedAt: { type: string, format: date-time, nullable: true }
+      required: [universityKey, programOverrides, synonyms, countryOverrides]
+
+    UpdatePortalProgramMappingBody:
+      type: object
+      properties:
+        programOverrides:
+          type: object
+          additionalProperties: { type: string }
+      required: [programOverrides]

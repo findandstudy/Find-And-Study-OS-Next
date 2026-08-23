@@ -1,0 +1,31 @@
+{
+  "name": "@workspace/portal-automation-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "NODE_OPTIONS=--max-old-space-size=512 tsx ./src/worker.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:lane-policy": "tsx --test ./scripts/test-portal-lane-policy.ts",
+    "test:queue": "tsx --test ./scripts/test-portal-queue.ts",
+    "test:writeback": "tsx --test ./scripts/test-portal-writeback.ts",
+    "run-once": "NODE_OPTIONS=--max-old-space-size=512 tsx ./scripts/run-once.ts",
+    "portal:dry": "tsx ./scripts/portal-dry.ts",
+    "seed-dry-job": "tsx ./scripts/seed-dry-job.ts",
+    "complete-1959": "NODE_OPTIONS=--max-old-space-size=512 tsx ./scripts/complete-topkapi-1959.ts",
+    "validate-profile": "tsx ./scripts/validate-profile.ts",
+    "analyze-program-match": "tsx ./scripts/analyze-program-match.ts",
+    "dump-program-options": "tsx ./scripts/dump-program-options.ts",
+    "smoke:portal-login": "tsx ./scripts/portal-login-smoke.ts"
+  },
+  "dependencies": {
+    "@workspace/db": "workspace:*",
+    "@workspace/portal-adapters": "workspace:*",
+    "@workspace/portal-runner": "workspace:*",
+    "drizzle-orm": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "catalog:"
+  }
+}

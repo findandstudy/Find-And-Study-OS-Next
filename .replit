@@ -1,0 +1,78 @@
+modules = ["nodejs-24", "javascript", "python-3.11", "postgresql-16"]
+
+[[artifacts]]
+id = "artifacts/api-server"
+
+[[artifacts]]
+id = "artifacts/edcons"
+
+[deployment]
+router = "application"
+deploymentTarget = "autoscale"
+
+[deployment.postBuild]
+args = ["pnpm", "store", "prune"]
+env = { "CI" = "true" }
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "inbox-tests"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "inbox-e2e"
+
+[[workflows.workflow]]
+name = "inbox-tests"
+author = "agent"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server test"
+
+[[workflows.workflow]]
+name = "inbox-e2e"
+author = "agent"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm test:e2e"
+
+[agent]
+stack = "PNPM_WORKSPACE"
+expertMode = true
+integrations = ["github:1.0.0"]
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 240000
+
+[nix]
+channel = "stable-25_05"
+
+[userenv]
+
+[userenv.development]
+PLAYWRIGHT_BASE_URL = "http://localhost:25197"
+PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH = "/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium"
+PLAYWRIGHT_STAFF_EMAIL = "en@findandstudy.com"
+
+[userenv.production]
+APP_BASE_URL = "https://portal.masterstudyinturkey.com"
+
+[userenv.shared]
+# Passwords and shared secrets must be configured through Replit Secrets.
