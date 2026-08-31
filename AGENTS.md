@@ -2,6 +2,32 @@
 
 These instructions apply to every task performed in this repository.
 
+## Current synchronization boundary — 31 August 2026
+
+This repository's `main` branch is the 23 August import snapshot at
+`32c84a928ab28d6350e539a267f3bbfb60524608`. It is not the current production
+code baseline.
+
+The read-only verified production baseline is:
+
+- source repository: `findandstudy/Find-And-Study-OS`;
+- source branch: `hotfix/embed-release-20260830`;
+- source commit: `d8f385ca018161cf6330232f5840d3a29c3581ce`;
+- release ID: `20260831T071637Z-d8f385ca0181`;
+- production database: `fasos_apply`;
+- Drizzle ledger: 66 entries, canonical range `0000–0065`.
+
+Read `docs/LIVE_BASELINE_REFRESH_2026-08-31.md` and
+`docs/baselines/production-baseline-2026-08-31.json` before any code or
+migration synchronization.
+
+The production line and the imported Control Plane line use the same
+`0054–0065` migration identifiers for different SQL. This is a P0 integration
+blocker. Do not merge, replay, rename in place, or deploy either migration line
+until the canonical renumber/journal/hash plan has been reviewed and proven in
+disposable PostgreSQL. Do not overwrite `main` with the live tree. Use a
+production-first convergence branch and reviewed, test-backed slices.
+
 ## Primary safety objective
 
 Production remains active while development continues. Students, applications,
